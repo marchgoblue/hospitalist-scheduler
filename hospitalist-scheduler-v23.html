@@ -1,0 +1,3599 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hospitalist Schedule</title>
+<link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script>
+// ══════════════════════════════════════════════════════
+//  SUPABASE CONFIG — fill in your project URL and anon key
+//  Get these from: supabase.com → your project → Settings → API
+// ══════════════════════════════════════════════════════
+const SUPABASE_URL  = 'https://wyvrtaqpakncaotlusdd.supabase.co';   // e.g. https://abcxyz.supabase.co
+const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind5dnJ0YXFwYWtuY2FvdGx1c2RkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxMjgwMzIsImV4cCI6MjA5NDcwNDAzMn0.GSSZ9cY_rtJtL76mb2uChSXHrPbs3K8s05F1uX2Jpy4';
+const DATA_ROW_ID = 'main';
+
+let _sb = null;
+function getSB(){
+  if(!_sb && SUPABASE_URL !== 'YOUR_SUPABASE_URL'){
+    _sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+  }
+  return _sb;
+}
+async function sha256(str){const buf=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(str));return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');}
+</script>
+<style>
+:root{
+  --bg:#ffffff;
+  --paper:#fafafa;
+  --line:#d4d4d4;
+  --line2:#999;
+  --line3:#666;
+  --ink:#1a1a1a;
+  --ink2:#444;
+  --ink3:#737373;
+  --hdr:#f3f3f3;
+  --hdr2:#e8e8e8;
+  --R:#dde9f7;       /* light blue */
+  --R-tx:#1b4d8f;
+  --S:#fdebc7;       /* light amber */
+  --S-tx:#8a5400;
+  --H:#e6dffb;       /* light purple */
+  --H-tx:#5e3aaa;
+  --OFF:#f9f9f9;
+  --req:#fde2e2;     /* request marker */
+  --req-tx:#a8252a;
+  --selected:#4285f4;
+  --weekend:#f5f5f5;
+  --today:#fff9c4;
+  --conflict:#ffb3b3;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{font-size:13px}
+body{font-family:'Source Sans 3',-apple-system,Helvetica,Arial,sans-serif;background:var(--paper);color:var(--ink);min-height:100vh}
+
+/* HEADER */
+#hdr{position:sticky;top:0;z-index:100;background:#fff;border-bottom:1px solid var(--line);display:flex;align-items:center;height:48px;padding:0 16px;gap:0}
+.brand{display:flex;align-items:center;gap:9px;padding-right:18px;border-right:1px solid var(--line);height:100%;min-width:230px}
+.brand-mark{width:26px;height:26px;border-radius:4px;background:#1f5a99;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:11px;letter-spacing:.5px;font-family:'JetBrains Mono',monospace}
+.brand-text{display:flex;flex-direction:column;line-height:1.1}
+.brand-name{font-size:14px;font-weight:700;color:var(--ink)}
+.brand-sub{font-size:10px;color:var(--ink3);font-family:'JetBrains Mono',monospace;letter-spacing:.5px;text-transform:uppercase}
+
+.tabs{display:flex;height:100%}
+.tab{display:flex;align-items:center;gap:6px;padding:0 14px;height:100%;background:none;border:none;border-bottom:2px solid transparent;color:var(--ink2);font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;transition:all .12s}
+.tab:hover{background:var(--hdr);color:var(--ink)}
+.tab.on{color:#1f5a99;border-bottom-color:#1f5a99;background:var(--paper)}
+
+.hdr-r{margin-left:auto;display:flex;align-items:center;gap:8px}
+.role-switch{display:flex;background:var(--hdr);border:1px solid var(--line);border-radius:4px;padding:2px;font-size:11px}
+.role-switch button{padding:4px 10px;background:none;border:none;border-radius:3px;font-family:inherit;font-weight:600;cursor:pointer;color:var(--ink3);text-transform:uppercase;letter-spacing:.5px;font-size:10px}
+.role-switch button.on{background:#fff;color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.1)}
+
+/* PAGES */
+.pg{display:none;padding:18px 22px;max-width:1500px;margin:0 auto}
+.pg.on{display:block;animation:fi .15s}
+@keyframes fi{from{opacity:0}to{opacity:1}}
+
+h1{font-size:22px;font-weight:700;letter-spacing:-.3px;color:var(--ink);line-height:1.2}
+h2{font-size:16px;font-weight:700;color:var(--ink)}
+h3{font-size:13px;font-weight:700;color:var(--ink2);text-transform:uppercase;letter-spacing:.5px}
+.tx-mu{color:var(--ink3)}.tx-sm{font-size:12px}.tx-xs{font-size:11px}
+.bold{font-weight:700}
+
+/* BUTTONS — Excel-like */
+.btn{font-family:inherit;font-size:12px;font-weight:600;padding:6px 12px;border-radius:3px;border:1px solid var(--line);background:#fff;color:var(--ink);cursor:pointer;transition:all .1s;display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
+.btn:hover{background:var(--hdr);border-color:var(--line2)}
+.btn-p{background:#1f5a99;color:#fff;border-color:#1a4a80}
+.btn-warn{background:#a85800;color:#fff;border-color:#7d4200}
+.btn-warn:hover{background:#7d4200}
+.btn-p:hover{background:#1a4a80}
+.btn-g{background:#0a8043;color:#fff;border-color:#086835}
+.btn-g:hover{background:#086835}
+.btn-d{background:#c5221f;color:#fff;border-color:#a01918}
+.btn-d:hover{background:#a01918}
+.btn-sm{padding:4px 9px;font-size:11px}
+.btn-xs{padding:2px 6px;font-size:10px}
+
+/* INPUTS — Excel-like */
+input,select,textarea{font-family:inherit;font-size:12px;padding:5px 8px;border:1px solid var(--line);border-radius:3px;background:#fff;color:var(--ink);outline:none}
+input:focus,select:focus{border-color:#1f5a99;box-shadow:0 0 0 2px rgba(31,90,153,.15)}
+input[type=checkbox]{width:14px;height:14px;cursor:pointer}
+
+/* TOOLBAR — Excel ribbon style */
+.toolbar{display:flex;align-items:center;gap:8px;padding:8px 12px;background:#fff;border:1px solid var(--line);border-radius:4px 4px 0 0;border-bottom:none;flex-wrap:wrap}
+.tb-group{display:flex;align-items:center;gap:5px;padding-right:10px;border-right:1px solid var(--line);height:28px}
+.tb-group:last-child{border-right:none}
+.tb-label{font-size:10px;color:var(--ink3);font-weight:600;text-transform:uppercase;letter-spacing:.5px;margin-right:4px}
+
+/* SCHEDULE GRID — Excel-like spreadsheet */
+.sheet-outer{position:relative;border:1px solid var(--line);border-radius:0 0 4px 4px;background:#fff;max-height:calc(100vh - 220px);overflow:hidden}
+.sheet-wrap{overflow:auto;width:100%;max-height:calc(100vh - 220px);padding-right:66px;box-sizing:border-box}
+.sheet-qtot-panel{position:absolute;right:0;top:0;bottom:0;width:63px;overflow:hidden;border-left:3px solid #1b4d8f;box-shadow:-4px 0 10px rgba(0,0,0,.15);z-index:10;background:transparent}
+.sheet{border-collapse:collapse;background:#fff;table-layout:fixed;font-size:11px}
+.sheet th,.sheet td{border:1px solid var(--line);padding:0;text-align:center;vertical-align:middle;height:24px;line-height:1;background:#fff;position:relative}
+
+/* Column headers (dates) — Excel-like */
+.sheet thead th{
+  background:var(--hdr);color:var(--ink2);font-weight:700;font-size:10px;
+  padding:3px 2px;position:sticky;top:0;z-index:5;
+  font-family:'JetBrains Mono',monospace;letter-spacing:.3px;
+  min-width:28px;width:28px;
+}
+.sheet thead th.name-col{
+  text-align:left;padding:6px 10px;min-width:180px;width:180px;
+  background:var(--hdr2);position:sticky;left:0;z-index:10;
+  font-family:'Source Sans 3',sans-serif;font-size:11px;text-transform:uppercase;
+  transform:translateZ(0);
+}
+.sheet thead th.month-sep{background:#dfe6ec;border-left:2px solid #999}
+.sheet thead th.weekend{background:#e8e8e8;color:var(--ink3)}
+.sheet thead th.today{background:#f9e08e;color:var(--ink);font-weight:700}
+.sheet thead th.holiday{background:var(--H);color:var(--H-tx)}
+
+/* Row labels (physician names) */
+.sheet tbody td.name-col{
+  text-align:left;padding:4px 10px;font-weight:600;font-size:12px;
+  background:#fff;position:sticky;left:0;z-index:2;
+  border-right:2px solid var(--line2);width:180px;min-width:180px;
+  cursor:pointer;transform:translateZ(0);
+}
+.sheet tbody td.name-col:hover{background:#eef5fb;color:#1f5a99}
+.sheet tbody tr:nth-child(even) td.name-col{background:var(--paper)}
+.sheet tbody tr:nth-child(even) td.name-col:hover{background:#eef5fb}
+
+/* Section headers in schedule grid */
+.section-hdr{font-size:11px;font-weight:700;padding:4px 8px!important;letter-spacing:.5px;text-transform:uppercase;cursor:default}
+.consult-hdr{background:#e8f5e9!important;color:#0a7044;border-top:2px solid #0a7044}
+.rounds-hdr{background:#dde9f7!important;color:#1b4d8f;border-top:2px solid #1b4d8f}
+.noct-hdr{background:#1a1a2e!important;color:#c9b8f5;border-top:2px solid #3a3a6e}
+
+/* Row / column highlights */
+.row-hl td{background:#fff9e6!important}
+.row-hl td.name-col{background:#fff0b3!important;font-weight:700}
+.name-col-hl{background:#fff0b3!important;font-weight:700}
+.col-hl{background:#e8f0fb!important;outline:1px solid #b8d4f0;outline-offset:-1px}
+.col-hdr{cursor:pointer}
+.col-hdr:hover{background:#c8d8ee!important}
+/* N (nocturnist shift) */
+.cell-N{background:#1a1a2e!important;color:#c9b8f5!important}
+/* Sticky quarter-total column — works with border-collapse:collapse */
+/* Quarter-total right panel — two-table layout for reliable frozen column */
+.qtot-hdr-cell{
+  background:#1b4d8f;color:#fff;font-size:11px;font-weight:700;
+  text-align:center;padding:3px 4px;white-space:nowrap;
+}
+.qtot-data-cell{
+  text-align:center;padding:2px 3px;font-size:11px;
+  border-top:1px solid #c8dcf0;background:#eef4fc;
+  white-space:nowrap;
+}
+.qtot-data-cell.even{background:#e4effa}
+.qtot-data-cell.hl{background:#fff5cc}
+.qtot-data-cell.section{background:#dfe6ec;height:24px}
+.qtot-data-cell.cov{background:#f0f5fb;border-top:2px solid #b8d4f0}
+.month-sum-hdr{
+  background:#1b4d8f!important;color:#fff;font-size:10px;font-weight:700;
+  text-align:center;padding:2px 3px;min-width:32px;width:32px;
+  position:sticky;border-left:2px solid #0d3a6e;
+}
+.month-sum-cell{
+  background:#e8eef7;min-width:32px;width:32px;padding:2px 2px;
+  text-align:center;vertical-align:middle;border-left:2px solid #b8d4f0;
+  white-space:nowrap;
+}
+.msc-r{display:block;font-size:9px;font-weight:700;color:#1b4d8f;line-height:1.3}
+.msc-s{display:block;font-size:9px;font-weight:700;color:#a85800;line-height:1.3}
+/* Consult team badge */
+.consult-badge{display:inline-block;background:#dff5e6;color:#0a7044;border:1px solid #a8d8b8;border-radius:2px;font-size:9px;font-weight:700;padding:1px 4px;margin-right:5px;letter-spacing:.4px}
+/* Required OFF conflict highlight */
+.cell-REQCONFLICT{background:#ff6b6b!important;color:#fff!important;font-weight:700}
+
+/* Data cells — explicit position+z-index so sticky cols (z>0) always win */
+.sheet tbody td.cell{
+  cursor:pointer;font-family:'JetBrains Mono',monospace;
+  font-size:10px;font-weight:600;letter-spacing:.3px;
+  min-width:28px;width:28px;
+  position:relative;z-index:0;
+}
+.sheet tbody td.cell.weekend{background:var(--weekend)}
+.sheet tbody td.cell.today{background:var(--today)!important;border:1px solid #d4a900}
+.sheet tbody td.cell.selected{outline:2px solid var(--selected);outline-offset:-2px;z-index:3}
+.sheet tbody td.cell.month-sep{border-left:2px solid #999}
+.sheet tbody td.cell.has-request{box-shadow:inset 0 0 0 2px var(--req-tx)}
+
+/* Shift backgrounds */
+.cell-R{background:var(--R)!important;color:var(--R-tx)}
+.cell-S{background:var(--S)!important;color:var(--S-tx)}
+.cell-H{background:var(--H)!important;color:var(--H-tx)}
+.cell-OFF{background:#fff;color:#bbb}
+.cell-OFF.weekend{background:var(--weekend);color:#bbb}
+.cell-CONFLICT{background:var(--conflict)!important;color:#7a0000!important;font-weight:700}
+
+/* Coverage footer row */
+.sheet tbody tr.cov td{
+  background:var(--hdr)!important;color:var(--ink2);font-weight:700;font-size:10px;
+  border-top:2px solid var(--ink3);height:20px;
+}
+.sheet tbody tr.cov td.name-col{font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--ink)}
+.cov-ok{color:#0a7044!important}
+.cov-low{color:#a85800!important;background:#fff5dc!important}
+.cov-high{color:#1f5a99!important;background:#dfecf5!important}
+.cov-bad{color:#a01918!important;background:#ffe0e0!important}
+
+/* CARDS */
+.card{background:#fff;border:1px solid var(--line);border-radius:4px;padding:16px;margin-bottom:16px}
+.card h3{margin-bottom:12px}
+
+/* GRID */
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px}
+.g4{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+
+/* STAT CARDS */
+.stat{background:#fff;border:1px solid var(--line);border-radius:4px;padding:14px 16px}
+.stat-v{font-size:30px;font-weight:700;line-height:1;color:var(--ink)}
+.stat-l{font-size:11px;color:var(--ink3);text-transform:uppercase;letter-spacing:.5px;margin-top:4px;font-weight:600}
+.stat-s{font-size:11px;color:var(--ink3);margin-top:2px}
+.stat.ok .stat-v{color:#0a7044}
+.stat.warn .stat-v{color:#a85800}
+.stat.bad .stat-v{color:#a01918}
+.stat.info .stat-v{color:#1f5a99}
+
+/* SHIFT BADGES */
+.sh{display:inline-block;padding:1px 6px;border-radius:3px;font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:600;letter-spacing:.3px}
+.sh-R{background:var(--R);color:var(--R-tx);border:1px solid #b8d4f0}
+.sh-S{background:var(--S);color:var(--S-tx);border:1px solid #f0d49a}
+.sh-H{background:var(--H);color:var(--H-tx);border:1px solid #c9bff5}
+
+/* WEEKLY VIEW */
+.week-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:0;border:1px solid var(--line);border-radius:4px;overflow:hidden;background:#fff;margin-top:14px}
+.week-day{background:#fff;padding:10px 8px;border-right:1px solid var(--line);min-height:200px}
+.week-day:last-child{border-right:none}
+.wd-hdr{font-size:10px;color:var(--ink3);text-transform:uppercase;letter-spacing:.5px;font-weight:700;margin-bottom:2px;font-family:'JetBrains Mono',monospace}
+.wd-date{font-size:18px;font-weight:700;color:var(--ink);line-height:1;margin-bottom:8px}
+.wd-date.today{color:#1f5a99}
+.wd-section-tit{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--ink3);margin:6px 0 3px 0;padding-top:5px;border-top:1px solid var(--line)}
+.wd-section-tit.r{color:var(--R-tx)}
+.wd-section-tit.s{color:var(--S-tx)}
+.wd-name{font-size:11px;color:var(--ink);padding:1px 0}
+.team-num{display:inline-block;background:#1b4d8f;color:#fff;font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:700;padding:1px 5px;border-radius:2px;min-width:18px;text-align:center;margin-right:3px}
+
+/* REQUEST PORTAL */
+.req-cal{display:grid;grid-template-columns:repeat(7,1fr);gap:2px;background:var(--line);padding:1px;border-radius:4px;margin-top:10px}
+.req-cal-hdr{background:var(--hdr);padding:6px;text-align:center;font-size:10px;font-weight:700;color:var(--ink2);text-transform:uppercase;letter-spacing:.5px;font-family:'JetBrains Mono',monospace}
+.req-cal-day{background:#fff;padding:8px 4px;min-height:50px;cursor:pointer;text-align:center;transition:all .1s;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;font-size:11px;position:relative}
+.req-cal-day:hover{background:#eef5fb}
+.req-cal-day.weekend{background:var(--weekend)}
+.req-cal-day.weekend:hover{background:#dbe7ef}
+.req-cal-day.empty{background:transparent;cursor:default}
+.req-cal-day.empty:hover{background:transparent}
+.req-cal-day.selected{background:var(--req)!important;color:var(--req-tx);font-weight:700;border:1px solid var(--req-tx)}
+.req-cal-day.req-required{background:#fde2e2!important;color:#a01918;font-weight:700;border:1.5px solid #a01918}
+.req-cal-day.req-optional{background:#fff5dc!important;color:#806000;font-weight:700;border:1.5px solid #a85800}
+.req-cal-day.disabled{opacity:.45;cursor:not-allowed}
+.req-cal-day.disabled:hover{background:#fff}
+.req-cal-day.weekend.disabled:hover{background:var(--weekend)}
+.day-num{font-weight:700;font-size:13px}
+.month-title{font-size:14px;font-weight:700;color:var(--ink);margin-top:18px;margin-bottom:6px;padding-bottom:4px;border-bottom:1px solid var(--line)}
+
+.req-type-picker{background:#fafbfc;border:1px solid var(--line);border-radius:4px;padding:10px;margin-bottom:10px}
+.req-type-opt{display:flex;align-items:center;gap:8px;padding:4px 6px;font-size:12px;cursor:pointer;border-radius:3px}
+.req-type-opt:hover{background:#eef5fb}
+.req-type-opt input{cursor:pointer}
+.req-type-opt-required strong{color:#a01918}
+.req-type-opt-optional strong{color:#806000}
+
+.req-type-badge{display:inline-block;padding:1px 6px;font-size:9px;font-weight:700;border-radius:2px;letter-spacing:.4px;margin-right:6px}
+.req-type-badge.req-type-required{background:#fde2e2;color:#a01918;border:1px solid #a01918}
+.req-type-badge.req-type-optional{background:#fff5dc;color:#806000;border:1px solid #a85800}
+
+.req-counter{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:3px;font-size:12px;font-weight:600;background:var(--hdr);border:1px solid var(--line)}
+.req-counter.warn{background:#fff5dc;color:#a85800;border-color:#f0d49a}
+.req-counter.bad{background:#ffe0e0;color:#a01918;border-color:#f0a8a8}
+.req-counter.ok{background:#dff5e6;color:#0a7044;border-color:#a8d8b8}
+
+/* SELECTED REQUESTS LIST */
+.req-list{display:flex;flex-direction:column;gap:4px;max-height:300px;overflow-y:auto}
+.req-list-item{display:flex;align-items:center;justify-content:space-between;padding:6px 10px;background:#fff;border:1px solid var(--line);border-radius:3px;font-size:12px}
+.req-list-item .req-date{font-family:'JetBrains Mono',monospace;font-weight:600}
+.req-list-item.weekend-req{background:#fff5dc}
+
+/* PHYSICIAN DETAIL */
+.doc-hdr{background:linear-gradient(180deg,#fff,var(--paper));border:1px solid var(--line);border-radius:4px;padding:18px 22px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:flex-start;gap:20px;flex-wrap:wrap}
+
+/* Physician portal page header */
+.phys-page-hdr{background:linear-gradient(135deg,#1b4d8f 0%,#2060b0 100%);color:#fff;padding:16px 24px;margin:-24px -24px 24px -24px;display:flex;align-items:center;gap:20px;flex-wrap:wrap;border-radius:0}
+.phys-page-hdr-left{flex:1;min-width:160px}
+.phys-page-hdr-name{font-size:22px;font-weight:700;color:#fff;letter-spacing:-.3px;line-height:1.2}
+.phys-page-hdr-sub{font-size:11px;color:rgba(255,255,255,.7);text-transform:uppercase;letter-spacing:.8px;margin-top:2px}
+.phys-page-hdr-nav{display:flex;gap:8px;align-items:center}
+.phys-nav-btn{padding:10px 18px;border:2px solid rgba(255,255,255,.5);border-radius:5px;background:transparent;color:rgba(255,255,255,.8);font-size:13px;font-weight:600;cursor:pointer;transition:all .15s;white-space:nowrap}
+.phys-nav-btn:hover{background:rgba(255,255,255,.15);border-color:rgba(255,255,255,.8);color:#fff}
+.phys-nav-btn.active{background:#fff;border-color:#fff;color:#1b4d8f;font-weight:700;box-shadow:0 2px 8px rgba(0,0,0,.15)}
+.phys-page-hdr-right{display:flex;align-items:center;gap:8px}
+/* Announcement: prominent chip right below the name */
+.phys-announcement-inline{
+  display:none;
+  margin-top:4px;
+  padding:5px 12px;
+  background:rgba(255,255,100,.22);
+  border:1.5px solid rgba(255,255,150,.5);
+  border-radius:4px;
+  font-size:13px;
+  font-weight:600;
+  color:#fff;
+  line-height:1.35;
+  max-width:480px;
+  letter-spacing:.01em;
+}
+.phys-announcement-inline:not(:empty){display:block}
+.doc-name{font-size:24px;font-weight:700;letter-spacing:-.3px;margin-bottom:6px}
+.tag{display:inline-flex;align-items:center;gap:4px;padding:2px 9px;border-radius:11px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;font-family:'JetBrains Mono',monospace;border:1px solid}
+.tag-r{background:#dde9f7;color:#1b4d8f;border-color:#b8d4f0}
+.tag-f{background:#dff5e6;color:#0a7044;border-color:#a8d8b8}
+.tag-s{background:var(--S);color:var(--S-tx);border-color:#f0d49a}
+.tag-d{background:var(--H);color:var(--H-tx);border-color:#c9bff5}
+.tag-n{background:#1a1a2e;color:#c9b8f5;border-color:#3a3a5e}
+.tag-w{background:#fff5dc;color:#806000;border-color:#e0c890}
+
+.pb{background:var(--hdr);border-radius:3px;height:8px;overflow:hidden;margin-top:4px}
+.pbf{height:100%;border-radius:3px;transition:width .4s}
+.pf-ok{background:linear-gradient(90deg,#0a8043,#0a7044)}
+.pf-warn{background:linear-gradient(90deg,#d4a514,#a85800)}
+.pf-over{background:linear-gradient(90deg,#c5221f,#a01918)}
+
+.upcoming{display:flex;flex-direction:column;gap:4px;margin-top:8px;max-height:400px;overflow-y:auto}
+.doc-cal-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px;margin-top:8px}
+.doc-cal-month{background:#fafbfc;border:1px solid var(--line);border-radius:5px;padding:8px}
+.doc-cal-title{font-size:12px;font-weight:700;color:var(--ink);text-align:center;margin-bottom:6px;padding:3px 0;border-bottom:1px solid var(--line)}
+.doc-cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px}
+.doc-cal-dh{font-size:9px;color:var(--ink3);text-align:center;font-weight:700;padding:2px 0;text-transform:uppercase;letter-spacing:.4px}
+.doc-cal-empty{background:transparent;min-height:32px}
+.doc-cal-day{position:relative;background:#fff;border:1px solid var(--line);border-radius:3px;min-height:32px;padding:2px 3px;font-size:10px;display:flex;flex-direction:column;justify-content:space-between}
+.doc-cal-day.weekend{background:#f6f7f9}
+.doc-cal-day.today{border:2px solid #1b4d8f;font-weight:700}
+.doc-cal-day.past{opacity:.5}
+.doc-cal-day.shift-R{background:#dde9f7;border-color:#b8d4f0}
+.doc-cal-day.shift-S{background:#fdebc7;border-color:#f0d49a}
+.doc-cal-day.shift-H{background:#e6dffb;border-color:#c9bff5}
+.doc-cal-day.shift-OFF{}
+.doc-cal-dnum{font-size:10px;color:var(--ink3);font-weight:600;line-height:1}
+.doc-cal-day.shift-R .doc-cal-dnum,.doc-cal-day.shift-S .doc-cal-dnum,.doc-cal-day.shift-H .doc-cal-dnum{color:var(--ink)}
+.doc-cal-shift{font-size:11px;font-weight:700;text-align:center;line-height:1;align-self:flex-end;width:100%}
+.doc-cal-day.shift-R .doc-cal-shift{color:#1b4d8f}
+.doc-cal-day.shift-S .doc-cal-shift{color:var(--S-tx)}
+.doc-cal-day.shift-H .doc-cal-shift{color:var(--H-tx)}
+.up-item{display:flex;align-items:center;gap:10px;padding:6px 10px;background:#fff;border:1px solid var(--line);border-radius:3px;font-size:12px}
+.up-date{font-family:'JetBrains Mono',monospace;font-weight:600;color:var(--ink);min-width:88px}
+.up-day{color:var(--ink3);font-size:11px;min-width:32px}
+
+/* DOC LIST */
+.dg{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px}
+.dc{background:#fff;border:1px solid var(--line);border-radius:4px;padding:11px 14px;cursor:pointer;transition:all .1s}
+.dc-noct{background:#f8f6ff;border-color:#c9b8f5}
+.dc:hover{border-color:#1f5a99;background:#f7faff;box-shadow:0 1px 4px rgba(0,0,0,.06)}
+.dcn{font-weight:700;font-size:13px;margin-bottom:2px}
+.dcm{font-size:11px;color:var(--ink3)}
+.dcs{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--ink3);margin-top:5px}
+.dc-pace{font-family:'JetBrains Mono',monospace;font-size:10px;margin-top:4px;padding:2px 6px;border-radius:3px;display:inline-block;font-weight:600}
+.dc-pace.pace-ok{background:#dff5e6;color:#0a7044}
+.dc-pace.pace-ahead{background:#dde9f7;color:#1b4d8f}
+.dc-pace.pace-behind{background:#fde2e2;color:#a01918}
+
+/* MODAL */
+.mbk{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:500}
+.mo{background:#fff;border-radius:6px;padding:24px;width:540px;max-width:95vw;box-shadow:0 12px 36px rgba(0,0,0,.3)}
+.mo h3{font-size:16px;color:var(--ink);margin-bottom:12px}
+
+/* TOAST */
+.toast{position:fixed;bottom:18px;right:18px;background:#1a1a1a;color:#fff;padding:10px 16px;border-radius:4px;font-size:12px;font-weight:600;opacity:0;transform:translateY(6px);transition:all .2s;z-index:600;box-shadow:0 4px 12px rgba(0,0,0,.3)}
+.toast.on{opacity:1;transform:translateY(0)}
+.toast.success{background:#0a7044}
+.toast.error{background:#a01918}
+.toast.info{background:#1f5a99}
+
+/* MISC */
+.row{display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:10px}
+.fg{display:flex;flex-direction:column;gap:3px}
+.fg label{font-size:10px;color:var(--ink3);font-weight:700;text-transform:uppercase;letter-spacing:.5px}
+.fb{display:flex;justify-content:space-between;align-items:center}
+.fl{display:flex;align-items:center;gap:8px}
+.mb{margin-bottom:14px}
+.mt{margin-top:14px}
+
+/* HOLIDAY ASSIGNMENT TABLE */
+.htbl{width:100%;border-collapse:collapse;font-size:12px}
+.htbl th{background:var(--hdr);padding:8px 12px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--ink2);border-bottom:1px solid var(--line)}
+.htbl td{padding:7px 12px;border-bottom:1px solid var(--line);background:#fff}
+.htbl tr:nth-child(even) td{background:var(--paper)}
+.htbl tr:hover td{background:#f0f7ff}
+
+/* ADMIN LOGIN OVERLAY */
+#login-overlay{position:fixed;inset:0;background:rgba(15,25,50,.85);display:flex;align-items:center;justify-content:center;z-index:2000;backdrop-filter:blur(4px)}
+.login-box{background:#fff;border-radius:8px;padding:36px 40px;width:360px;box-shadow:0 24px 60px rgba(0,0,0,.4);text-align:center}
+.login-box h2{font-size:20px;color:#1b4d8f;margin-bottom:6px}
+.login-box p{font-size:13px;color:var(--ink3);margin-bottom:20px}
+.login-input{width:100%;padding:10px 12px;border:1.5px solid var(--line);border-radius:4px;font-size:14px;font-family:inherit;margin-bottom:10px;outline:none}
+.login-input:focus{border-color:#1b4d8f;box-shadow:0 0 0 2px #1b4d8f22}
+.login-error{color:#a01918;font-size:12px;margin-bottom:10px;min-height:16px}
+.readonly-banner{background:#fff5dc;border-bottom:2px solid #f0c040;padding:6px 16px;font-size:12px;font-weight:600;color:#7a5000;text-align:center;display:none}
+.readonly-banner.on{display:block}
+#sync-status{font-size:11px;color:var(--ink3);font-family:'JetBrains Mono',monospace}
+
+/* PRINT *//* PRINT */
+@media print{
+  body{background:#fff!important}
+  #hdr,.no-print,.toolbar{display:none!important}
+  .pg{padding:0}
+  .sheet-outer{max-height:none;overflow:visible;position:static}
+  .sheet-wrap{max-height:none;overflow:visible;padding-right:0}
+  .sheet-qtot-panel{display:none}
+  .sheet thead th{background:#f0f0f0!important;color:#333!important;print-color-adjust:exact;-webkit-print-color-adjust:exact}
+  .cell-R{background:#dde9f7!important;color:#1b4d8f!important;print-color-adjust:exact;-webkit-print-color-adjust:exact}
+  .cell-S{background:#fdebc7!important;color:#8a5400!important;print-color-adjust:exact;-webkit-print-color-adjust:exact}
+  .cell-H{background:#e6dffb!important;color:#5e3aaa!important;print-color-adjust:exact;-webkit-print-color-adjust:exact}
+}
+</style>
+</head>
+<body>
+
+<!-- Read-only banner (shown when not admin) -->
+<div class="readonly-banner" id="readonly-banner">
+  👁️ View-only mode — you can see all schedules and data but cannot make changes.
+  <button class="btn btn-sm" style="margin-left:12px" onclick="showLogin()">Admin Login</button>
+</div>
+
+<!-- Login overlay -->
+<div id="login-overlay">
+  <div class="login-box">
+    <div style="font-size:36px;margin-bottom:8px">🏥</div>
+    <h2>Hospitalist Schedule</h2>
+    <p style="color:var(--ink3);font-size:13px;margin-bottom:20px">Sign in with your username and password.</p>
+    <input class="login-input" id="un-input" type="text" placeholder="Username (e.g. jane.smith)" autocomplete="username" autocapitalize="none" spellcheck="false">
+    <input class="login-input" id="pw-input" type="password" placeholder="Password" autocomplete="current-password" onkeydown="if(event.key==='Enter')tryLogin()">
+    <div class="login-error" id="login-error"></div>
+    <button class="btn btn-p" style="width:100%;padding:10px;font-size:14px" onclick="tryLogin()">Sign In</button>
+    <div id="supabase-status" style="margin-top:14px;font-size:11px;color:var(--ink3)">Connecting to database…</div>
+  </div>
+</div>
+
+<div id="hdr">
+  <div class="brand">
+    <div class="brand-mark">HS</div>
+    <div class="brand-text">
+      <span class="brand-name">Hospitalist Schedule</span>
+      <span class="brand-sub">Quarterly Planner</span>
+    </div>
+  </div>
+  <div class="tabs" id="tabs-admin">
+    <button class="tab on" id="t-sched" onclick="nav('sched')">📊 Schedule</button>
+    <button class="tab" id="t-week" onclick="nav('week')">📅 Weekly View</button>
+    <button class="tab" id="t-requests" onclick="nav('requests')">📋 Requests</button>
+    <button class="tab" id="t-docs" onclick="nav('docs')">👤 Physicians</button>
+    <button class="tab" id="t-hol" onclick="nav('hol')">🎄 Holidays</button>
+    <button class="tab" id="t-cfg" onclick="nav('cfg')">⚙️ Settings</button>
+  </div>
+  <div class="tabs" id="tabs-phys" style="display:none">
+    <!-- Physician navigation now in the page header, not the tab bar -->
+  </div>
+  <div class="hdr-r">
+    <div class="role-switch">
+      <button class="on" id="r-admin" onclick="switchRole('admin')">Admin</button>
+      <button id="r-phys" onclick="switchRole('phys')">Physician</button>
+    </div>
+    <select id="phys-pick" style="display:none;width:160px" onchange="onPhysPick()"></select>
+    <button class="btn btn-sm" onclick="window.print()">🖨️ Print</button>
+    <span id="user-display" style="font-size:12px;color:var(--ink3);font-weight:600;margin-right:4px"></span>
+    <span id="sync-status">⏳ loading</span>
+    <button class="btn btn-p btn-sm" id="save-btn" onclick="saveData()" disabled>💾 Save</button>
+    <button class="btn btn-sm" style="background:#f3f3f3;border-color:#ccc" onclick="logout()" title="Sign out">↩ Out</button>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════ -->
+<!-- ADMIN: SCHEDULE (main Excel-like grid)              -->
+<!-- ════════════════════════════════════════════════════ -->
+<div class="pg on" id="pg-sched">
+  <div class="fb mb" style="flex-wrap:wrap;gap:10px">
+    <div>
+      <h1>Quarterly Schedule</h1>
+      <p class="tx-sm tx-mu" id="quarter-info">Select a quarter and generate.</p>
+    </div>
+    <div class="fl">
+      <select id="yr-sel" style="width:90px" onchange="updateQuarterInfo()">
+        <option>2025</option><option>2026</option><option>2027</option>
+      </select>
+      <select id="q-sel" style="width:150px" onchange="updateQuarterInfo()">
+        <option value="1">Q1 · Jan–Mar</option>
+        <option value="2">Q2 · Apr–Jun</option>
+        <option value="3">Q3 · Jul–Sep</option>
+        <option value="4">Q4 · Oct–Dec</option>
+      </select>
+      <button class="btn btn-p" id="gen-btn" onclick="tryGenerateQuarter()">⚡ Generate Schedule</button>
+      <button class="btn btn-sm" onclick="recheckFairness()" title="Check shift distribution fairness">📊 Fairness Check</button>
+    </div>
+  </div>
+
+  <!-- Excel-style toolbar -->
+  <div class="toolbar">
+    <div class="tb-group">
+      <span class="tb-label">View</span>
+      <button class="btn btn-sm" onclick="setShiftMode('R')" id="m-fill-r">Fill R</button>
+      <button class="btn btn-sm" onclick="setShiftMode('S')" id="m-fill-s">Fill S</button>
+      <button class="btn btn-sm" onclick="setShiftMode('OFF')" id="m-fill-off">Fill OFF</button>
+      <button class="btn btn-sm" onclick="setShiftMode(null)" id="m-fill-none">Cancel</button>
+    </div>
+    <div class="tb-group">
+      <span class="tb-label">Filter</span>
+      <input type="text" id="filter-name" placeholder="Search name..." style="width:130px" oninput="filterSchedule()" onkeydown="if(event.key==='Enter')filterSchedule()">
+    </div>
+    <div class="tb-group">
+      <span class="tb-label">Legend</span>
+      <span class="sh sh-R">R</span><span class="tx-xs tx-mu">Rounding 7a–5p</span>
+      <span class="sh sh-S">S</span><span class="tx-xs tx-mu">Swing 3p–1a</span>
+      <span class="sh sh-H">H</span><span class="tx-xs tx-mu">Holiday</span>
+    </div>
+    <div class="tb-group" style="margin-left:auto">
+      <span class="tb-label" id="fill-mode-label">Click cell to cycle R→S→N→OFF · Double-click name to open</span>
+    </div>
+  </div>
+
+  <div class="sheet-outer" id="sheet-outer">
+    <div class="sheet-wrap" id="sheet-wrap">
+      <div style="padding:40px;text-align:center;color:var(--ink3)">Pick a quarter and click <strong>Generate Schedule</strong> to begin.</div>
+    </div>
+    <div class="sheet-qtot-panel" id="sheet-qtot-panel" style="display:none">
+      <table class="sheet" id="qtot-table" style="table-layout:auto"></table>
+    </div>
+  </div>
+
+  <!-- Fairness Dashboard -->
+  <div id="fairness-panel" style="display:none;margin-top:16px">
+    <div class="fb" style="align-items:center;margin-bottom:10px">
+      <div>
+        <h3 style="margin:0">Schedule Fairness Review</h3>
+        <p class="tx-sm tx-mu" style="margin:2px 0 0">Flags providers with abnormal shift counts, swing counts, or weekend loads — or unmet required requests.</p>
+      </div>
+      <button class="btn btn-p btn-sm" onclick="recheckFairness()">🔄 Recheck</button>
+    </div>
+    <div id="fairness-content"><div class="tx-mu tx-sm">Generate a schedule then click Recheck to evaluate fairness.</div></div>
+  </div>
+
+  <!-- Admin Announcement -->
+  <div class="card" style="margin-top:16px">
+    <div class="fb" style="align-items:center;margin-bottom:8px">
+      <h3 style="margin:0">📢 Physician Portal Announcement</h3>
+      <span class="tx-xs tx-mu">Displayed on physician portal pages</span>
+    </div>
+    <textarea id="admin-announcement" rows="2" style="width:100%;box-sizing:border-box;padding:8px;border:1px solid var(--line);border-radius:3px;font-family:inherit;font-size:13px;resize:vertical" placeholder="Type a message for all physicians (e.g. 'Q3 schedule is posted — please review by June 15.')..." oninput="saveAnnouncement()">${S.announcement||''}</textarea>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════ -->
+<!-- WEEKLY VIEW                                          -->
+<!-- ════════════════════════════════════════════════════ -->
+<div class="pg" id="pg-week">
+  <div class="fb mb" style="flex-wrap:wrap;gap:10px">
+    <div class="fl">
+      <button class="btn btn-sm" onclick="chWeek(-1)">◀ Prev</button>
+      <span id="wk-title" class="bold" style="min-width:280px;text-align:center;font-size:15px">—</span>
+      <button class="btn btn-sm" onclick="chWeek(1)">Next ▶</button>
+      <button class="btn btn-sm" onclick="goToToday()">Today</button>
+    </div>
+    <button class="btn btn-p btn-sm" onclick="window.print()">🖨️ Print Week</button>
+  </div>
+  <div id="wk-grid"><div style="padding:40px;text-align:center;color:var(--ink3)">Generate schedule first.</div></div>
+</div>
+
+<!-- ════════════════════════════════════════════════════ -->
+<!-- REQUESTS (admin overview)                            -->
+<!-- ════════════════════════════════════════════════════ -->
+<div class="pg" id="pg-requests">
+  <div class="fb mb">
+    <div>
+      <h1>Time-Off Requests</h1>
+      <p class="tx-sm tx-mu">Review submitted requests for the upcoming quarter.</p>
+    </div>
+    <div class="fl">
+      <select id="req-q-sel" onchange="renderRequestsAdmin()">
+        <option value="2025-1">2025 Q1</option>
+        <option value="2025-2">2025 Q2</option>
+        <option value="2025-3">2025 Q3</option>
+        <option value="2025-4">2025 Q4</option>
+        <option value="2026-1">2026 Q1</option>
+        <option value="2026-2">2026 Q2</option>
+        <option value="2026-3">2026 Q3</option>
+        <option value="2026-4">2026 Q4</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="g4 mb">
+    <div class="stat info"><div class="stat-v" id="rs-total">0</div><div class="stat-l">Requests Submitted</div><div class="stat-s" id="rs-sub-count">— physicians</div></div>
+    <div class="stat ok"><div class="stat-v" id="rs-honored">0</div><div class="stat-l">Honored</div><div class="stat-s">In current schedule</div></div>
+    <div class="stat warn"><div class="stat-v" id="rs-unmet">0</div><div class="stat-l">Unmet</div><div class="stat-s">Conflicts to resolve</div></div>
+    <div class="stat"><div class="stat-v" id="rs-pending">0</div><div class="stat-l">Not Submitted</div><div class="stat-s">Physicians w/o requests</div></div>
+  </div>
+
+  <div class="card">
+    <h3>Submitted Requests</h3>
+    <div id="admin-req-list"><div class="tx-mu tx-sm">No requests for this quarter yet.</div></div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════ -->
+<!-- PHYSICIANS LIST / DETAIL                             -->
+<!-- ════════════════════════════════════════════════════ -->
+<div class="pg" id="pg-docs">
+  <div class="fb mb">
+    <h1>Physicians</h1>
+    <button class="btn btn-sm" id="doc-back" style="display:none" onclick="backToDocList()">← Back to List</button>
+  </div>
+  <div id="doc-list-view">
+    <div style="position:relative;margin-bottom:14px">
+      <input type="text" id="doc-search" placeholder="Search physicians..." style="width:100%" oninput="renderDocList()">
+    </div>
+    <div class="dg" id="doc-grid"></div>
+  </div>
+  <div id="doc-detail" style="display:none"></div>
+</div>
+
+<!-- ════════════════════════════════════════════════════ -->
+<!-- HOLIDAYS                                             -->
+<!-- ════════════════════════════════════════════════════ -->
+<div class="pg" id="pg-hol">
+  <div class="fb mb">
+    <h1>Holiday Assignments</h1>
+    <div class="fl">
+      <select id="hol-yr" onchange="renderHolidayTable()">
+        <option>2025</option><option>2026</option><option>2027</option>
+      </select>
+      <button class="btn btn-p btn-sm" onclick="autoAssignHolidays()">⚡ Auto-Assign</button>
+    </div>
+  </div>
+  <div class="card mb">
+    <h3>Rules</h3>
+    <ul style="margin:0;padding-left:20px;font-size:13px;line-height:1.7">
+      <li>🎄 No physician works two Christmases in a row</li>
+      <li>🦃 Each physician works Thanksgiving OR Christmas in a given year — never both</li>
+      <li>🔄 Holiday assignments alternate from year to year</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>Holiday Schedule <span id="hol-yr-lbl" style="color:var(--ink3);font-weight:400"></span></h3>
+    <div style="overflow-x:auto"><table class="htbl" id="hol-table"></table></div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════ -->
+<!-- SETTINGS                                             -->
+<!-- ════════════════════════════════════════════════════ -->
+<div class="pg" id="pg-cfg">
+  <h1 class="mb">Settings</h1>
+  <div class="g2">
+    <div class="card">
+      <h3>Schedule Parameters</h3>
+      <div class="row">
+        <div class="fg"><label>Annual Shifts (FT)</label><input type="number" id="c-annual" value="182" style="width:90px"></div>
+        <div class="fg"><label>Rounders/Day</label><input type="number" id="c-r" value="13" style="width:80px"></div>
+        <div class="fg"><label>Swing/Day</label><input type="number" id="c-s" value="3" style="width:80px"></div>
+      </div>
+      <div class="row">
+        <div class="fg"><label>Max Requests/Quarter</label><input type="number" id="c-max-req" value="20" style="width:90px"></div>
+        <div class="fg"><label>Max Weekend Requests</label><input type="number" id="c-max-wk" value="6" style="width:90px"></div>
+      </div>
+      <button class="btn btn-p btn-sm" onclick="saveCfg()">Save</button>
+    </div>
+    <div class="card">
+      <h3>Add Physician</h3>
+      <div class="row">
+        <div class="fg"><label>Last Name</label><input type="text" id="n-last" style="width:130px"></div>
+        <div class="fg"><label>First Name</label><input type="text" id="n-first" style="width:120px"></div>
+      </div>
+      <div class="row">
+        <div class="fg"><label>Role</label><select id="n-role" style="width:80px"><option>MD</option><option>NP</option></select></div>
+        <div class="fg"><label>FTE</label><select id="n-fte" style="width:80px"><option>1.0</option><option>0.5</option></select></div>
+        <div class="fg"><label>Type</label><select id="n-type" style="width:120px"><option value="standard">Standard</option><option value="swing-only">Swing Only</option><option value="weekday-only">Weekday Only</option><option value="nocturnist">Nocturnist</option></select></div>
+      </div>
+      <div class="row">
+        <div class="fg"><label>Start Date</label><input type="date" id="n-start" style="width:140px"></div>
+        <div class="fg"><label>Title</label><input type="text" id="n-title" placeholder="Medical Director..." style="width:180px"></div>
+      </div>
+      <button class="btn btn-g btn-sm" onclick="addPhysician()">+ Add</button>
+    </div>
+    <div class="card" style="grid-column:1/-1">
+      <h3>Physician Roster (<span id="roster-count">0</span>)</h3>
+      <div style="max-height:380px;overflow-y:auto" id="roster-list"></div>
+    </div>
+    <div class="card">
+      <h3>Data Management</h3>
+      <div class="fl">
+        <button class="btn btn-sm" onclick="exportData()">📤 Export JSON</button>
+        <button class="btn btn-sm" onclick="importData()">📥 Import JSON</button>
+        <button class="btn btn-d btn-sm" onclick="if(confirm('Reset ALL data? This cannot be undone.')){localStorage.clear();location.reload()}">🗑️ Reset All</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════ -->
+<!-- PHYSICIAN: MY REQUESTS                               -->
+<!-- ════════════════════════════════════════════════════ -->
+<div class="pg" id="pg-myreq">
+  <!-- Physician page header — shared across phys pages via CSS show/hide -->
+  <div class="phys-page-hdr">
+    <div class="phys-page-hdr-left">
+      <div class="phys-page-hdr-name" id="phys-hdr-name-req">—</div>
+      <div id="phys-announcement-req" class="phys-announcement-inline"></div>
+      <div class="phys-page-hdr-sub">Physician Portal</div>
+    </div>
+    <div class="phys-page-hdr-nav">
+      <button class="phys-nav-btn active" id="phys-nav-req" onclick="nav('myreq')">
+        📝 Time-Off Requests
+      </button>
+      <button class="phys-nav-btn" id="phys-nav-schd" onclick="nav('myschd')">
+        📅 My Schedule
+      </button>
+    </div>
+    <div class="phys-page-hdr-right" style="flex:1;justify-content:flex-end;gap:16px">
+      <select id="phys-pick-req" onchange="onPhysPickReq()" style="padding:6px 10px;border:1px solid #b8d4f0;border-radius:4px;background:#fff;font-size:13px;color:#1a4a80;cursor:pointer;min-width:160px"></select>
+    </div>
+  </div>
+
+  <div class="fl mb" style="gap:10px;flex-wrap:wrap;align-items:center">
+    <div>
+      <p class="tx-sm tx-mu">Select dates you <strong>cannot work</strong> in the upcoming quarter. Use <strong style="color:#a01918">Required</strong> for must-honor requests and <strong style="color:#806000">Optional</strong> for flexible preferences.</p>
+    </div>
+    <div class="fl">
+      <select id="myq-sel" onchange="renderMyRequestCal()">
+        <option value="2025-1">2025 Q1 (Jan–Mar)</option>
+        <option value="2025-2">2025 Q2 (Apr–Jun)</option>
+        <option value="2025-3">2025 Q3 (Jul–Sep)</option>
+        <option value="2025-4">2025 Q4 (Oct–Dec)</option>
+        <option value="2026-1">2026 Q1 (Jan–Mar)</option>
+        <option value="2026-2">2026 Q2 (Apr–Jun)</option>
+        <option value="2026-3">2026 Q3 (Jul–Sep)</option>
+        <option value="2026-4">2026 Q4 (Oct–Dec)</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- hidden active-phys elements for legacy compat -->
+  <div id="active-phys-name" style="display:none"></div>
+  <div id="active-phys-status" style="display:none"></div>
+
+  <!-- Peer honoring rate banner -->
+  <div id="req-peer-banner" style="display:none;margin-bottom:12px"></div>
+
+  <div class="g2 mb">
+    <div class="card">
+      <div class="fb mb">
+        <h3>Your Selections</h3>
+        <div class="fl" style="gap:6px">
+          <span class="req-counter" id="cnt-total">0 / 20</span>
+          <span class="req-counter" id="cnt-weekend">0 / 6 wkend</span>
+        </div>
+      </div>
+      <div class="req-type-picker">
+        <div class="tx-xs tx-mu" style="margin-bottom:4px">Mark new selections as:</div>
+        <label class="req-type-opt req-type-opt-required">
+          <input type="radio" name="req-type" value="required">
+          <span><strong>REQUIRED</strong> — must be honored (e.g. trip, surgery)</span>
+        </label>
+        <label class="req-type-opt req-type-opt-optional">
+          <input type="radio" name="req-type" value="optional" checked>
+          <span><strong>OPTIONAL</strong> — flexible, honor if possible</span>
+        </label>
+      </div>
+      <div class="tx-xs tx-mu mb">
+        <strong>Rules:</strong> Maximum <strong>20 OFF dates per quarter</strong>. Of those, no more than <strong>6 can span weekends</strong>. Required dates count toward both limits.
+      </div>
+      <div id="my-req-list"><div class="tx-mu tx-sm">No dates selected yet. Choose Required or Optional above, then click days on the calendar.</div></div>
+      <div class="fl mt">
+        <button class="btn btn-p btn-sm" onclick="submitMyRequests()">✓ Submit Requests</button>
+        <button class="btn btn-sm" onclick="clearMyRequests()">Clear All</button>
+        <span class="tx-xs tx-mu" id="submit-status"></span>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Calendar — Click dates you cannot work</h3>
+      <div id="my-req-cal"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════ -->
+<!-- PHYSICIAN: MY SCHEDULE                               -->
+<!-- ════════════════════════════════════════════════════ -->
+<div class="pg" id="pg-myschd">
+  <div class="phys-page-hdr">
+    <div class="phys-page-hdr-left">
+      <div class="phys-page-hdr-name" id="phys-hdr-name-schd">—</div>
+      <div id="phys-announcement-schd" class="phys-announcement-inline"></div>
+      <div class="phys-page-hdr-sub">Physician Portal</div>
+    </div>
+    <div class="phys-page-hdr-nav">
+      <button class="phys-nav-btn" id="phys-nav-req2" onclick="nav('myreq')">
+        📝 Time-Off Requests
+      </button>
+      <button class="phys-nav-btn active" id="phys-nav-schd2" onclick="nav('myschd')">
+        📅 My Schedule
+      </button>
+    </div>
+    <div class="phys-page-hdr-right" style="flex:1;justify-content:flex-end;gap:16px">
+      <select id="phys-pick-schd" onchange="onPhysPickSchd()" style="padding:6px 10px;border:1px solid #b8d4f0;border-radius:4px;background:#fff;font-size:13px;color:#1a4a80;cursor:pointer;min-width:160px"></select>
+    </div>
+  </div>
+  <span style="display:none" id="my-name-lbl"></span>
+  <div id="my-schd-content"><div class="tx-mu tx-sm" style="padding:40px;text-align:center">Schedule not generated yet. Ask your admin to generate the schedule.</div></div>
+  <div style="padding:16px 24px;border-top:1px solid rgba(255,255,255,.2)">
+    <button class="phys-nav-btn" onclick="showChangePasswordModal()" style="font-size:12px;padding:6px 14px">🔒 Change My Password</button>
+  </div>
+</div>
+
+<!-- Modal -->
+<div class="mbk" id="modal" style="display:none" onclick="if(event.target.id==='modal')document.getElementById('modal').style.display='none'">
+  <div class="mo">
+    <h3 id="mo-tit">Edit</h3>
+    <div id="mo-bod"></div>
+    <div class="fl mt" style="justify-content:flex-end">
+      <button class="btn" onclick="document.getElementById('modal').style.display='none'">Cancel</button>
+      <button class="btn btn-p" id="mo-ok" style="display:none">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ════════════════════════════════════════════════════════
+//  PHYSICIAN ROSTER
+// ════════════════════════════════════════════════════════
+const INIT_DOCS = [
+  {id:'adelore',   last:'Adelore',     first:'Tejumade',    role:'MD',fte:1.0,type:'standard',  active:true,startDate:null,    title:''},
+  {id:'ahmad',     last:'Ahmad',       first:'Fakhar',      role:'MD',fte:1.0,type:'standard',  active:true,startDate:null,    title:''},
+  {id:'ahmadani',  last:'Ahmadani',    first:'Ikramullah',  role:'MD',fte:1.0,type:'nocturnist',active:true,startDate:null,    title:'Nocturnist'},
+  {id:'aligwekwe', last:'Aligwekwe',   first:'Chinwe',      role:'MD',fte:1.0,type:'standard',  active:true,startDate:null,    title:''},
+  {id:'anderson',  last:'Anderson',    first:'Courtney',    role:'MD',fte:1.0,type:'standard',  active:true,startDate:null,    title:''},
+  {id:'blair',     last:'Blair',       first:'Daniel',      role:'MD',fte:1.0,type:'standard',  active:true,startDate:null,    title:''},
+  {id:'bonilla',   last:'Bonilla',     first:'Frank',       role:'MD',fte:1.0,type:'standard',  active:true,startDate:null,    title:''},
+  {id:'bueno',     last:'Bueno',       first:'Yolin',       role:'MD',fte:1.0,type:'standard',  active:true,startDate:null,    title:''},
+  {id:'chaudhry',  last:'Chaudhry',    first:'Mannan',      role:'MD',fte:1.0,type:'standard',  active:true,startDate:null,    title:''},
+  {id:'cruz',      last:'Cruz',        first:'Danhely',     role:'MD',fte:1.0,type:'standard',  active:true,startDate:null,    title:''},
+  {id:'dasoveanu', last:'Dasoveanu',   first:'George',      role:'MD',fte:1.0,type:'standard',  active:true,startDate:null,    title:''},
+  {id:'dave',      last:'Dave',        first:'Isha',        role:'MD',fte:1.0,type:'standard',  active:true,startDate:null,    title:''},
+  {id:'fernando',  last:'Fernando',    first:'Nimeshi',     role:'MD',fte:1.0,type:'standard',  active:true,startDate:null,    title:''},
+  {id:'garg',      last:'Garg',        first:'Monisha',     role:'MD',fte:1.0,type:'standard',  active:true,startDate:null,    title:''},
+  {id:'groarke',   last:'Groarke',     first:'Brendan',     role:'MD',fte:1.0,type:'standard',  active:true,startDate:null,    title:''},
+  {id:'guillot',   last:'Guillot',     first:'Juan',        role:'MD',fte:1.0,type:'standard',  active:true,startDate:null,    title:''},
+  {id:'ifeadi',    last:'Ifeadi',      first:'Ngozi',       role:'MD',fte:1.0,type:'standard',  active:true,startDate:null,    title:''},
+  {id:'maalouf',   last:'Maalouf',     first:'Samer',       role:'MD',fte:1.0,type:'standard',  active:true,startDate:null,    title:''},
+  {id:'march',     last:'March',       first:'Christopher', role:'MD',fte:0.5,type:'standard',  active:true,startDate:null,    title:''},
+  {id:'middendorf',last:'Middendorf',  first:'Chris',       role:'MD',fte:1.0,type:'standard',  active:true,startDate:null,    title:''},
+  {id:'nestoiter', last:'Nestoiter',   first:'Adriana',     role:'MD',fte:1.0,type:'standard',  active:true,startDate:null,    title:''},
+  {id:'patel_j',   last:'Patel',       first:'Jaideep',     role:'MD',fte:1.0,type:'standard',  active:true,startDate:null,    title:''},
+  {id:'patel_jt',  last:'Patel',       first:'Jatan',       role:'MD',fte:1.0,type:'standard',  active:true,startDate:null,    title:''},
+  {id:'patel_r',   last:'Patel',       first:'Rak',         role:'MD',fte:1.0,type:'standard',  active:true,startDate:null,    title:''},
+  {id:'raza',      last:'Raza',        first:'Muhammad',    role:'MD',fte:1.0,type:'standard',  active:true,startDate:null,    title:''},
+  {id:'rizvi',     last:'Rizvi',       first:'Syed',        role:'MD',fte:1.0,type:'standard',  active:true,startDate:null,    title:''},
+  {id:'shah',      last:'Shah',        first:'Arpit',       role:'MD',fte:1.0,type:'standard',  active:true,startDate:null,    title:''},
+  {id:'singh',     last:'Singh',       first:'Geena',       role:'MD',fte:1.0,type:'standard',  active:true,startDate:null,    title:''},
+  {id:'slavina',   last:'Slavina',     first:'Irina',       role:'MD',fte:1.0,type:'swing-only',active:true,startDate:null,    title:''},
+  {id:'tahir',     last:'Tahir',       first:'Hindia',      role:'MD',fte:1.0,type:'weekday-only',active:true,startDate:null,    title:'Medical Director'},
+  {id:'turner',    last:'Turner',      first:'Chase',       role:'MD',fte:1.0,type:'standard',  active:true,startDate:null,    title:''},
+  {id:'walls',     last:'Walls',       first:'Sheri',       role:'MD',fte:1.0,type:'nocturnist',active:true,startDate:null,    title:'Nocturnist'},
+  {id:'wilson',    last:'Wilson',      first:'Kwasi',       role:'MD',fte:1.0,type:'standard',  active:true,startDate:null,    title:''},
+  {id:'zouain',    last:'Zouain',      first:'Eduardo',     role:'MD',fte:1.0,type:'standard',  active:true,startDate:null,    title:''},
+  {id:'odeyinka',  last:'Odeyinka',    first:'Oladipo',     role:'MD',fte:1.0,type:'standard',  active:true,startDate:'2026-07-01',title:''},
+  {id:'chapagain', last:'Chapagain',   first:'Sudeep',      role:'MD',fte:1.0,type:'standard',  active:true,startDate:'2026-07-01',title:''},
+];
+
+// ════════════════════════════════════════════════════════
+//  STATE
+// ════════════════════════════════════════════════════════
+let S = {
+  docs: JSON.parse(JSON.stringify(INIT_DOCS)),
+  sched: {},               // {docId: {dateStr: 'R'|'S'|'OFF'|'H'}}
+  teams: {},               // {docId: {dateStr: 1..13}} - team number for R shifts
+  requests: {},            // {quarterKey: {docId: {required:[], optional:[]}}}
+  cycleStarts: {},         // {quarterKey: {docId: dateStr}}  -- their cycle start day for that quarter
+  hols: {},                // {year: {docId: {tg:bool, xm:bool}}}
+  announcement: '',        // admin message displayed in physician portal
+  cfg: {annual:182, R:13, S:3, maxReq:20, maxWeekendReq:6},
+  ui: {
+    role:'admin',          // 'admin' or 'phys'
+    currentPhysId: 'adelore',  // physician viewing as
+    year:2025, quarter:1,
+    wkStart:null,
+    fillMode:null,
+    calMode:'next3',   // physician calendar view mode
+    calYear:2026,      // physician calendar view year
+    selectedRow:null,  // docId of highlighted row
+    selectedCols:new Set(), // set of date strings with highlighted cols
+    requestQuarter:'2025-1',
+    adminReqQuarter:'2025-1',
+    holYear:2025,
+  }
+};
+
+// ════════════════════════════════════════════════════════
+//  PERSISTENCE
+// ════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════
+//  AUTH & STORAGE — per-user login, Supabase-backed
+// ════════════════════════════════════════════════════════
+let currentUser=null; // {username,role,docId}
+let isSaving=false,pendingSave=false;
+function isAdmin(){return currentUser&&currentUser.role==='admin';}
+function isPhysician(){return currentUser&&currentUser.role==='physician';}
+
+function setReadOnly(ro){
+  const b=document.getElementById('readonly-banner');if(b)b.classList.toggle('on',ro);
+  ['gen-btn','save-btn','m-fill-r','m-fill-s','m-fill-off','m-fill-none'].forEach(id=>{const el=document.getElementById(id);if(el)el.disabled=ro;});
+}
+function updateHeaderForUser(){
+  const el=document.getElementById('user-display');if(!el||!currentUser)return;
+  el.textContent=isAdmin()?`👤 ${currentUser.username} (Admin)`:`👤 ${currentUser.username}`;
+}
+
+async function saveData(){
+  if(!currentUser){toast('Not logged in','error');return;}
+  if(!isAdmin()){toast('View-only — changes not saved','error');return;}
+  const sb=getSB();
+  if(!sb){localStorage.setItem('hsq',JSON.stringify(S));toast('Saved locally','info');return;}
+  if(isSaving){pendingSave=true;return;}
+  isSaving=true;setSyncStatus('saving');
+  try{const{error}=await sb.from('schedule_data').upsert({id:DATA_ROW_ID,data:JSON.stringify(S),updated_at:new Date().toISOString()},{onConflict:'id'});if(error)throw error;setSyncStatus('saved');toast('Saved','success');}
+  catch(e){console.error(e);setSyncStatus('error');toast('Save failed','error');}
+  finally{isSaving=false;if(pendingSave){pendingSave=false;saveData();}}
+}
+
+async function loadData(){
+  const sb=getSB();
+  if(!sb){const d=localStorage.getItem('hsq');if(d){try{S={...S,...JSON.parse(d)};}catch(e){}}applyMigrations();return;}
+  setSyncStatus('loading');
+  try{const{data,error}=await sb.from('schedule_data').select('data').eq('id',DATA_ROW_ID).single();if(error&&error.code!=='PGRST116')throw error;if(data&&data.data)S={...S,...JSON.parse(data.data)};setSyncStatus('synced');}
+  catch(e){console.error(e);setSyncStatus('error');toast('Load failed','error');}
+  applyMigrations();
+}
+
+function applyMigrations(){
+  if(!S.teams)S.teams={};if(!S.announcement)S.announcement='';
+  S.ui.selectedRow=null;S.ui.selectedCols=new Set();
+  const u={odeyinka:{first:'Oladipo'},chapagain:{first:'Sudeep'},walls:{type:'nocturnist',title:'Nocturnist'},ahmadani:{type:'nocturnist',title:'Nocturnist'},tahir:{type:'weekday-only'}};
+  Object.entries(u).forEach(([id,p])=>{const d=S.docs.find(d=>d.id===id);if(d)Object.assign(d,p);});
+}
+
+function setSyncStatus(state){
+  const el=document.getElementById('sync-status');if(!el)return;
+  const m={loading:'⏳ loading',saving:'💾 saving…',saved:'✓ saved',synced:'✓ synced',error:'⚠ error'};
+  el.textContent=m[state]||state;
+  el.style.color=state==='error'?'#a01918':(state==='saved'||state==='synced')?'#0a7044':'var(--ink3)';
+}
+
+let lastSyncTime=0;
+async function pollForChanges(){
+  const sb=getSB();if(!sb)return;
+  try{const{data}=await sb.from('schedule_data').select('updated_at').eq('id',DATA_ROW_ID).single();if(data){const t=new Date(data.updated_at).getTime();if(t>lastSyncTime&&lastSyncTime>0){await loadData();renderSchedule();toast('Schedule updated','info');}lastSyncTime=t;}}catch(e){}
+}
+setInterval(pollForChanges,30000);
+
+async function getUser(u){const sb=getSB();if(!sb)return null;const{data,error}=await sb.from('users').select('*').eq('username',u).single();return(error||!data)?null:data;}
+async function updatePasswordInDB(u,h){const sb=getSB();if(!sb)return false;const{error}=await sb.from('users').update({password_hash:h}).eq('username',u);return!error;}
+
+async function tryLogin(){
+  const username=document.getElementById('un-input').value.trim().toLowerCase();
+  const password=document.getElementById('pw-input').value;
+  const errEl=document.getElementById('login-error');errEl.textContent='';
+  if(!username||!password){errEl.textContent='Enter username and password.';return;}
+  const sb=getSB();
+  if(!sb){if(username==='admin'&&password==='admin'){currentUser={username:'admin',role:'admin',docId:null};completeLogin();}else errEl.textContent='No DB configured. Use admin/admin.';return;}
+  const btn=document.querySelector('#login-overlay .btn-p');if(btn){btn.disabled=true;btn.textContent='Signing in…';}
+  try{
+    const hash=await sha256(password),user=await getUser(username);
+    if(!user||user.password_hash!==hash){errEl.textContent='Incorrect username or password.';return;}
+    currentUser={username:user.username,role:user.role,docId:user.doc_id};completeLogin();
+  }catch(e){errEl.textContent='Login error — try again.';console.error(e);}
+  finally{if(btn){btn.disabled=false;btn.textContent='Sign In';}}
+}
+
+function completeLogin(){
+  sessionStorage.setItem('hs_user',JSON.stringify(currentUser));
+  document.getElementById('login-overlay').style.display='none';
+  if(isPhysician()&&currentUser.docId)S.ui.currentPhysId=currentUser.docId;
+  updateHeaderForUser();
+}
+function logout(){sessionStorage.removeItem('hs_user');currentUser=null;location.reload();}
+
+function showChangePasswordModal(){
+  showModal('🔒 Change My Password',
+    `<div class="fg mb"><label>Current Password</label><input type="password" id="cp-old" class="login-input" placeholder="Current password"></div>
+     <div class="fg mb"><label>New Password</label><input type="password" id="cp-new" class="login-input" placeholder="New password (min 6 chars)"></div>
+     <div class="fg mb"><label>Confirm</label><input type="password" id="cp-confirm" class="login-input" placeholder="Confirm new password"></div>
+     <div class="login-error" id="cp-error"></div>`,
+    'Change Password',
+    async()=>{
+      const o=document.getElementById('cp-old').value,n=document.getElementById('cp-new').value,con=document.getElementById('cp-confirm').value;
+      const e=document.getElementById('cp-error');e.textContent='';
+      if(!o||!n||!con){e.textContent='All fields required.';return;}
+      if(n.length<6){e.textContent='Minimum 6 characters.';return;}
+      if(n!==con){e.textContent='Passwords do not match.';return;}
+      const user=await getUser(currentUser.username);
+      if(!user||user.password_hash!==await sha256(o)){e.textContent='Current password incorrect.';return;}
+      if(await updatePasswordInDB(currentUser.username,await sha256(n))){document.getElementById('modal').style.display='none';toast('Password changed','success');}
+      else e.textContent='Failed — try again.';
+    }
+  );
+}
+
+async function adminResetPassword(docId){
+  if(!isAdmin()){toast('Admin only','error');return;}
+  const doc=byId(docId);if(!doc)return;
+  const sb=getSB();if(!sb){toast('No database','error');return;}
+  const{data}=await sb.from('users').select('username').eq('doc_id',docId).single();
+  if(!data){toast('No account found','error');return;}
+  const uname=data.username;
+  showModal(`🔑 Reset Password — ${dname(doc)}`,
+    `<div class="tx-sm mb">Reset password for <strong>${uname}</strong>.</div>
+     <div class="fg mb"><label>New Password</label><input type="password" id="rp-new" class="login-input" placeholder="New password (min 4 chars)"></div>
+     <div class="fg mb"><label>Confirm</label><input type="password" id="rp-confirm" class="login-input" placeholder="Confirm"></div>
+     <div class="login-error" id="rp-error"></div>`,
+    'Reset Password',
+    async()=>{
+      const n=document.getElementById('rp-new').value,con=document.getElementById('rp-confirm').value;
+      const e=document.getElementById('rp-error');
+      if(!n||n.length<4){e.textContent='Too short (min 4 chars).';return;}
+      if(n!==con){e.textContent='Passwords do not match.';return;}
+      if(await updatePasswordInDB(uname,await sha256(n))){document.getElementById('modal').style.display='none';toast(`Password reset for ${dname(doc)}`,'success');}
+      else e.textContent='Failed — try again.';
+    }
+  );
+}
+
+// loadData is now async (Supabase version above)
+function exportData(){const b=new Blob([JSON.stringify(S,null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=`hospitalist-schedule-${new Date().toISOString().slice(0,10)}.json`;a.click();toast('Exported','success')}
+function importData(){const i=document.createElement('input');i.type='file';i.accept='.json';i.onchange=e=>{const r=new FileReader();r.onload=ev=>{try{S={...S,...JSON.parse(ev.target.result)};localStorage.setItem('hsq',JSON.stringify(S));location.reload()}catch(e){toast('Invalid file','error')}};r.readAsText(e.target.files[0])};i.click()}
+
+// ════════════════════════════════════════════════════════
+//  HELPERS
+// ════════════════════════════════════════════════════════
+function dstr(y,m,d){return `${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`}
+function dstrD(date){return dstr(date.getFullYear(),date.getMonth(),date.getDate())}
+function parseD(s){const[y,m,d]=s.split('-').map(Number);return new Date(y,m-1,d)}
+function addD(date,n){const d=new Date(date);d.setDate(d.getDate()+n);return d}
+function dim(y,m){return new Date(y,m+1,0).getDate()}
+function dayN(date){return ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][date.getDay()]}
+function monN(m){return ['January','February','March','April','May','June','July','August','September','October','November','December'][m]}
+function monAbbr(m){return ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][m]}
+function dname(d){return d.last+(d.first?', '+d.first:'')}
+function byId(id){return S.docs.find(d=>d.id===id)}
+function isWeekend(date){return date.getDay()===0||date.getDay()===6}
+function quarterRange(year,q){
+  // q is 1-indexed, returns {start, end, months:[m0,m1,m2]}
+  const startMonth=(q-1)*3;
+  return {
+    start: new Date(year, startMonth, 1),
+    end: new Date(year, startMonth+3, 0),
+    months: [startMonth, startMonth+1, startMonth+2]
+  };
+}
+function quarterDays(year,q){
+  const r=quarterRange(year,q);
+  const days=[];
+  for(let d=new Date(r.start); d<=r.end; d=addD(d,1)){
+    days.push(new Date(d));
+  }
+  return days;
+}
+function activeDocs(year,month){
+  return S.docs.filter(d=>{
+    if(!d.active) return false;
+    if(d.startDate){
+      const sd=parseD(d.startDate);
+      const qEnd=new Date(year, month===undefined?11:month+1, 0);
+      if(sd>qEnd) return false;
+    }
+    return true;
+  });
+}
+function toast(msg,kind='info',ms=2500){
+  const t=document.getElementById('toast');
+  t.textContent=msg;
+  t.className='toast on '+(kind||'');
+  setTimeout(()=>t.classList.remove('on'),ms);
+}
+function showModal(title,body,okLbl,okFn){
+  document.getElementById('mo-tit').textContent=title;
+  document.getElementById('mo-bod').innerHTML=body;
+  const b=document.getElementById('mo-ok');
+  if(okLbl){b.style.display='';b.textContent=okLbl;b.onclick=okFn}
+  else b.style.display='none';
+  document.getElementById('modal').style.display='flex';
+}
+
+// Holidays
+function holDates(y){
+  // Thanksgiving: 4th Thursday of November
+  let tg=new Date(y,10,1); let thuCount=0;
+  while(thuCount<4){if(tg.getDay()===4)thuCount++;if(thuCount<4)tg.setDate(tg.getDate()+1)}
+  // Memorial Day: last Monday of May
+  let mem=new Date(y,4,31);
+  while(mem.getDay()!==1) mem.setDate(mem.getDate()-1);
+  // Labor Day: first Monday of September
+  let lab=new Date(y,8,1);
+  while(lab.getDay()!==1) lab.setDate(lab.getDate()+1);
+  return {
+    ny:`${y}-01-01`,          // New Year's Day
+    mem:dstrD(mem),           // Memorial Day
+    jul4:`${y}-07-04`,        // 4th of July
+    lab:dstrD(lab),           // Labor Day
+    tg:dstrD(tg),             // Thanksgiving
+    xm:`${y}-12-25`           // Christmas
+  };
+}
+// "Strictly scheduled" holidays (Thanksgiving/Christmas rule applies)
+function isStrictHol(ds,y){const h=holDates(y);return ds===h.tg||ds===h.xm}
+// All tracked holidays
+function isHol(ds,y){
+  const h=holDates(y);
+  return ds===h.ny||ds===h.mem||ds===h.jul4||ds===h.lab||ds===h.tg||ds===h.xm;
+}
+function holName(key){
+  return {ny:'New Year\'s Day',mem:'Memorial Day',jul4:'4th of July',
+          lab:'Labor Day',tg:'Thanksgiving',xm:'Christmas'}[key]||key;
+}
+
+// ════════════════════════════════════════════════════════
+//  SCHEDULE GENERATION (v10) — Monthly balance + MAX_S cap fix
+//
+//  Key fixes over v9:
+//    - MAX_S_BLOCK = 2: strictly limits consecutive S days to 2
+//      (v9 bug: S continuation had no cap → Raza/Rizvi 7-day S blocks)
+//    - Monthly S fairness: tiered selection (providers below monthly target first)
+//      Each provider targets ~quarterTargetS/3 S shifts per month
+//    - mustContinueS_couplet also checks runLen < MAX_S_BLOCK (belt-and-suspenders)
+//
+//  Three-layer S fill (guarantees 3 S/day):
+//    Layer 1 - Normal: preferredR met AND below monthly quota
+//    Layer 2 - Normal above-quota: preferredR met, but over monthly target (still fair)
+//    Layer 3 - Emergency: 3+ R (early transition when S supply thin)
+//    Layer 4 - Last resort: pull rested OFF doc into S
+//
+//  Team numbers:
+//    Each R-shift doc gets team 1-13; persists through their block;
+//    new blocks avoid last 3 team numbers where possible
+// ════════════════════════════════════════════════════════
+function getPreferredR(doc){
+  return (doc.preferences && doc.preferences.preferredR) || 5;
+}
+function getMaxWork(doc){
+  return (doc.preferences && doc.preferences.maxWork) || 7;
+}
+
+function generateQuarter(){
+  const year=parseInt(document.getElementById('yr-sel').value);
+  const q=parseInt(document.getElementById('q-sel').value);
+  S.ui.year=year; S.ui.quarter=q;
+  const qKey=`${year}-${q}`;
+
+  const range=quarterRange(year,q);
+  const startD=range.start;
+  const totalDays=Math.floor((range.end-startD)/86400000)+1;
+
+  const allActive=activeDocs(year,range.months[0]);
+  const rotation=allActive.filter(d=>d.type==='standard' && d.fte===1.0);
+  const partTime=allActive.filter(d=>d.type==='standard' && d.fte<1.0);
+  const swingOnly=allActive.filter(d=>d.type==='swing-only');
+  const weekdayOnly=allActive.filter(d=>d.type==='weekday-only');
+  const nocturnists=allActive.filter(d=>d.type==='nocturnist');
+
+  rotation.sort((a,b)=>a.last.localeCompare(b.last)||a.first.localeCompare(b.first));
+
+  if(!S.requests[qKey]) S.requests[qKey]={};
+  const requests=S.requests[qKey];
+
+  allActive.forEach(d=>{
+    if(!S.sched[d.id]) S.sched[d.id]={};
+    if(!S.teams) S.teams={};
+    if(!S.teams[d.id]) S.teams[d.id]={};
+    for(let i=0;i<totalDays;i++){
+      const ds=dstrD(addD(startD,i));
+      delete S.sched[d.id][ds];
+      delete S.teams[d.id][ds];
+    }
+  });
+
+  const MIN_R_HARD=3;
+  const MAX_S_BLOCK=2;   // ← critical cap: no more than 2 consecutive S days
+  // Monthly S target per provider (~quarterTargetS / 3 months)
+  // Target ~8 S per quarter → ~2.67 per month → we use 3 as soft cap
+  const MONTHLY_S_TARGET=Math.round(8/3);  // 3
+
+  // State init — stagger across 14-phase cycle
+  const state={};
+  rotation.forEach((doc,i)=>{
+    const phase=i%14;
+    if(phase<7){
+      const workDay=phase;
+      let lastShift=null, runLen=0;
+      if(workDay===0){lastShift=null;runLen=0;}
+      else if(workDay<5){lastShift='R';runLen=workDay;}
+      else if(workDay===5){lastShift='R';runLen=5;}
+      else if(workDay===6){lastShift='S';runLen=1;}
+      else {lastShift='S';runLen=Math.min(2,workDay-4);}
+      state[doc.id]={
+        block:'W', lastWorkSize:0, dayInBlock:workDay,
+        workInBlock:workDay, lastShift, runLen,
+        qR:0, qS:0, monthCount:[0,0,0,0,0,0,0,0,0,0,0,0],
+        preferredR:getPreferredR(doc), maxWork:getMaxWork(doc),
+        teamHistory:[]
+      };
+    } else {
+      const restDay=phase-7;
+      state[doc.id]={
+        block:'O', lastWorkSize:7, dayInBlock:restDay,
+        workInBlock:0, lastShift:null, runLen:restDay,
+        qR:0, qS:0, monthCount:[0,0,0,0,0,0,0,0,0,0,0,0],
+        preferredR:getPreferredR(doc), maxWork:getMaxWork(doc),
+        teamHistory:[]
+      };
+    }
+  });
+
+  function canBeR(docId){
+    const s=state[docId];
+    if(!s) return false;
+    if(s.lastShift==='S') return false;
+    if(s.block==='W') return s.workInBlock<s.maxWork;
+    return s.dayInBlock>=s.lastWorkSize;
+  }
+  function canBeS_base(docId){
+    // Base S eligibility (shared between normal and emergency)
+    const s=state[docId];
+    if(!s||s.block!=='W') return false;
+    if(s.workInBlock>=s.maxWork) return false;
+    if(s.lastShift==='S') return s.runLen<MAX_S_BLOCK;  // continuation: cap at MAX_S_BLOCK
+    return false;
+  }
+  function canBeS_normal(docId){
+    const s=state[docId];
+    if(!s||s.block!=='W') return false;
+    if(s.workInBlock>=s.maxWork) return false;
+    if(s.lastShift==='S') return s.runLen<MAX_S_BLOCK;
+    if(s.lastShift==='R' && s.runLen>=s.preferredR)
+      return s.workInBlock+1<=s.maxWork;
+    return false;
+  }
+  function canBeS_emergency(docId){
+    const s=state[docId];
+    if(!s||s.block!=='W') return false;
+    if(s.workInBlock>=s.maxWork) return false;
+    if(s.lastShift==='S') return s.runLen<MAX_S_BLOCK;
+    if(s.lastShift==='R' && s.runLen>=MIN_R_HARD)
+      return s.workInBlock+1<=s.maxWork;
+    return false;
+  }
+  function canBeS_lastResort(docId){
+    const s=state[docId];
+    if(!s||s.block!=='O') return false;
+    return s.dayInBlock>=MIN_R_HARD;
+  }
+  function mustContinueR(docId){
+    const s=state[docId];
+    return s&&s.block==='W'&&s.lastShift==='R'
+        &&s.runLen<s.preferredR&&s.workInBlock<s.maxWork;
+  }
+  function mustContinueS_couplet(docId){
+    const s=state[docId];
+    // Must complete couplet: exactly 1 S done, haven't hit MAX_S_BLOCK yet
+    return s&&s.block==='W'&&s.lastShift==='S'
+        &&s.runLen===1&&s.runLen<MAX_S_BLOCK&&s.workInBlock<s.maxWork;
+  }
+  function canBeOff(docId){
+    const s=state[docId];
+    if(!s) return true;
+    if(s.block==='W'&&s.lastShift==='R'&&s.runLen<MIN_R_HARD) return false;
+    if(s.block==='W'&&s.lastShift==='S'&&s.runLen<MAX_S_BLOCK&&s.workInBlock<s.maxWork) return false;
+    return true;
+  }
+  function assign(docId,shift,month){
+    const s=state[docId];
+    if(shift==='R'||shift==='S'){
+      if(s.block==='O'){
+        s.block='W';s.dayInBlock=0;s.workInBlock=0;s.runLen=0;
+      }
+      s.workInBlock++;s.dayInBlock++;
+      s.runLen=(s.lastShift===shift)?s.runLen+1:1;
+      s.lastShift=shift;
+      if(shift==='R') s.qR++; else s.qS++;
+      s.monthCount[month]++;
+    } else {
+      if(s.block==='W'&&s.workInBlock>0){
+        s.lastWorkSize=s.workInBlock;
+        s.block='O';s.dayInBlock=1;s.workInBlock=0;
+        s.lastShift=null;s.runLen=1;
+      } else if(s.block==='O'){
+        s.dayInBlock++;s.runLen++;
+      } else {
+        s.block='O';s.dayInBlock=1;s.workInBlock=0;
+        s.lastShift=null;s.runLen=1;
+      }
+    }
+  }
+  function hasRequiredRequest(docId,ds){
+    const r=requests[docId];
+    if(!r) return false;
+    if(Array.isArray(r)) return false;
+    return Array.isArray(r.required)&&r.required.indexOf(ds)>=0;
+  }
+  function hasOptionalRequest(docId,ds){
+    const r=requests[docId];
+    if(!r) return false;
+    if(Array.isArray(r)) return r.indexOf(ds)>=0;
+    return Array.isArray(r.optional)&&r.optional.indexOf(ds)>=0;
+  }
+
+  // ──────── DAILY LOOP ────────
+  for(let di=0;di<totalDays;di++){
+    const date=addD(startD,di);
+    const ds=dstrD(date);
+    const dow=date.getDay();
+    const month=date.getMonth();
+
+    nocturnists.forEach(doc=>{S.sched[doc.id][ds]='OFF';});
+
+    let tahirR=0;
+    weekdayOnly.forEach(doc=>{
+      if(doc.startDate&&doc.startDate>ds){S.sched[doc.id][ds]='OFF';return;}
+      if(dow>=1&&dow<=5){S.sched[doc.id][ds]='R';tahirR++;}
+      else{S.sched[doc.id][ds]='OFF';}
+    });
+
+    let slavinaS=0;
+    swingOnly.forEach((doc,idx)=>{
+      if(doc.startDate&&doc.startDate>ds){S.sched[doc.id][ds]='OFF';return;}
+      const phase=idx*7;
+      const pos=((di-phase)%14+14)%14;
+      if(pos<7){S.sched[doc.id][ds]='S';slavinaS++;}
+      else{S.sched[doc.id][ds]='OFF';}
+    });
+
+    let marchR=0,marchS=0;
+    partTime.forEach(doc=>{
+      if(doc.startDate&&doc.startDate>ds){S.sched[doc.id][ds]='OFF';return;}
+      const superPos=((di)%28+28)%28;
+      let m='OFF';
+      if(superPos<14){if(superPos<5)m='R';else if(superPos<7)m='S';}
+      S.sched[doc.id][ds]=m;
+      if(m==='R')marchR++;if(m==='S')marchS++;
+    });
+
+    let needR=S.cfg.R-tahirR-marchR;
+    let needS=S.cfg.S-slavinaS-marchS;
+    const assigned=new Set();
+
+    // STEP 1: Required OFF
+    rotation.forEach(doc=>{
+      if(doc.startDate&&doc.startDate>ds){S.sched[doc.id][ds]='OFF';assigned.add(doc.id);return;}
+      if(hasRequiredRequest(doc.id,ds)){
+        S.sched[doc.id][ds]='OFF';assign(doc.id,'OFF',month);assigned.add(doc.id);
+      }
+    });
+
+    // STEP 1b: Optional OFF — honor requests, prioritizing docs with lowest honoring rate
+    // Docs who've had fewer requests honored get priority (fairness across the group)
+    const optionalRequestDocs = rotation.filter(doc=>{
+      if(assigned.has(doc.id)) return false;
+      return hasOptionalRequest(doc.id,ds) && canBeOff(doc.id);
+    });
+    // Sort: lowest honoring rate gets honored first
+    optionalRequestDocs.sort((a,b)=>{
+      const rA=getHonoringRate(a.id,year);
+      const rB=getHonoringRate(b.id,year);
+      return rA-rB;  // ascending: lowest rate goes first
+    });
+    optionalRequestDocs.forEach(doc=>{
+      S.sched[doc.id][ds]='OFF';assign(doc.id,'OFF',month);assigned.add(doc.id);
+    });
+
+    // STEP 2: Forced R continuations (must reach preferredR)
+    rotation.forEach(doc=>{
+      if(assigned.has(doc.id)) return;
+      if(mustContinueR(doc.id)){
+        S.sched[doc.id][ds]='R';assign(doc.id,'R',month);needR--;assigned.add(doc.id);
+      }
+    });
+
+    // STEP 3: Forced S couplet completions
+    rotation.forEach(doc=>{
+      if(assigned.has(doc.id)) return;
+      if(mustContinueS_couplet(doc.id)){
+        S.sched[doc.id][ds]='S';assign(doc.id,'S',month);needS--;assigned.add(doc.id);
+      }
+    });
+
+    // Helper: sort key for S candidates (monthly fairness first, then quarterly)
+    function sSortKey(docId){
+      const s=state[docId];
+      return [s.monthCount[month], s.qS];
+    }
+
+    // STEP 4a: Normal S — BELOW monthly target (strongest fairness tier)
+    if(needS>0){
+      const cands=rotation
+        .filter(d=>!assigned.has(d.id)&&canBeS_normal(d.id)&&state[d.id].monthCount[month]<MONTHLY_S_TARGET)
+        .sort((a,b)=>{
+          const [am,aq]=sSortKey(a.id), [bm,bq]=sSortKey(b.id);
+          return am!==bm?am-bm:aq!==bq?aq-bq:a.last.localeCompare(b.last);
+        });
+      let i=0;
+      while(needS>0&&i<cands.length){
+        const doc=cands[i];
+        S.sched[doc.id][ds]='S';assign(doc.id,'S',month);assigned.add(doc.id);needS--;i++;
+      }
+    }
+
+    // STEP 4b: Normal S — AT/ABOVE monthly target (still use, just lower priority)
+    if(needS>0){
+      const cands=rotation
+        .filter(d=>!assigned.has(d.id)&&canBeS_normal(d.id))
+        .sort((a,b)=>{
+          const [am,aq]=sSortKey(a.id), [bm,bq]=sSortKey(b.id);
+          return am!==bm?am-bm:aq!==bq?aq-bq:a.last.localeCompare(b.last);
+        });
+      let i=0;
+      while(needS>0&&i<cands.length){
+        const doc=cands[i];
+        S.sched[doc.id][ds]='S';assign(doc.id,'S',month);assigned.add(doc.id);needS--;i++;
+      }
+    }
+
+    // STEP 4c: Emergency S (3+ R done, early transition)
+    if(needS>0){
+      const cands=rotation
+        .filter(d=>!assigned.has(d.id)&&canBeS_emergency(d.id))
+        .sort((a,b)=>{
+          const [am,aq]=sSortKey(a.id), [bm,bq]=sSortKey(b.id);
+          if(am!==bm) return am-bm;
+          if(aq!==bq) return aq-bq;
+          const aR=(state[a.id].block==='W'&&state[a.id].lastShift==='R')?state[a.id].runLen:0;
+          const bR=(state[b.id].block==='W'&&state[b.id].lastShift==='R')?state[b.id].runLen:0;
+          return bR-aR||a.last.localeCompare(b.last);
+        });
+      let i=0;
+      while(needS>0&&i<cands.length){
+        const doc=cands[i];
+        S.sched[doc.id][ds]='S';assign(doc.id,'S',month);assigned.add(doc.id);needS--;i++;
+      }
+    }
+
+    // STEP 4d: Last resort — pull rested OFF doc
+    if(needS>0){
+      const cands=rotation
+        .filter(d=>!assigned.has(d.id)&&canBeS_lastResort(d.id))
+        .sort((a,b)=>{
+          const [am,aq]=sSortKey(a.id), [bm,bq]=sSortKey(b.id);
+          const aRest=state[a.id].dayInBlock, bRest=state[b.id].dayInBlock;
+          return am!==bm?am-bm:aq!==bq?aq-bq:bRest-aRest||a.last.localeCompare(b.last);
+        });
+      let i=0;
+      while(needS>0&&i<cands.length){
+        const doc=cands[i];
+        S.sched[doc.id][ds]='S';assign(doc.id,'S',month);assigned.add(doc.id);needS--;i++;
+      }
+    }
+
+    // STEP 5: Fill R
+    const rCandidates=rotation
+      .filter(d=>!assigned.has(d.id)&&canBeR(d.id))
+      .sort((a,b)=>{
+        const sa=state[a.id],sb=state[b.id];
+        const aCont=(sa.block==='W'&&sa.lastShift==='R')?0:1;
+        const bCont=(sb.block==='W'&&sb.lastShift==='R')?0:1;
+        if(aCont!==bCont) return aCont-bCont;
+        if(sa.monthCount[month]!==sb.monthCount[month]) return sa.monthCount[month]-sb.monthCount[month];
+        if(sa.qR!==sb.qR) return sa.qR-sb.qR;
+        const aRest=(sa.block==='O')?sa.dayInBlock:0;
+        const bRest=(sb.block==='O')?sb.dayInBlock:0;
+        return bRest-aRest||a.last.localeCompare(b.last);
+      });
+    let ri=0;
+    while(needR>0&&ri<rCandidates.length){
+      const doc=rCandidates[ri];
+      S.sched[doc.id][ds]='R';assign(doc.id,'R',month);assigned.add(doc.id);needR--;ri++;
+    }
+
+    // STEP 6: Everyone else OFF
+    rotation.forEach(doc=>{
+      if(assigned.has(doc.id)) return;
+      if(mustContinueR(doc.id)){S.sched[doc.id][ds]='R';assign(doc.id,'R',month);return;}
+      if(mustContinueS_couplet(doc.id)){S.sched[doc.id][ds]='S';assign(doc.id,'S',month);return;}
+      S.sched[doc.id][ds]='OFF';assign(doc.id,'OFF',month);
+    });
+
+    assignTeamNumbers(allActive,ds,state,di);
+  }
+
+  // Holiday markings
+  const hd=holDates(year);
+  if(S.hols[year]){
+    Object.entries(S.hols[year]).forEach(([docId,h])=>{
+      if(h.tg&&S.sched[docId]&&S.sched[docId][hd.tg]) S.sched[docId][hd.tg]='H';
+      if(h.xm&&S.sched[docId]&&S.sched[docId][hd.xm]) S.sched[docId][hd.xm]='H';
+    });
+  }
+
+  S.cycleStarts[qKey]={generated:new Date().toISOString()};
+  saveData();
+  renderSchedule();
+  updateQuarterInfo();
+  updateGenButton();
+  toast(`Generated Q${q} ${year}`,'success');
+  setTimeout(recheckFairness, 100);  // auto-check fairness after generation
+}
+
+// Assign team numbers 1-13 to R-shift docs for a given day
+function assignTeamNumbers(allActive,ds,state,di){
+  if(!S.teams) S.teams={};
+  const rDocs=allActive.filter(d=>S.sched[d.id]&&S.sched[d.id][ds]==='R');
+  if(rDocs.length===0) return;
+  const prevDS=di>0?dstrD(addD(parseD(ds),-1)):null;
+  const takenTeams=new Set();
+  // First pass: continue existing R blocks (keep same team)
+  rDocs.forEach(doc=>{
+    if(prevDS){
+      const yest=S.sched[doc.id][prevDS];
+      const yestTeam=S.teams[doc.id]&&S.teams[doc.id][prevDS];
+      if(yest==='R'&&yestTeam){
+        if(!S.teams[doc.id]) S.teams[doc.id]={};
+        S.teams[doc.id][ds]=yestTeam;
+        takenTeams.add(yestTeam);
+      }
+    }
+  });
+  // Second pass: new block starts — avoid recent teams
+  rDocs.forEach(doc=>{
+    if(S.teams[doc.id]&&S.teams[doc.id][ds]) return;
+    const recent=new Set((state[doc.id]&&state[doc.id].teamHistory||[]).slice(-3));
+    let chosen=null;
+    for(let t=1;t<=13;t++){if(!takenTeams.has(t)&&!recent.has(t)){chosen=t;break;}}
+    if(!chosen){for(let t=1;t<=13;t++){if(!takenTeams.has(t)){chosen=t;break;}}}
+    if(!chosen) chosen=13;
+    if(!S.teams[doc.id]) S.teams[doc.id]={};
+    S.teams[doc.id][ds]=chosen;
+    takenTeams.add(chosen);
+    if(state[doc.id]){
+      state[doc.id].teamHistory.push(chosen);
+      if(state[doc.id].teamHistory.length>4) state[doc.id].teamHistory.shift();
+    }
+  });
+}
+
+function updateGenButton(){
+  const year=parseInt(document.getElementById('yr-sel').value)||S.ui.year;
+  const q=parseInt(document.getElementById('q-sel').value)||S.ui.quarter;
+  const qKey=`${year}-${q}`;
+  const exists=S.cycleStarts[qKey]&&S.cycleStarts[qKey].generated;
+  const btn=document.getElementById('gen-btn');
+  if(!btn) return;
+  if(exists){
+    btn.textContent='🔄 Regenerate Schedule';
+    btn.className='btn btn-warn';
+  } else {
+    btn.textContent='⚡ Generate Schedule';
+    btn.className='btn btn-p';
+  }
+}
+
+function tryGenerateQuarter(){
+  const year=parseInt(document.getElementById('yr-sel').value)||S.ui.year;
+  const q=parseInt(document.getElementById('q-sel').value)||S.ui.quarter;
+  const qKey=`${year}-${q}`;
+  const exists=S.cycleStarts[qKey]&&S.cycleStarts[qKey].generated;
+  if(exists){
+    showModal(
+      '🔄 Regenerate Schedule?',
+      `<div style="font-size:14px;line-height:1.6">
+        <p><strong>This will replace the existing Q${q} ${year} schedule.</strong></p>
+        <p>Any manual edits you've made will be lost. The schedule will be rebuilt from scratch using current requests and preferences.</p>
+        <p style="color:#a85800;font-weight:600">This cannot be undone.</p>
+      </div>`,
+      'Yes, Regenerate',
+      ()=>{
+        document.getElementById('modal').style.display='none';
+        generateQuarter();
+      }
+    );
+  } else {
+    generateQuarter();
+  }
+}
+function updateQuarterInfo(){
+  const year=parseInt(document.getElementById('yr-sel').value);
+  const q=parseInt(document.getElementById('q-sel').value);
+  S.ui.year=year; S.ui.quarter=q;
+  const r=quarterRange(year,q);
+  document.getElementById('quarter-info').innerHTML=
+    `Quarter ${q} · ${monN(r.months[0])} ${r.start.getDate()} – ${monN(r.months[2])} ${r.end.getDate()}, ${year} (${Math.floor((r.end-r.start)/86400000)+1} days)`;
+  updateGenButton();
+  renderSchedule();
+}
+function filterSchedule(){
+  S.ui.year=parseInt(document.getElementById('yr-sel').value);
+  S.ui.quarter=parseInt(document.getElementById('q-sel').value);
+  renderSchedule();
+}
+
+// ════════════════════════════════════════════════════════
+//  REQUEST HONORING RATE
+//  Returns a doc's ratio of honored requests (0–1).
+//  Used to prioritize fairness during schedule generation.
+// ════════════════════════════════════════════════════════
+function getHonoringRate(docId, upToYear){
+  let total=0, honored=0;
+  const sched=S.sched[docId]||{};
+  Object.entries(S.requests).forEach(([qKey,qReqs])=>{
+    if(qKey.endsWith('_submitted')) return;
+    const [y]=qKey.split('-').map(Number);
+    if(upToYear && y>upToYear) return;
+    const entry=qReqs[docId];
+    if(!entry) return;
+    const allDates=Array.isArray(entry)?entry:[...(entry.required||[]),...(entry.optional||[])];
+    allDates.forEach(ds=>{
+      total++;
+      const sh=sched[ds]||'OFF';
+      if(sh==='OFF'||sh==='H') honored++;
+    });
+  });
+  if(total===0) return 1.0;  // no requests = treat as fully honored (don't deprioritize)
+  return honored/total;
+}
+
+// Get peer comparison stats for honoring rates across the group
+function getHonoringStats(year){
+  const activeDocs2=activeDocs(year).filter(d=>d.type==='standard'&&d.active);
+  const rates=activeDocs2.map(doc=>({doc, rate:getHonoringRate(doc.id, year), docId:doc.id}))
+    .filter(r=>{ // only include docs who have submitted requests
+      return Object.values(S.requests).some(qReqs=>{
+        if(!qReqs||typeof qReqs!=='object') return false;
+        return qReqs[r.docId]&&(Array.isArray(qReqs[r.docId])
+          ?(qReqs[r.docId].length>0)
+          :((qReqs[r.docId].required||[]).length+(qReqs[r.docId].optional||[]).length>0));
+      });
+    });
+  rates.sort((a,b)=>a.rate-b.rate);
+  return rates;
+}
+function saveAnnouncement(){
+  S.announcement=(document.getElementById('admin-announcement')?.value||'').trim();
+  saveData();
+}
+function loadAnnouncement(){
+  const ta=document.getElementById('admin-announcement');
+  if(ta) ta.value=S.announcement||'';
+}
+
+// ════════════════════════════════════════════════════════
+//  FAIRNESS DASHBOARD
+// ════════════════════════════════════════════════════════
+function recheckFairness(){
+  const year=S.ui.year, q=S.ui.quarter;
+  const days=quarterDays(year,q);
+  const qKey=`${year}-${q}`;
+  const requests=S.requests[qKey]||{};
+
+  // Only rotation docs (standard type, active, started before quarter end)
+  const docs=activeDocs(year).filter(d=>
+    d.type==='standard' && d.active &&
+    (!d.startDate||d.startDate<=dstrD(days[days.length-1]))
+  );
+
+  if(docs.length===0){
+    document.getElementById('fairness-content').innerHTML=
+      '<div class="tx-mu tx-sm">Generate a schedule first.</div>';
+    document.getElementById('fairness-panel').style.display='block';
+    return;
+  }
+
+  // ── Per-doc stats ──
+  const stats=docs.map(doc=>{
+    const fte=doc.fte||1.0;
+    let total=0, swing=0, weekends=0;
+    days.forEach(d=>{
+      const ds=dstrD(d);
+      const sh=(S.sched[doc.id]&&S.sched[doc.id][ds])||'OFF';
+      if(sh==='R'||sh==='S'||sh==='H') total++;
+      if(sh==='S'||sh==='H') swing++;
+      if((sh==='R'||sh==='S'||sh==='H')&&isWeekend(d)) weekends++;
+    });
+    // Check required request conflicts
+    const reqEntry=requests[doc.id];
+    const required=Array.isArray(reqEntry)?[]:((reqEntry&&reqEntry.required)||[]);
+    let unmetRequired=0;
+    required.forEach(ds=>{
+      const sh=(S.sched[doc.id]&&S.sched[doc.id][ds])||'OFF';
+      if(sh==='R'||sh==='S') unmetRequired++;
+    });
+    // FTE-normalised values: what we'd expect a 1.0 FTE doc to have if this doc were full-time
+    // Multiply actual stats by (1/fte) to get FTE-equivalent, then compare to full-time group
+    const normTotal  = fte===1.0 ? total   : total/fte;
+    const normSwing  = fte===1.0 ? swing   : swing/fte;
+    const normWkend  = fte===1.0 ? weekends: weekends/fte;
+    return {doc, fte, total, swing, weekends, unmetRequired, normTotal, normSwing, normWkend};
+  });
+
+  // ── Group stats using FTE-normalised values (only full-time docs set the baseline) ──
+  // Use 1.0 FTE docs to compute the expected full-time counts
+  const fteDocs=stats.filter(s=>s.fte===1.0);
+  const refStats=fteDocs.length>=3 ? fteDocs : stats; // fall back to all if few FT
+
+  const normTotals=refStats.map(s=>s.normTotal);
+  const normSwings=refStats.map(s=>s.normSwing);
+  const normWkends=refStats.map(s=>s.normWkend);
+
+  function avg(arr){return arr.reduce((a,b)=>a+b,0)/arr.length}
+  function std(arr,mean){return Math.sqrt(arr.map(v=>(v-mean)**2).reduce((a,b)=>a+b,0)/arr.length)}
+
+  const avgNormTotal=avg(normTotals);
+  const avgNormSwing=avg(normSwings);
+  const avgNormWkend=avg(normWkends);
+
+  const stdNormTotal=std(normTotals,avgNormTotal);
+  const stdNormSwing=std(normSwings,avgNormSwing);
+  const stdNormWkend=std(normWkends,avgNormWkend);
+
+  const TOTAL_THRESH=Math.max(3,stdNormTotal*1.5);
+  const SWING_THRESH=Math.max(2,stdNormSwing*1.5);
+  const WKEND_THRESH=Math.max(2,stdNormWkend*1.5);
+
+  // ── Flag collection ──
+  // For each doc, compare their EXPECTED (FTE-prorated) to group average
+  const flags=[];
+  stats.forEach(({doc,fte,total,swing,weekends,unmetRequired,normTotal,normSwing,normWkend})=>{
+    const docFlags=[];
+    // Expected for this doc based on FTE
+    const expTotal=Math.round(avgNormTotal*fte);
+    const expSwing=Math.round(avgNormSwing*fte);
+    const expWkend=Math.round(avgNormWkend*fte);
+    // Use normalised comparison for fairness (compare to FTE-normalised group)
+    const fteLabel=fte<1.0?` (${fte} FTE, expected ~${expTotal})`:'';
+    if(normTotal>avgNormTotal+TOTAL_THRESH)
+      docFlags.push({msg:`${total} total shifts${fteLabel} — high (avg ${expTotal} for ${fte} FTE)`,level:'warn'});
+    if(normTotal<avgNormTotal-TOTAL_THRESH)
+      docFlags.push({msg:`${total} total shifts${fteLabel} — low (avg ${expTotal} for ${fte} FTE)`,level:'warn'});
+    if(normSwing>avgNormSwing+SWING_THRESH)
+      docFlags.push({msg:`${swing} swing shifts (expected ~${expSwing}) — high`,level:'warn'});
+    if(normSwing<avgNormSwing-SWING_THRESH&&normSwing<1.5)
+      docFlags.push({msg:`${swing} swing shifts (expected ~${expSwing}) — low`,level:'warn'});
+    if(normWkend>avgNormWkend+WKEND_THRESH)
+      docFlags.push({msg:`${weekends} weekend shifts (expected ~${expWkend}) — high`,level:'warn'});
+    if(normWkend<avgNormWkend-WKEND_THRESH)
+      docFlags.push({msg:`${weekends} weekend shifts (expected ~${expWkend}) — low`,level:'info'});
+    if(unmetRequired>0)
+      docFlags.push({msg:`${unmetRequired} REQUIRED request${unmetRequired>1?'s':''} NOT honored`,level:'error'});
+    if(docFlags.length>0) flags.push({doc,flags:docFlags});
+  });
+
+  // ── Render ──
+  const panel=document.getElementById('fairness-content');
+  const fteNote=fteDocs.length<stats.length
+    ? `<span class="tx-mu"> · Part-time providers compared at their FTE-prorated expected values</span>`:'';
+  if(flags.length===0){
+    panel.innerHTML=`
+      <div style="background:#dff5e6;border:1px solid #a8d8b8;border-radius:4px;padding:12px 16px;color:#0a7044;font-weight:600">
+        ✓ No fairness issues detected for Q${q} ${year}. Distribution looks good!
+      </div>
+      <div class="tx-xs tx-mu" style="margin-top:6px">
+        Group stats (full-time avg): ${avgNormTotal.toFixed(1)} total · ${avgNormSwing.toFixed(1)} swing · ${avgNormWkend.toFixed(1)} weekend shifts/provider${fteNote}
+      </div>`;
+  } else {
+    let html=`
+      <div class="tx-xs tx-mu" style="margin-bottom:8px">
+        Flagged ${flags.length} of ${docs.length} providers ·
+        Full-time avg: ${avgNormTotal.toFixed(1)} total · ${avgNormSwing.toFixed(1)} swing · ${avgNormWkend.toFixed(1)} weekend${fteNote}
+      </div>
+      <table class="htbl" style="font-size:12px">
+        <thead><tr><th>Provider</th><th>FTE</th><th>Issues</th></tr></thead><tbody>`;
+    flags.sort((a,b)=>{
+      const aErr=a.flags.some(f=>f.level==='error')?0:1;
+      const bErr=b.flags.some(f=>f.level==='error')?0:1;
+      return aErr-bErr||a.doc.last.localeCompare(b.doc.last);
+    }).forEach(({doc,flags:flist})=>{
+      html+=`<tr><td><strong>${dname(doc)}</strong></td><td class="tx-mu">${doc.fte}</td><td>`;
+      flist.forEach(f=>{
+        const bg=f.level==='error'?'#fde2e2':f.level==='warn'?'#fff5dc':'#eef5fb';
+        const col=f.level==='error'?'#a01918':f.level==='warn'?'#a85800':'#1b4d8f';
+        const icon=f.level==='error'?'⚠':f.level==='warn'?'△':'ℹ';
+        html+=`<div style="background:${bg};color:${col};border-radius:3px;padding:3px 8px;margin-bottom:3px;font-size:11px;font-weight:600">${icon} ${f.msg}</div>`;
+      });
+      html+='</td></tr>';
+    });
+    html+='</tbody></table>';
+    panel.innerHTML=html;
+  }
+  document.getElementById('fairness-panel').style.display='block';
+  toast(`Fairness check: ${flags.length} flag${flags.length!==1?'s':''}`,flags.length===0?'success':'info');
+}
+
+// ════════════════════════════════════════════════════════
+//  MAIN SCHEDULE GRID (Excel-like)
+// ════════════════════════════════════════════════════════
+function renderSchedule(){
+  const yr=parseInt(document.getElementById('yr-sel').value)||S.ui.year;
+  const qt=parseInt(document.getElementById('q-sel').value)||S.ui.quarter;
+  S.ui.year=yr; S.ui.quarter=qt;
+  const year=yr, q=qt;
+  const days=quarterDays(year,q);
+  const today=dstrD(new Date());
+  const filterText=(document.getElementById('filter-name')?.value||'').toLowerCase().trim();
+
+  const allDocs=activeDocs(year);
+  const consultDocs=allDocs.filter(d=>d.type==='weekday-only');
+  const nocturnistDocs=allDocs.filter(d=>d.type==='nocturnist').sort((a,b)=>a.last.localeCompare(b.last));
+  let rotationDocs=allDocs.filter(d=>d.type!=='weekday-only' && d.type!=='nocturnist');
+  const fConsult=filterText?consultDocs.filter(d=>dname(d).toLowerCase().includes(filterText)):consultDocs;
+  const fRotation=filterText?rotationDocs.filter(d=>dname(d).toLowerCase().includes(filterText)):rotationDocs;
+  const fNocturnist=filterText?nocturnistDocs.filter(d=>dname(d).toLowerCase().includes(filterText)):nocturnistDocs;
+
+  if(fConsult.length===0 && fRotation.length===0 && fNocturnist.length===0){
+    document.getElementById('sheet-wrap').innerHTML='<div style="padding:40px;text-align:center;color:var(--ink3)">No physicians match filter.</div>';
+    return;
+  }
+
+  // Month boundary computation
+  let currentMonth=-1; let monthCells=[];
+  days.forEach((d,i)=>{
+    if(d.getMonth()!==currentMonth){
+      monthCells.push({month:d.getMonth(),start:i,span:1,end:i});
+      currentMonth=d.getMonth();
+    } else { monthCells[monthCells.length-1].span++; monthCells[monthCells.length-1].end=i; }
+  });
+  // No ∑ summary columns — monthly counts shown in qtot panel per-row instead
+  const monthEndIdx=new Set();  // empty: no summary cols inserted
+
+  // ─── HEADER ───
+  // Each month block = month-days + 1 summary col. Plus 1 name col + 1 TOTAL col at end.
+  let html='<table class="sheet"><thead>';
+  html+='<tr><th class="name-col" rowspan="2">PHYSICIAN</th>';
+  monthCells.forEach((m,mi)=>{
+    html+=`<th colspan="${m.span}" class="${mi>0?'month-sep':''}" style="background:#dfe6ec;font-size:11px;text-transform:uppercase">${monN(m.month)} ${year}</th>`;
+  });
+  html+='</tr><tr>';
+  days.forEach((d,i)=>{
+    const ds=dstrD(d);
+    const cls=[];
+    if(isWeekend(d)) cls.push('weekend');
+    if(ds===today) cls.push('today');
+    if(isHol(ds,year)) cls.push('holiday');
+    if(i>0 && d.getDate()===1) cls.push('month-sep');
+    // Date header is clickable to highlight the column
+    html+=`<th class="${cls.join(' ')} col-hdr" data-date="${ds}" onclick="toggleColHighlight('${ds}')" title="Click to highlight column · ${d.toDateString()}">${d.getDate()}<br><span style="font-weight:400;font-size:9px;color:var(--ink3)">${['S','M','T','W','T','F','S'][d.getDay()]}</span></th>`;
+    if(monthEndIdx.has(i)){
+      html+='<th class="month-sum-hdr" title="Monthly total">∑</th>';
+    }
+  });
+  html+='</tr></thead><tbody>';
+
+  const qKey=`${year}-${q}`;
+  const requests=S.requests[qKey]||{};
+  function getDocReqs(docId){
+    const r=requests[docId];
+    if(!r) return {all:new Set(),req:new Set()};
+    if(Array.isArray(r)) return {all:new Set(r),req:new Set()};
+    const all=new Set([...(r.required||[]),...(r.optional||[])]);
+    return {all,req:new Set(r.required||[])};
+  }
+
+  const selRow=S.ui.selectedRow||null;
+  // selectedCols is stored as Set but JSON.parse turns it into {} — always coerce
+  if(!(S.ui.selectedCols instanceof Set)){
+    S.ui.selectedCols = S.ui.selectedCols
+      ? new Set(Object.keys(S.ui.selectedCols))
+      : new Set();
+  }
+  const selCols=S.ui.selectedCols;
+
+  const qtotRows = [];  // collects per-row totals for the overlay
+  function buildRow(doc,isConsult){
+    const {all:docReqs,req:docRequired}=getDocReqs(doc.id);
+    // Per-month counts for summary column
+    const mc={}; monthCells.forEach(m=>{mc[m.month]={r:0,s:0};});
+    let qTotalR=0, qTotalS=0;
+    days.forEach(d=>{
+      const sh=(S.sched[doc.id]&&S.sched[doc.id][dstrD(d)])||'OFF';
+      const m=d.getMonth();
+      if(mc[m]){
+        if(sh==='R'){mc[m].r++;qTotalR++;}
+        if(sh==='S'||sh==='H'){mc[m].s++;qTotalS++;}
+      }
+    });
+    const isHighlighted = selRow===doc.id;
+    const rowCls=isHighlighted?'row-hl':'';
+    let row=`<tr class="${rowCls}" id="row-${doc.id}">`;
+    // Name cell: click to toggle row highlight WITHOUT opening detail
+    row+=`<td class="name-col${isHighlighted?' name-col-hl':''}" onclick="toggleRowHighlight('${doc.id}')" title="Click to highlight · Double-click to open"ondblclick="navToDoc('${doc.id}')">${isConsult?'<span class="consult-badge">CONSULT</span>':''}${dname(doc)}</td>`;
+    days.forEach((d,i)=>{
+      const ds=dstrD(d);
+      const sh=(S.sched[doc.id]&&S.sched[doc.id][ds])||'OFF';
+      const isW=isWeekend(d);
+      const isT=ds===today;
+      const isReq=docReqs.has(ds);
+      const isReqRequired=docRequired.has(ds);
+      const conflict=isReq&&(sh==='R'||sh==='S');
+      const isColHl=selCols.has(ds);
+      const cls=['cell','cell-'+sh];
+      if(isW) cls.push('weekend');
+      if(isT) cls.push('today');
+      if(isReq) cls.push('has-request');
+      if(conflict) cls.push(isReqRequired?'cell-REQCONFLICT':'cell-CONFLICT');
+      if(i>0 && d.getDate()===1) cls.push('month-sep');
+      if(isHighlighted) cls.push('row-hl-cell');
+      if(isColHl) cls.push('col-hl');
+      const label=sh==='OFF'?'':sh;
+      const tip=(isReqRequired&&conflict?'⚠ REQUIRED OFF but scheduled! ':isReq?'Requested OFF · ':'')+(sh==='OFF'?'off':sh);
+      // cellClick now cycles, data-shift is the current value
+      row+=`<td class="${cls.join(' ')}" data-doc="${doc.id}" data-date="${ds}" data-shift="${sh}" onclick="cycleCell('${doc.id}','${ds}')" title="${tip}">${label}</td>`;
+      if(monthEndIdx.has(i)){
+        const m=mc[d.getMonth()];
+        row+=`<td class="month-sum-cell"><span class="msc-r">R${m.r}</span><span class="msc-s">S${m.s}</span></td>`;
+      }
+    });
+    // Store qtot data for overlay
+    const qTotal=qTotalR+qTotalS;
+    const target=Math.round(doc.fte*S.cfg.annual/4);
+    const qColor=qTotal>target+3?'#a01918':qTotal<target-3?'#a85800':'#0a7044';
+    // Monthly breakdown for qtot panel (replaces removed ∑ columns)
+    const monthlyBreakdown=monthCells.map(m=>`${mc[m.month].r}R ${mc[m.month].s}S`);
+    qtotRows.push({docId:doc.id, qTotal, qTotalR, qTotalS, target, qColor, monthlyBreakdown});
+    row+='</tr>';
+    return row;
+  }
+
+  // nCols = day columns only (no summary cols)
+  const nCols=days.length;
+  if(fConsult.length>0){
+    html+=`<tr><td class="section-hdr consult-hdr" colspan="${nCols+1}">▶ Consult Team</td></tr>`;
+    fConsult.forEach(doc=>{ html+=buildRow(doc,true); });
+  }
+  if(fRotation.length>0){
+    if(fConsult.length>0){
+      html+=`<tr><td class="section-hdr rounds-hdr" colspan="${nCols+1}">▶ Rounding Physicians (${S.cfg.R})</td></tr>`;
+    }
+    fRotation.forEach(doc=>{ html+=buildRow(doc,false); });
+  }
+  if(fNocturnist.length>0){
+    html+=`<tr><td class="section-hdr noct-hdr" colspan="${nCols+1}">▶ Nocturnists</td></tr>`;
+    fNocturnist.forEach(doc=>{ html+=buildRow(doc,false); });
+  }
+  html+='</tbody>';
+
+  // Coverage rows
+  html+='<tfoot>';
+  const targetR=S.cfg.R+consultDocs.length;
+  html+='<tr class="cov"><td class="name-col">ROUNDERS</td>';
+  let covRTotal=0;
+  days.forEach((d,i)=>{
+    const ds=dstrD(d);
+    const v=allDocs.filter(doc=>S.sched[doc.id]&&S.sched[doc.id][ds]==='R').length;
+    covRTotal+=v;
+    let cls='cell';
+    if(v===targetR) cls+=' cov-ok'; else if(v<targetR-1) cls+=' cov-bad'; else cls+=' cov-low';
+    if(i>0 && d.getDate()===1) cls+=' month-sep';
+    const isColHl=selCols.has(ds);
+    if(isColHl) cls+=' col-hl';
+    html+=`<td class="${cls}">${v}</td>`;
+    if(monthEndIdx.has(i)) html+='<td class="month-sum-cell"></td>';
+  });
+  html+='</tr><tr class="cov"><td class="name-col">SWING</td>';
+  let covSTotal=0;
+  days.forEach((d,i)=>{
+    const ds=dstrD(d);
+    const v=allDocs.filter(doc=>S.sched[doc.id]&&(S.sched[doc.id][ds]==='S'||S.sched[doc.id][ds]==='H')).length;
+    covSTotal+=v;
+    let cls='cell';
+    if(v===S.cfg.S) cls+=' cov-ok'; else if(v<S.cfg.S-1) cls+=' cov-bad'; else cls+=' cov-low';
+    if(i>0 && d.getDate()===1) cls+=' month-sep';
+    const isColHl=selCols.has(ds);
+    if(isColHl) cls+=' col-hl';
+    html+=`<td class="${cls}">${v}</td>`;
+    if(monthEndIdx.has(i)) html+='<td class="month-sum-cell"></td>';
+  });
+  html+='</tr></tfoot></table>';
+
+  document.getElementById('sheet-wrap').innerHTML=html;
+  // Build the quarter-total overlay panel (replaces broken CSS sticky approach)
+  buildQtotOverlay(qtotRows, q);
+}
+
+
+
+// ════════════════════════════════════════════════════════
+//  QUARTER TOTAL PANEL — two-table layout
+//  Main table scrolls horizontally; right panel is fixed-width,
+//  heights synced via JS, vertical scroll locked together.
+// ════════════════════════════════════════════════════════
+function buildQtotOverlay(qtotRows, q){
+  const wrap=document.getElementById('sheet-wrap');
+  const panel=document.getElementById('sheet-qtot-panel');
+  const qtotTable=document.getElementById('qtot-table');
+  if(!wrap||!panel||!qtotTable) return;
+
+  const mainTable=wrap.querySelector('table');
+  if(!mainTable){ panel.style.display='none'; return; }
+
+  // Build matching rows for the right-panel table
+  // Walk all rows in main table thead, tbody, tfoot
+  let html='<thead>';
+  const theadRows=mainTable.querySelectorAll('thead tr');
+  theadRows.forEach((tr,i)=>{
+    if(i===0){
+      // First header row: single tall cell spanning all header rows
+      html+=`<tr><th class="qtot-hdr-cell" rowspan="${theadRows.length}" style="vertical-align:middle">Q${q}<br><span style="font-size:9px;font-weight:400;opacity:.8">Total</span></th></tr>`;
+    }
+    // subsequent header rows already covered by rowspan
+  });
+  html+='</thead><tbody>';
+
+  const tbodyRows=mainTable.querySelectorAll('tbody tr');
+  tbodyRows.forEach((tr,i)=>{
+    const docId=tr.querySelector('td[data-doc]')?.getAttribute('data-doc');
+    const isEven=(i%2===1);
+    if(!docId){
+      // Section header or spacer row
+      html+=`<tr><td class="qtot-data-cell section"></td></tr>`;
+      return;
+    }
+    const row=qtotRows.find(r=>r.docId===docId);
+    const isHl=S.ui.selectedRow===docId;
+    const cls='qtot-data-cell'+(isEven?' even':'')+(isHl?' hl':'');
+    if(row){
+      const mTip=row.monthlyBreakdown?row.monthlyBreakdown.join(' | '):'';
+      html+=`<tr><td class="${cls}" title="Q${q} total: ${row.qTotalR}R + ${row.qTotalS}S = ${row.qTotal} (target ~${row.target})&#10;${mTip}">
+        <span style="color:${row.qColor};font-weight:700;font-size:12px;display:block;line-height:1.2">${row.qTotal}</span>
+        <span style="color:#666;font-size:9px;display:block;line-height:1.2">${row.qTotalR}R ${row.qTotalS}S</span>
+      </td></tr>`;
+    } else {
+      html+=`<tr><td class="${cls}"></td></tr>`;
+    }
+  });
+
+  html+='</tbody><tfoot>';
+  const tfootRows=mainTable.querySelectorAll('tfoot tr');
+  tfootRows.forEach((tr,i)=>{
+    html+=`<tr><td class="qtot-data-cell cov"></td></tr>`;
+  });
+  html+='</tfoot>';
+
+  qtotTable.innerHTML=html;
+
+  // Keep invisible until heights synced — prevents blank blue column flash
+  panel.style.visibility='hidden';
+  panel.style.display='';
+  panel.style.overflowY='hidden';
+
+  function showAfterSync(){
+    syncQtotHeights();
+    panel.style.visibility='visible';
+  }
+  requestAnimationFrame(function(){
+    requestAnimationFrame(function(){ showAfterSync(); });
+  });
+  setTimeout(showAfterSync, 80);
+  setTimeout(showAfterSync, 250);
+
+  wrap.onscroll=function(){
+    // Sync vertical scroll — panel is absolute so doesn't scroll on its own
+    panel.scrollTop=wrap.scrollTop;
+  };
+}
+
+function syncQtotHeights(){
+  const wrap=document.getElementById('sheet-wrap');
+  const panel=document.getElementById('sheet-qtot-panel');
+  if(!wrap||!panel) return;
+  const mainTable=wrap.querySelector('table');
+  const qtotTable=panel.querySelector('table');
+  if(!mainTable||!qtotTable) return;
+
+  // Sync thead height
+  const mainTheadRows=mainTable.querySelectorAll('thead tr');
+  const qtotTheadCell=qtotTable.querySelector('thead th');
+  if(mainTheadRows.length&&qtotTheadCell){
+    let totalH=0;
+    mainTheadRows.forEach(tr=>{ totalH+=tr.getBoundingClientRect().height; });
+    qtotTheadCell.style.height=totalH+'px';
+    qtotTheadCell.style.minHeight=totalH+'px';
+  }
+
+  // Sync tbody rows
+  const mainTbodyRows=mainTable.querySelectorAll('tbody tr');
+  const qtotTbodyRows=qtotTable.querySelectorAll('tbody tr');
+  mainTbodyRows.forEach((tr,i)=>{
+    if(qtotTbodyRows[i]){
+      const h=tr.getBoundingClientRect().height;
+      qtotTbodyRows[i].style.height=h+'px';
+      const td=qtotTbodyRows[i].querySelector('td');
+      if(td) td.style.height=h+'px';
+    }
+  });
+
+  // Sync tfoot rows
+  const mainTfootRows=mainTable.querySelectorAll('tfoot tr');
+  const qtotTfootRows=qtotTable.querySelectorAll('tfoot tr');
+  mainTfootRows.forEach((tr,i)=>{
+    if(qtotTfootRows[i]){
+      const h=tr.getBoundingClientRect().height;
+      qtotTfootRows[i].style.height=h+'px';
+      const td=qtotTfootRows[i].querySelector('td');
+      if(td) td.style.height=h+'px';
+    }
+  });
+}
+
+
+
+function toggleRowHighlight(docId){
+  S.ui.selectedRow = (S.ui.selectedRow===docId) ? null : docId;
+  renderSchedule();
+}
+function toggleColHighlight(ds){
+  if(!(S.ui.selectedCols instanceof Set)) S.ui.selectedCols=new Set();
+  if(S.ui.selectedCols.has(ds)) S.ui.selectedCols.delete(ds);
+  else S.ui.selectedCols.add(ds);
+  renderSchedule();
+}
+
+// ── Fill mode (Fill R / Fill S / Fill OFF buttons) ─────
+function setShiftMode(mode){
+  S.ui.fillMode=mode;
+  document.getElementById('fill-mode-label').textContent =
+    mode ? `Fill mode: ${mode} — click cells to apply` : 'Click cell to cycle R→S→N→OFF · Double-click name to open';
+  ['R','S','OFF','none'].forEach(m=>{
+    const btn=document.getElementById('m-fill-'+(m==='none'?'none':m.toLowerCase()));
+    if(btn) btn.classList.remove('btn-p');
+  });
+  if(mode){
+    const btn=document.getElementById('m-fill-'+mode.toLowerCase());
+    if(btn) btn.classList.add('btn-p');
+  }
+}
+
+// ── Cell click: cycles R→S→N→OFF, or applies fill mode ─
+const SHIFT_CYCLE=['R','S','N','OFF'];
+function cycleCell(docId,ds){
+  // If fill mode is active, apply it directly (no cycle)
+  if(S.ui.fillMode){
+    if(!S.sched[docId]) S.sched[docId]={};
+    S.sched[docId][ds]=S.ui.fillMode;
+    saveData();
+    renderSchedule();
+    return;
+  }
+  // Cycle through R → S → N → OFF → R
+  const cur=(S.sched[docId]&&S.sched[docId][ds])||'OFF';
+  const idx=SHIFT_CYCLE.indexOf(cur);
+  const next=SHIFT_CYCLE[(idx+1)%SHIFT_CYCLE.length];
+  if(!S.sched[docId]) S.sched[docId]={};
+  S.sched[docId][ds]=next;
+  saveData();
+  renderSchedule();
+}
+// Legacy cellClick kept for compatibility (now same as cycleCell)
+function cellClick(docId,ds){ cycleCell(docId,ds); }
+
+// ════════════════════════════════════════════════════════
+//  WEEKLY VIEW
+// ════════════════════════════════════════════════════════
+function wkStart(date){const d=new Date(date);d.setHours(0,0,0,0);d.setDate(d.getDate()-d.getDay());return d}
+function renderWeek(){
+  if(!S.ui.wkStart) S.ui.wkStart=wkStart(new Date());
+  const ws=S.ui.wkStart;
+  const we=addD(ws,6);
+  const today=dstrD(new Date());
+  document.getElementById('wk-title').textContent=
+    `${monAbbr(ws.getMonth())} ${ws.getDate()} – ${monAbbr(we.getMonth())} ${we.getDate()}, ${ws.getFullYear()}`;
+
+  const docs=activeDocs(ws.getFullYear());
+  let html='<div class="week-grid">';
+  for(let i=0;i<7;i++){
+    const d=addD(ws,i);
+    const ds=dstrD(d);
+    const isT=ds===today;
+    const isH=isHol(ds,d.getFullYear());
+    // Rounders with their team number
+    const rs=docs.filter(doc=>S.sched[doc.id]&&S.sched[doc.id][ds]==='R')
+      .map(doc=>({doc, team:(S.teams && S.teams[doc.id] && S.teams[doc.id][ds]) || 99}))
+      .sort((a,b)=>a.team-b.team || a.doc.last.localeCompare(b.doc.last));
+    const ss=docs.filter(doc=>S.sched[doc.id]&&(S.sched[doc.id][ds]==='S'||S.sched[doc.id][ds]==='H'))
+      .sort((a,b)=>a.last.localeCompare(b.last));
+    html+=`<div class="week-day"${isH?' style="background:#f8f3fe"':''}>
+      <div class="wd-hdr">${dayN(d)}</div>
+      <div class="wd-date${isT?' today':''}">${d.getDate()}</div>
+      ${isH?'<div style="font-size:10px;color:var(--H-tx);font-weight:600;margin-bottom:4px">🎄 Holiday</div>':''}
+      <div class="wd-section-tit r">Rounds 7a–5p (${rs.length})</div>
+      ${rs.map(({doc,team})=>`<div class="wd-name"><span class="team-num">${team<99?team:'—'}</span> ${dname(doc)}</div>`).join('')||'<div class="wd-name tx-mu">—</div>'}
+      <div class="wd-section-tit s">Swing 3p–1a (${ss.length})</div>
+      ${ss.map(d=>`<div class="wd-name">${dname(d)}</div>`).join('')||'<div class="wd-name tx-mu">—</div>'}
+    </div>`;
+  }
+  html+='</div>';
+  document.getElementById('wk-grid').innerHTML=html;
+}
+function chWeek(dir){S.ui.wkStart=addD(S.ui.wkStart||wkStart(new Date()),dir*7);renderWeek()}
+function goToToday(){S.ui.wkStart=wkStart(new Date());renderWeek()}
+
+// ════════════════════════════════════════════════════════
+//  PHYSICIAN: MY REQUESTS
+// ════════════════════════════════════════════════════════
+function renderMyRequestCal(){
+  const qKey=document.getElementById('myq-sel').value;
+  S.ui.requestQuarter=qKey;
+  const [y,q]=qKey.split('-').map(Number);
+  const days=quarterDays(y,q);
+  if(!S.requests[qKey]) S.requests[qKey]={};
+  // Ensure data structure: {required:[], optional:[]} (migrate from legacy [] if needed)
+  let entry=S.requests[qKey][S.ui.currentPhysId];
+  if(Array.isArray(entry)){
+    // Legacy: convert to optional
+    entry={required:[], optional:entry};
+    S.requests[qKey][S.ui.currentPhysId]=entry;
+  } else if(!entry || typeof entry !== 'object'){
+    entry={required:[], optional:[]};
+    S.requests[qKey][S.ui.currentPhysId]=entry;
+  }
+  if(!Array.isArray(entry.required)) entry.required=[];
+  if(!Array.isArray(entry.optional)) entry.optional=[];
+
+  const reqSet=new Set(entry.required);
+  const optSet=new Set(entry.optional);
+
+  // Update physician header names
+  updatePhysHeaders();
+  // Sync pickers to current physId
+  const reqPick=document.getElementById('phys-pick-req');
+  if(reqPick) reqPick.value=S.ui.currentPhysId;
+
+  const ss=document.getElementById('submit-status');
+  if(ss) ss.textContent='';
+
+  // Peer comparison banner — skip for strict 7on/7off providers
+  const peerBanner=document.getElementById('req-peer-banner');
+  if(peerBanner){
+    const curDocReq=byId(S.ui.currentPhysId);
+    const isStrictDoc=curDocReq&&curDocReq.preferences&&curDocReq.preferences.scheduleStyle==='strict';
+    if(isStrictDoc){
+      peerBanner.style.display='none';
+    } else {
+      const yr2=new Date().getFullYear();
+      const myRate=getHonoringRate(S.ui.currentPhysId, yr2);
+      const allRates=getHonoringStats(yr2);
+      if(allRates.length>1){
+        const myRatePct=Math.round(myRate*100);
+        const sorted=allRates.map(r=>r.rate);
+        const myRank=sorted.filter(r=>r<myRate).length+1;
+        const total=allRates.length;
+        const isLow=myRank<=Math.ceil(total/3);
+        const isMid=myRank<=Math.ceil(2*total/3);
+        // Low = green (priority = benefit), high = amber (informational)
+        const color=isLow?'#0a7044':isMid?'#1b4d8f':'#a85800';
+        const bg=isLow?'#dff5e6':isMid?'#eef5fb':'#fff5dc';
+        peerBanner.innerHTML=`<div style="background:${bg};border:1px solid ${color}44;border-radius:4px;padding:8px 12px;font-size:12px">
+          <strong style="color:${color}">📊 Your request honoring rate: ${myRatePct}%</strong>
+          <span style="color:#555;margin-left:8px">— Rank ${myRank} of ${total} providers</span>
+          ${isLow?`<span style="color:#0a7044;font-weight:600;margin-left:8px">✓ You have scheduling priority</span>`:''}
+          <div style="color:#777;font-size:11px;margin-top:3px">Providers with lower honoring rates receive higher priority when scheduling conflicts occur.</div>
+        </div>`;
+        peerBanner.style.display='block';
+      } else {
+        peerBanner.style.display='none';
+      }
+    }
+  }
+
+  // Check if provider has strict 7-on/7-off — grey out calendar if so
+  const curDocForReq=byId(S.ui.currentPhysId);
+  const isStrict=curDocForReq&&curDocForReq.preferences&&curDocForReq.preferences.scheduleStyle==='strict';
+  if(isStrict){
+    document.getElementById('my-req-cal').innerHTML='';
+    const statusEl=document.getElementById('active-phys-status');
+    if(statusEl) statusEl.textContent='';
+    // Show locked overlay
+    const calCard=document.getElementById('my-req-cal').closest('.card');
+    document.getElementById('my-req-cal').innerHTML=`
+      <div style="background:#f0f4f8;border:2px dashed #b8c8d8;border-radius:6px;padding:30px;text-align:center;color:#5a6a7a;margin-top:8px">
+        <div style="font-size:24px;margin-bottom:8px">🔒</div>
+        <div style="font-weight:700;font-size:14px;margin-bottom:6px">Strict 7-on / 7-off schedule</div>
+        <div style="font-size:12px;color:#7a8a9a">Time-off requests are not available for providers on a strict rotating schedule.<br>Contact your administrator to adjust individual days if needed.</div>
+      </div>`;
+    // Disable buttons
+    ['cnt-total','cnt-weekend'].forEach(id=>{
+      const el=document.getElementById(id);
+      if(el) el.style.opacity='.4';
+    });
+    document.querySelectorAll('#pg-myreq .btn-p, #pg-myreq input[type="radio"]').forEach(el=>el.disabled=true);
+    return;
+  }
+  // Re-enable if switching away from strict
+  document.querySelectorAll('#pg-myreq .btn-p, #pg-myreq input[type="radio"]').forEach(el=>el.disabled=false);
+  ['cnt-total','cnt-weekend'].forEach(id=>{
+    const el=document.getElementById(id);
+    if(el) el.style.opacity='';
+  });
+
+  const priorTotal = entry.required.length + entry.optional.length;
+  const statusEl=document.getElementById('active-phys-status');
+  if(statusEl) {
+    statusEl.textContent = priorTotal > 0
+      ? `${entry.required.length} required, ${entry.optional.length} optional dates saved for ${qKey}`
+      : `No dates saved yet for ${qKey}`;
+  }
+
+  // Group days by month
+  const byMonth={};
+  days.forEach(d=>{
+    const k=d.getMonth();
+    if(!byMonth[k]) byMonth[k]=[];
+    byMonth[k].push(d);
+  });
+
+  const today=new Date();today.setHours(0,0,0,0);
+
+  let html='';
+  Object.entries(byMonth).forEach(([mNum,monthDays])=>{
+    const m=parseInt(mNum);
+    html+=`<div class="month-title">${monN(m)} ${y}</div>`;
+    html+='<div class="req-cal">';
+    ['SUN','MON','TUE','WED','THU','FRI','SAT'].forEach(dn=>{
+      html+=`<div class="req-cal-hdr">${dn}</div>`;
+    });
+    const firstDow=monthDays[0].getDay();
+    for(let i=0;i<firstDow;i++) html+='<div class="req-cal-day empty"></div>';
+    monthDays.forEach(d=>{
+      const ds=dstrD(d);
+      const isW=isWeekend(d);
+      const isReq=reqSet.has(ds);
+      const isOpt=optSet.has(ds);
+      const isPast=d<today;
+      const cls=['req-cal-day'];
+      if(isW) cls.push('weekend');
+      if(isReq) cls.push('req-required');
+      if(isOpt) cls.push('req-optional');
+      if(isPast) cls.push('disabled');
+      html+=`<div class="${cls.join(' ')}" onclick="toggleRequestDate('${ds}')" data-date="${ds}">
+        <span class="day-num">${d.getDate()}</span>
+        ${isW?'<span style="font-size:8px;color:var(--ink3);text-transform:uppercase;letter-spacing:.5px">wknd</span>':''}
+        ${isReq?'<span style="font-size:8px;color:#a01918;font-weight:700;letter-spacing:.5px">REQ</span>':''}
+        ${isOpt?'<span style="font-size:8px;color:#806000;font-weight:700;letter-spacing:.5px">OPT</span>':''}
+      </div>`;
+    });
+    html+='</div>';
+  });
+
+  document.getElementById('my-req-cal').innerHTML=html;
+  renderMyRequestList();
+}
+
+function toggleRequestDate(ds){
+  const qKey=S.ui.requestQuarter;
+  if(!S.requests[qKey]) S.requests[qKey]={};
+  let entry=S.requests[qKey][S.ui.currentPhysId];
+  if(Array.isArray(entry)) entry={required:[],optional:entry};
+  if(!entry) entry={required:[],optional:[]};
+  if(!Array.isArray(entry.required)) entry.required=[];
+  if(!Array.isArray(entry.optional)) entry.optional=[];
+  S.requests[qKey][S.ui.currentPhysId]=entry;
+
+  const today=new Date();today.setHours(0,0,0,0);
+  const d=parseD(ds);
+  if(d<today){toast('Cannot select past dates','error');return}
+
+  // Get current selection type from radio
+  const typeEl = document.querySelector('input[name="req-type"]:checked');
+  const requestType = (typeEl && typeEl.value) || 'optional';
+
+  const inReq = entry.required.indexOf(ds);
+  const inOpt = entry.optional.indexOf(ds);
+
+  if(inReq >= 0 || inOpt >= 0){
+    // Date already selected - remove it
+    if(inReq >= 0) entry.required.splice(inReq, 1);
+    if(inOpt >= 0) entry.optional.splice(inOpt, 1);
+  } else {
+    // Adding new date - check limits
+    const total = entry.required.length + entry.optional.length;
+    const weekendCount = [...entry.required, ...entry.optional]
+      .filter(s=>isWeekend(parseD(s))).length;
+    const isW=isWeekend(d);
+    if(total >= S.cfg.maxReq){
+      toast(`Limit reached: ${S.cfg.maxReq} dates max per quarter`,'error');
+      return;
+    }
+    if(isW && weekendCount >= S.cfg.maxWeekendReq){
+      toast(`Weekend limit reached: ${S.cfg.maxWeekendReq} max`,'error');
+      return;
+    }
+    if(requestType === 'required'){
+      entry.required.push(ds);
+      entry.required.sort();
+    } else {
+      entry.optional.push(ds);
+      entry.optional.sort();
+    }
+  }
+  renderMyRequestCal();
+}
+
+function renderMyRequestList(){
+  const qKey=S.ui.requestQuarter;
+  const entry=S.requests[qKey]&&S.requests[qKey][S.ui.currentPhysId];
+  const req = (entry && entry.required) || [];
+  const opt = (entry && entry.optional) || (Array.isArray(entry) ? entry : []);
+
+  const all = [...req.map(d=>({ds:d,type:'required'})), ...opt.map(d=>({ds:d,type:'optional'}))]
+    .sort((a,b)=>a.ds.localeCompare(b.ds));
+
+  const total = req.length + opt.length;
+  const weekendCount = [...req, ...opt].filter(s=>isWeekend(parseD(s))).length;
+
+  const totalEl=document.getElementById('cnt-total');
+  totalEl.textContent=`${total} / ${S.cfg.maxReq}`;
+  totalEl.className='req-counter '+(total>=S.cfg.maxReq?'bad':total>=S.cfg.maxReq-3?'warn':'ok');
+
+  const wkEl=document.getElementById('cnt-weekend');
+  wkEl.textContent=`${weekendCount} / ${S.cfg.maxWeekendReq} wkend`;
+  wkEl.className='req-counter '+(weekendCount>=S.cfg.maxWeekendReq?'bad':weekendCount>=S.cfg.maxWeekendReq-1?'warn':'ok');
+
+  const out=document.getElementById('my-req-list');
+  if(all.length===0){
+    out.innerHTML='<div class="tx-mu tx-sm">No dates selected yet. Choose Required or Optional above, then click days on the calendar.</div>';
+    return;
+  }
+  out.innerHTML='<div class="req-list">'+all.map(({ds,type})=>{
+    const d=parseD(ds);
+    const isW=isWeekend(d);
+    const typeBadge = type==='required'
+      ? '<span class="req-type-badge req-type-required">REQUIRED</span>'
+      : '<span class="req-type-badge req-type-optional">OPTIONAL</span>';
+    return `<div class="req-list-item${isW?' weekend-req':''}">
+      <span>${typeBadge} <span class="req-date">${ds}</span> · ${d.toLocaleDateString('en-US',{weekday:'long',month:'short',day:'numeric'})}${isW?' <strong>(wknd)</strong>':''}</span>
+      <button class="btn btn-xs btn-d" onclick="toggleRequestDate('${ds}')">Remove</button>
+    </div>`;
+  }).join('')+'</div>';
+}
+
+function submitMyRequests(){
+  const qKey=S.ui.requestQuarter;
+  if(!S.requests[qKey]) S.requests[qKey]={};
+  const docId=S.ui.currentPhysId;
+  const doc=byId(docId);
+  const entry=S.requests[qKey][docId];
+  const req = (entry && entry.required) || [];
+  const opt = (entry && entry.optional) || (Array.isArray(entry) ? entry : []);
+  const total = req.length + opt.length;
+  if(!S.requests[qKey+'_submitted']) S.requests[qKey+'_submitted']={};
+  S.requests[qKey+'_submitted'][docId]=new Date().toISOString();
+  saveData();
+  document.getElementById('submit-status').textContent=`✓ Submitted ${total} dates (${req.length} required, ${opt.length} optional) for ${dname(doc)}`;
+  toast(`Submitted ${total} dates for ${dname(doc)}`,'success');
+}
+
+function clearMyRequests(){
+  if(!confirm('Clear all selected dates?')) return;
+  const qKey=S.ui.requestQuarter;
+  if(S.requests[qKey]) S.requests[qKey][S.ui.currentPhysId]={required:[],optional:[]};
+  renderMyRequestCal();
+  toast('Cleared','info');
+}
+
+// ════════════════════════════════════════════════════════
+//  ADMIN: REQUESTS OVERVIEW
+// ════════════════════════════════════════════════════════
+function renderRequestsAdmin(){
+  const qKey=document.getElementById('req-q-sel').value;
+  S.ui.adminReqQuarter=qKey;
+  const reqs=S.requests[qKey]||{};
+  const [y,q]=qKey.split('-').map(Number);
+  const docs=activeDocs(y,(q-1)*3);
+
+  // Helper to get required/optional from possibly-legacy entry
+  function unpack(entry){
+    if(!entry) return {required:[],optional:[]};
+    if(Array.isArray(entry)) return {required:[],optional:entry};
+    return {required:entry.required||[], optional:entry.optional||[]};
+  }
+
+  let totalReq=0,subCount=0,honored=0,unmet=0,unmetRequired=0;
+  docs.forEach(doc=>{
+    const {required,optional}=unpack(reqs[doc.id]);
+    const all=[...required,...optional];
+    if(all.length>0) subCount++;
+    totalReq+=all.length;
+    required.forEach(ds=>{
+      const sh=(S.sched[doc.id]&&S.sched[doc.id][ds])||'OFF';
+      if(sh==='OFF'||sh==='H') honored++;
+      else { unmet++; unmetRequired++; }
+    });
+    optional.forEach(ds=>{
+      const sh=(S.sched[doc.id]&&S.sched[doc.id][ds])||'OFF';
+      if(sh==='OFF'||sh==='H') honored++;
+      else unmet++;
+    });
+  });
+
+  document.getElementById('rs-total').textContent=totalReq;
+  document.getElementById('rs-sub-count').textContent=`from ${subCount} physician${subCount===1?'':'s'}`;
+  document.getElementById('rs-honored').textContent=honored;
+  document.getElementById('rs-unmet').textContent=unmet + (unmetRequired>0?` (⚠ ${unmetRequired} REQUIRED)`:'');
+  document.getElementById('rs-pending').textContent=docs.length-subCount;
+
+  let html='';
+  const docsWithReqs=docs.filter(doc=>{
+    const {required,optional}=unpack(reqs[doc.id]);
+    return required.length+optional.length>0;
+  }).sort((a,b)=>a.last.localeCompare(b.last));
+  if(docsWithReqs.length===0){
+    html='<div class="tx-mu tx-sm">No requests submitted for this quarter.</div>';
+  } else {
+    html='<table class="htbl"><thead><tr><th>Physician</th><th>Required</th><th>Optional</th><th>Weekend</th><th>Status</th><th>Dates</th></tr></thead><tbody>';
+    docsWithReqs.forEach(doc=>{
+      const {required,optional}=unpack(reqs[doc.id]);
+      const all=[...required,...optional];
+      const weekendCount=all.filter(s=>isWeekend(parseD(s))).length;
+      let docHonored=0,docUnmet=0,docUnmetReq=0;
+      required.forEach(ds=>{
+        const sh=(S.sched[doc.id]&&S.sched[doc.id][ds])||'OFF';
+        if(sh==='OFF'||sh==='H') docHonored++; else { docUnmet++; docUnmetReq++; }
+      });
+      optional.forEach(ds=>{
+        const sh=(S.sched[doc.id]&&S.sched[doc.id][ds])||'OFF';
+        if(sh==='OFF'||sh==='H') docHonored++; else docUnmet++;
+      });
+      let statusHtml;
+      if(docUnmet===0) statusHtml='<span style="color:#0a7044;font-weight:600">✓ All honored</span>';
+      else if(docUnmetReq>0) statusHtml=`<span style="color:#a01918;font-weight:700">⚠ ${docUnmetReq} REQUIRED unmet</span>`;
+      else statusHtml=`<span style="color:#a85800;font-weight:600">${docUnmet} optional unmet</span>`;
+
+      // Build colored date list with R/O indicators
+      const dateChips = [...required.map(d=>({ds:d,type:'R'})), ...optional.map(d=>({ds:d,type:'O'}))]
+        .sort((a,b)=>a.ds.localeCompare(b.ds))
+        .map(({ds,type})=>{
+          const sh=(S.sched[doc.id]&&S.sched[doc.id][ds])||'OFF';
+          const ok=sh==='OFF'||sh==='H';
+          const color = ok ? '#0a7044' : (type==='R' ? '#a01918' : '#a85800');
+          return `<span style="display:inline-block;margin-right:6px;color:${color}">${type}:${ds.slice(5)}${ok?'':'⚠'}</span>`;
+        }).join('');
+
+      html+=`<tr><td><strong>${dname(doc)}</strong></td><td>${required.length}</td><td>${optional.length}</td><td>${weekendCount}</td><td>${statusHtml}</td><td style="font-family:'JetBrains Mono',monospace;font-size:11px">${dateChips}</td></tr>`;
+    });
+    html+='</tbody></table>';
+  }
+  document.getElementById('admin-req-list').innerHTML=html;
+}
+
+// ════════════════════════════════════════════════════════
+//  PHYSICIAN: MY SCHEDULE
+// ════════════════════════════════════════════════════════
+function renderMySchedule(){
+  const docId=S.ui.currentPhysId;
+  const doc=byId(docId);
+  // Sync picker and header
+  const schdPick=document.getElementById('phys-pick-schd');
+  if(schdPick) schdPick.value=docId;
+  updatePhysHeaders();
+  const nameLbl=document.getElementById('my-name-lbl');
+  if(nameLbl) nameLbl.textContent=`Viewing as: ${dname(doc)}`;
+
+  // Read calendar view mode BEFORE innerHTML replacement (preserve user's selection)
+  const calModeEl=document.getElementById('my-cal-mode');
+  const calYearEl=document.getElementById('my-cal-year');
+  // If elements exist, use their current value; otherwise fall back to stored or default
+  if(calModeEl) S.ui.calMode=calModeEl.value;
+  if(calYearEl) S.ui.calYear=parseInt(calYearEl.value);
+  const calMode=S.ui.calMode||'next3';
+  const calYear=S.ui.calYear||new Date().getFullYear();
+
+  const today=new Date();today.setHours(0,0,0,0);
+  const yr=today.getFullYear();
+  const sched=S.sched[docId]||{};
+
+  // Year stats - total scheduled and completed YTD
+  let rCount=0,sCount=0,hCount=0;
+  let rDone=0,sDone=0,hDone=0;
+  Object.entries(sched).forEach(([ds,sh])=>{
+    if(!ds.startsWith(String(yr))) return;
+    const d=parseD(ds);
+    if(sh==='R'){rCount++; if(d<=today)rDone++;}
+    else if(sh==='S'){sCount++; if(d<=today)sDone++;}
+    else if(sh==='H'){hCount++; if(d<=today)hDone++;}
+  });
+  const total=rCount+sCount+hCount;
+  const totalDone=rDone+sDone+hDone;
+  const target=Math.round(doc.fte*S.cfg.annual);
+  const pct=Math.min(Math.round(total/target*100),100);
+
+  // Per-quarter S count
+  const qS=[0,0,0,0];
+  Object.entries(sched).forEach(([ds,sh])=>{
+    if(!ds.startsWith(String(yr))) return;
+    if(sh==='S'){
+      const m=parseInt(ds.split('-')[1])-1;
+      qS[Math.floor(m/3)]++;
+    }
+  });
+
+  // Monthly breakdown
+  const monthly=Array.from({length:12},()=>({r:0,s:0,h:0}));
+  Object.entries(sched).forEach(([ds,sh])=>{
+    if(!ds.startsWith(String(yr))) return;
+    const m=parseInt(ds.split('-')[1])-1;
+    if(sh==='R') monthly[m].r++;
+    else if(sh==='S') monthly[m].s++;
+    else if(sh==='H') monthly[m].h++;
+  });
+
+  // Pace calculation
+  const yearStart=new Date(yr,0,1);
+  const yearEnd=new Date(yr,11,31);
+  let calendarFrac;
+  if(today<yearStart) calendarFrac=0;
+  else if(today>yearEnd) calendarFrac=1;
+  else calendarFrac=(today-yearStart)/(yearEnd-yearStart);
+  const expected=Math.round(target*calendarFrac);
+  const paceDelta=totalDone-expected;
+  let paceHTML='';
+  if(doc.type!=='nocturnist'){
+    if(calendarFrac<=0) paceHTML='<div class="dc-pace tx-mu" style="margin-top:6px">Year not started</div>';
+    else if(calendarFrac>=1) paceHTML='<div class="dc-pace tx-mu" style="margin-top:6px">Year complete</div>';
+    else if(Math.abs(paceDelta)<=2) paceHTML=`<div class="dc-pace pace-ok" style="margin-top:6px">On pace · ${totalDone} done / ${expected} expected</div>`;
+    else if(paceDelta>2) paceHTML=`<div class="dc-pace pace-ahead" style="margin-top:6px">Ahead by ${paceDelta} · ${totalDone} done / ${expected} expected</div>`;
+    else paceHTML=`<div class="dc-pace pace-behind" style="margin-top:6px">Behind by ${-paceDelta} · ${totalDone} done / ${expected} expected</div>`;
+  }
+
+  // Request honoring peer comparison — skip for strict 7on/7off providers
+  let peerHTML='';
+  if(!doc.preferences||doc.preferences.scheduleStyle!=='strict'){
+    const myRate=getHonoringRate(docId, yr);
+    const allRates=getHonoringStats(yr);
+    if(allRates.length>1){
+      const myRatePct=Math.round(myRate*100);
+      const sorted=allRates.map(r=>r.rate);
+      const myRank=sorted.filter(r=>r<myRate).length+1;
+      const total=allRates.length;
+      const isLow=myRank<=Math.ceil(total/3);
+      const isMid=myRank<=Math.ceil(2*total/3);
+      // Low rank (most priority) = GREEN/BLUE — it's a benefit, not a warning
+      const color=isLow?'#0a7044':isMid?'#1b4d8f':'#a85800';
+      const bg=isLow?'#dff5e6':isMid?'#eef5fb':'#fff5dc';
+      const label=isLow?'You have one of the lowest honoring rates — your requests receive highest scheduling priority':
+                  isMid?'Your honoring rate is near the group average':
+                        'You have a high honoring rate — others with fewer honored requests may receive priority over yours';
+      const myEntry=allRates.find(r=>r.docId===docId);
+      if(myEntry!==undefined){
+        peerHTML=`<div style="background:${bg};border:1px solid ${color}33;border-radius:4px;padding:10px 14px;margin-top:8px">
+          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:${color};margin-bottom:4px">📊 Request Honoring — Peer Comparison</div>
+          <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+            <div>
+              <span style="font-size:22px;font-weight:700;color:${color}">${myRatePct}%</span>
+              <span style="font-size:11px;color:#666;margin-left:4px">of your requests honored</span>
+            </div>
+            <div style="font-size:11px;color:#555">
+              Rank <strong>${myRank}</strong> of <strong>${total}</strong> providers
+              ${isLow?'<span style="color:#0a7044;font-weight:700">✓ Priority status</span>':''}
+            </div>
+          </div>
+          <div style="font-size:11px;color:${color};margin-top:4px;font-style:italic">${label}</div>
+          <div style="font-size:10px;color:#888;margin-top:4px">Providers with fewer honored requests receive scheduling priority for future time-off requests.</div>
+        </div>`;
+      }
+    }
+  }
+  {
+    const monthlyReqStats=Array.from({length:12},()=>({requested:0,honored:0}));
+    let totalReq=0,totalHonored=0;
+    for(let q2=1;q2<=4;q2++){
+      const qk=`${yr}-${q2}`;
+      const reqEntry=S.requests[qk]&&S.requests[qk][docId];
+      if(!reqEntry) continue;
+      const allDates=Array.isArray(reqEntry)?reqEntry:[...(reqEntry.required||[]),...(reqEntry.optional||[])];
+      allDates.forEach(ds=>{
+        if(!ds.startsWith(String(yr))) return;
+        const mo=parseInt(ds.split('-')[1])-1;
+        const sh=(sched[ds])||'OFF';
+        const isHonored=sh==='OFF'||sh==='H';
+        monthlyReqStats[mo].requested++;
+        totalReq++;
+        if(isHonored){ monthlyReqStats[mo].honored++; totalHonored++; }
+      });
+    }
+    if(totalReq>0){
+      const yearPct=Math.round(totalHonored/totalReq*100);
+      const yearColor=yearPct>=90?'#0a7044':yearPct>=70?'#a85800':'#a01918';
+      const monthBadges=monthlyReqStats.map((ms,mi)=>{
+        if(ms.requested===0) return '';
+        const pct=Math.round(ms.honored/ms.requested*100);
+        const bg=pct===100?'#dff5e6':pct>=70?'#fff5dc':'#fde2e2';
+        const col=pct===100?'#0a7044':pct>=70?'#a85800':'#a01918';
+        return `<span style="background:${bg};color:${col};padding:2px 7px;border-radius:3px;font-size:10px;font-weight:600;white-space:nowrap">${monAbbr(mi)}: ${ms.honored}/${ms.requested} (${pct}%)</span>`;
+      }).filter(Boolean).join('');
+      reqHonoringHTML=`
+        <div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--line)">
+          <div class="tx-xs tx-mu" style="margin-bottom:4px;font-weight:700">📅 Time-Off Request Honoring</div>
+          <div style="font-size:18px;font-weight:700;color:${yearColor};margin-bottom:5px">${yearPct}% honored <span style="font-size:12px;font-weight:400;color:var(--ink3)">(${totalHonored}/${totalReq} days, ${yr} total)</span></div>
+          <div style="display:flex;flex-wrap:wrap;gap:4px">${monthBadges}</div>
+        </div>`;
+    }
+  }
+
+  let monthRows='';
+  for(let mi=0;mi<12;mi++){
+    const mv=monthly[mi];
+    const t=mv.r+mv.s+mv.h;
+    monthRows+=`<tr><td>${monN(mi)}</td>
+      <td>${mv.r?`<span class="sh sh-R">${mv.r}</span>`:'—'}</td>
+      <td>${mv.s?`<span class="sh sh-S">${mv.s}</span>`:'—'}</td>
+      <td>${mv.h?`<span class="sh sh-H">${mv.h}</span>`:'—'}</td>
+      <td class="bold">${t}</td></tr>`;
+  }
+
+  const html=`
+    <div class="doc-hdr">
+      <div>
+        <div class="doc-name">${dname(doc)}</div>
+        <div class="fl" style="flex-wrap:wrap;gap:5px;margin-top:6px">
+          <span class="tag tag-r">${doc.role}</span>
+          ${doc.fte<1?`<span class="tag tag-f">${doc.fte} FTE</span>`:''}
+          ${doc.type==='swing-only'?'<span class="tag tag-s">Swing Only</span>':''}
+          ${doc.type==='weekday-only'?'<span class="tag tag-w">Mon–Fri</span>':''}
+          ${doc.type==='nocturnist'?'<span class="tag tag-n">Nocturnist</span>':''}
+          ${doc.title?`<span class="tag tag-d">${doc.title}</span>`:''}
+        </div>
+        <div style="margin-top:10px;font-size:11px;color:var(--ink3)">
+          <strong>Swing per quarter:</strong>
+          <span class="sh sh-S" style="margin:0 4px">Q1: ${qS[0]}</span>
+          <span class="sh sh-S" style="margin:0 4px">Q2: ${qS[1]}</span>
+          <span class="sh sh-S" style="margin:0 4px">Q3: ${qS[2]}</span>
+          <span class="sh sh-S" style="margin:0 4px">Q4: ${qS[3]}</span>
+          <span class="tx-mu" style="margin-left:8px">(target ~8 per quarter)</span>
+        </div>
+      </div>
+      <div style="min-width:280px">
+        <div class="fb tx-sm" style="margin-bottom:3px"><span class="tx-mu">${yr} Total Scheduled</span><span class="bold">${total} / ${target}</span></div>
+        <div class="pb"><div class="pbf ${pct>100?'pf-over':pct>=90?'pf-ok':'pf-warn'}" style="width:${pct}%"></div></div>
+        <div class="tx-xs tx-mu" style="margin-top:4px">${pct>105?'⚠ Over target':pct<90?`${target-total} short of target`:'✓ On track'}</div>
+        ${paceHTML}
+        ${reqHonoringHTML}
+        ${peerHTML}
+      </div>
+    </div>
+    <div class="card">
+      <div class="fb" style="align-items:center;margin-bottom:10px">
+        <h3 style="margin:0">Schedule Calendar</h3>
+        <div class="fl" style="gap:8px;align-items:center">
+          <label class="tx-xs tx-mu">View:</label>
+          <select id="my-cal-mode" onchange="renderMySchedule()" style="padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:3px">
+            <option value="next3">Next 3 Months</option>
+            <option value="q1">Q1 (Jan–Mar)</option>
+            <option value="q2">Q2 (Apr–Jun)</option>
+            <option value="q3">Q3 (Jul–Sep)</option>
+            <option value="q4">Q4 (Oct–Dec)</option>
+          </select>
+          <select id="my-cal-year" onchange="renderMySchedule()" style="padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:3px">
+            <option value="2025">2025</option>
+            <option value="2026">2026</option>
+            <option value="2027">2027</option>
+          </select>
+        </div>
+      </div>
+      <div>${renderDocCalendarsForView(docId, calMode, calYear)}</div>
+    </div>
+    <div class="card">
+      <h3>Monthly Breakdown — ${yr}</h3>
+      <table class="htbl" style="font-size:12px">
+        <thead><tr><th>Month</th><th>R</th><th>S</th><th>H</th><th>Total</th></tr></thead>
+        <tbody>${monthRows}
+          <tr style="border-top:2px solid var(--line2)">
+            <td class="bold">TOTAL</td><td class="bold">${rCount}</td><td class="bold">${sCount}</td><td class="bold">${hCount}</td><td class="bold">${total}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  `;
+
+  document.getElementById('my-schd-content').innerHTML=html;
+  // Restore select values - they reset when innerHTML is replaced
+  const newModeEl=document.getElementById('my-cal-mode');
+  const newYearEl=document.getElementById('my-cal-year');
+  if(newModeEl) newModeEl.value=calMode;
+  if(newYearEl) newYearEl.value=String(calYear);
+}
+
+// ════════════════════════════════════════════════════════
+//  PHYSICIANS LIST / DETAIL (admin view)
+// ════════════════════════════════════════════════════════
+function renderDocList(){
+  const q=(document.getElementById('doc-search')?.value||'').toLowerCase();
+  const year=S.ui.year;
+  const allDocs=activeDocs(year).filter(d=>!q||dname(d).toLowerCase().includes(q)).sort((a,b)=>a.last.localeCompare(b.last));
+
+  // Split nocturnists from rotation
+  const rotDocs=allDocs.filter(d=>d.type!=='nocturnist');
+  const noctDocs=allDocs.filter(d=>d.type==='nocturnist');
+
+  // Calendar progress for pace calculation
+  const today=new Date(); today.setHours(0,0,0,0);
+  const yearStart=new Date(year,0,1);
+  const yearEnd=new Date(year,11,31);
+  let calendarFrac;
+  if(today<yearStart) calendarFrac=0;
+  else if(today>yearEnd) calendarFrac=1;
+  else calendarFrac=(today-yearStart)/(yearEnd-yearStart);
+
+  function buildDocCard(doc){
+    const sched=S.sched[doc.id]||{};
+    let totalScheduled=0, totalCompleted=0;
+    Object.entries(sched).forEach(([ds,sh])=>{
+      if(!ds.startsWith(String(year))) return;
+      if(sh==='R'||sh==='S'||sh==='H'){
+        totalScheduled++;
+        if(parseD(ds)<=today) totalCompleted++;
+      }
+    });
+    const target=Math.round(doc.fte*S.cfg.annual);
+    const pct=Math.min(Math.round(totalScheduled/target*100),100);
+    const expected=Math.round(target*calendarFrac);
+    const paceDelta=totalCompleted-expected;
+    let paceLabel='', paceClass='';
+    if(doc.type!=='nocturnist'){
+      if(calendarFrac<=0){ paceLabel='Year not started'; paceClass='tx-mu'; }
+      else if(calendarFrac>=1){ paceLabel='Year complete'; paceClass='tx-mu'; }
+      else if(Math.abs(paceDelta)<=2){ paceLabel=`On pace (${totalCompleted}/${expected})`; paceClass='pace-ok'; }
+      else if(paceDelta>2){ paceLabel=`Ahead +${paceDelta} (${totalCompleted}/${expected})`; paceClass='pace-ahead'; }
+      else { paceLabel=`Behind ${paceDelta} (${totalCompleted}/${expected})`; paceClass='pace-behind'; }
+    }
+    return `<div class="dc${doc.type==='nocturnist'?' dc-noct':''}" onclick="showDocDetail('${doc.id}')">
+      <div class="dcn">${dname(doc)}</div>
+      <div class="dcm">${doc.role}${doc.fte<1?` · ${doc.fte} FTE`:''}${doc.type==='swing-only'?' · Swing Only':''}${doc.type==='weekday-only'?' · Mon–Fri':''}${doc.type==='nocturnist'?' · Nocturnist':''}${doc.title?' · '+doc.title:''}</div>
+      <div class="dcs">${doc.type==='nocturnist'?'Self-scheduled (not in rotation)':totalScheduled+' / '+target+' shifts scheduled'}</div>
+      ${doc.type!=='nocturnist'?`<div class="pb" style="margin-top:5px"><div class="pbf ${pct>100?'pf-over':pct>=90?'pf-ok':'pf-warn'}" style="width:${pct}%"></div></div>`:''}
+      ${paceLabel?`<div class="dc-pace ${paceClass}">${paceLabel}</div>`:''}
+    </div>`;
+  }
+
+  let html='';
+  if(rotDocs.length>0){
+    html+=rotDocs.map(buildDocCard).join('');
+  }
+  if(noctDocs.length>0){
+    html+=`<div style="grid-column:1/-1;margin-top:16px;padding-top:12px;border-top:2px solid #3a3a6e">
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#c9b8f5;background:#1a1a2e;display:inline-block;padding:2px 10px;border-radius:2px;margin-bottom:10px">🌙 Nocturnists</div>
+    </div>`;
+    html+=noctDocs.map(buildDocCard).join('');
+  }
+  document.getElementById('doc-grid').innerHTML=html||'<div class="tx-mu tx-sm">No physicians found.</div>';
+}
+
+function showDocDetail(docId){
+  const doc=byId(docId);
+  const year=S.ui.year;
+  const sched=S.sched[docId]||{};
+
+  // Year stats
+  let rCount=0,sCount=0,hCount=0;
+  // Completed YTD vs total scheduled
+  let rDone=0,sDone=0,hDone=0;
+  const today=new Date();today.setHours(0,0,0,0);
+  Object.entries(sched).forEach(([ds,sh])=>{
+    if(!ds.startsWith(String(year))) return;
+    const d=parseD(ds);
+    if(sh==='R'){rCount++; if(d<=today)rDone++;}
+    else if(sh==='S'){sCount++; if(d<=today)sDone++;}
+    else if(sh==='H'){hCount++; if(d<=today)hDone++;}
+  });
+  const total=rCount+sCount+hCount;
+  const totalDone=rDone+sDone+hDone;
+  const target=Math.round(doc.fte*S.cfg.annual);
+  const pct=Math.min(Math.round(total/target*100),100);
+
+  // Per-quarter S count
+  const qS=[0,0,0,0];
+  Object.entries(sched).forEach(([ds,sh])=>{
+    if(!ds.startsWith(String(year))) return;
+    if(sh==='S'){
+      const m=parseInt(ds.split('-')[1])-1;
+      qS[Math.floor(m/3)]++;
+    }
+  });
+
+  // Pace calculation
+  const yearStart=new Date(year,0,1);
+  const yearEnd=new Date(year,11,31);
+  let calendarFrac;
+  if(today<yearStart) calendarFrac=0;
+  else if(today>yearEnd) calendarFrac=1;
+  else calendarFrac=(today-yearStart)/(yearEnd-yearStart);
+  const expected=Math.round(target*calendarFrac);
+  const paceDelta=totalDone-expected;
+  let paceHTML='';
+  if(doc.type!=='nocturnist'){
+    if(calendarFrac<=0){
+      paceHTML='<div class="dc-pace tx-mu" style="margin-top:6px">Year not started</div>';
+    } else if(calendarFrac>=1){
+      paceHTML='<div class="dc-pace tx-mu" style="margin-top:6px">Year complete</div>';
+    } else if(Math.abs(paceDelta)<=2){
+      paceHTML=`<div class="dc-pace pace-ok" style="margin-top:6px">On pace · ${totalDone} done / ${expected} expected</div>`;
+    } else if(paceDelta>2){
+      paceHTML=`<div class="dc-pace pace-ahead" style="margin-top:6px">Ahead by ${paceDelta} · ${totalDone} done / ${expected} expected</div>`;
+    } else {
+      paceHTML=`<div class="dc-pace pace-behind" style="margin-top:6px">Behind by ${-paceDelta} · ${totalDone} done / ${expected} expected</div>`;
+    }
+  }
+
+  // Monthly breakdown
+  const monthly=Array.from({length:12},()=>({r:0,s:0,h:0}));
+  Object.entries(sched).forEach(([ds,sh])=>{
+    if(!ds.startsWith(String(year))) return;
+    const m=parseInt(ds.split('-')[1])-1;
+    if(sh==='R') monthly[m].r++;
+    else if(sh==='S') monthly[m].s++;
+    else if(sh==='H') monthly[m].h++;
+  });
+
+  // Upcoming
+  const upcoming=[];
+  for(let i=0;i<90;i++){
+    const d=addD(today,i);
+    const ds=dstrD(d);
+    const sh=sched[ds];
+    if(sh&&sh!=='OFF') upcoming.push({d,ds,sh});
+  }
+
+  document.getElementById('doc-list-view').style.display='none';
+  document.getElementById('doc-back').style.display='';
+  const det=document.getElementById('doc-detail');
+  det.style.display='block';
+
+  let monthRows='';
+  for(let mi=0;mi<12;mi++){
+    const mv=monthly[mi];
+    const t=mv.r+mv.s+mv.h;
+    monthRows+=`<tr><td>${monN(mi)}</td>
+      <td>${mv.r?`<span class="sh sh-R">${mv.r}</span>`:'—'}</td>
+      <td>${mv.s?`<span class="sh sh-S">${mv.s}</span>`:'—'}</td>
+      <td>${mv.h?`<span class="sh sh-H">${mv.h}</span>`:'—'}</td>
+      <td class="bold">${t}</td></tr>`;
+  }
+
+  det.innerHTML=`
+    <div class="doc-hdr">
+      <div>
+        <div class="doc-name">${dname(doc)}</div>
+        <div class="fl" style="flex-wrap:wrap;gap:5px;margin-top:6px">
+          <span class="tag tag-r">${doc.role}</span>
+          ${doc.fte<1?`<span class="tag tag-f">${doc.fte} FTE</span>`:''}
+          ${doc.type==='swing-only'?'<span class="tag tag-s">Swing Only</span>':''}
+          ${doc.type==='weekday-only'?'<span class="tag tag-w">Mon–Fri</span>':''}
+          ${doc.type==='nocturnist'?'<span class="tag tag-n">Nocturnist</span>':''}
+          ${doc.title?`<span class="tag tag-d">${doc.title}</span>`:''}
+          ${doc.startDate?`<span class="tag" style="background:#eee;color:var(--ink3);border-color:var(--line)">Start ${doc.startDate}</span>`:''}
+        </div>
+        <div style="margin-top:10px;font-size:11px;color:var(--ink3)">
+          <strong>Swing per quarter:</strong>
+          <span class="sh sh-S" style="margin:0 4px">Q1: ${qS[0]}</span>
+          <span class="sh sh-S" style="margin:0 4px">Q2: ${qS[1]}</span>
+          <span class="sh sh-S" style="margin:0 4px">Q3: ${qS[2]}</span>
+          <span class="sh sh-S" style="margin:0 4px">Q4: ${qS[3]}</span>
+          <span class="tx-mu" style="margin-left:8px">(target ~8 per quarter)</span>
+        </div>
+      </div>
+      <div style="min-width:280px">
+        <div class="fb tx-sm" style="margin-bottom:3px"><span class="tx-mu">${year} Total Scheduled</span><span class="bold">${total} / ${target}</span></div>
+        <div class="pb"><div class="pbf ${pct>100?'pf-over':pct>=90?'pf-ok':'pf-warn'}" style="width:${pct}%"></div></div>
+        <div class="tx-xs tx-mu" style="margin-top:4px">${pct>105?'⚠ Over target':pct<90?`${target-total} short of target`:'✓ On track'}</div>
+        ${paceHTML}
+      </div>
+    </div>
+    <div class="card">
+      <h3>Schedule — Next 3 Months</h3>
+      <div id="doc-cal-grid">${renderDocCalendars(docId, today)}</div>
+    </div>
+    <div class="card">
+      <h3>Monthly Breakdown — ${year}</h3>
+      <table class="htbl" style="font-size:12px">
+        <thead><tr><th>Month</th><th>R</th><th>S</th><th>H</th><th>Total</th></tr></thead>
+        <tbody>${monthRows}
+          <tr style="border-top:2px solid var(--line2)">
+            <td class="bold">TOTAL</td><td class="bold">${rCount}</td><td class="bold">${sCount}</td><td class="bold">${hCount}</td><td class="bold">${total}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+// Render mini calendar grids for the next 3 months for a physician
+// Render mini calendars for a specific view mode ('next3', 'q1'-'q4')
+function renderDocCalendarsForView(docId, mode, viewYear){
+  const today = new Date(); today.setHours(0,0,0,0);
+  const todayDS = dstrD(today);
+  const sched = S.sched[docId] || {};
+  const year = viewYear || today.getFullYear();
+
+  // Determine which months to show
+  let months = [];
+  if(mode === 'next3'){
+    for(let i=0;i<3;i++) months.push(new Date(today.getFullYear(), today.getMonth()+i, 1));
+  } else {
+    const qStart = mode==='q1'?0:mode==='q2'?3:mode==='q3'?6:9;
+    for(let i=0;i<3;i++) months.push(new Date(year, qStart+i, 1));
+  }
+
+  let html = '<div class="doc-cal-row">';
+  months.forEach(target=>{
+    const y = target.getFullYear();
+    const m = target.getMonth();
+    const daysInM = new Date(y, m+1, 0).getDate();
+    const firstDow = new Date(y, m, 1).getDay();
+
+    html += '<div class="doc-cal-month">';
+    html += `<div class="doc-cal-title">${monN(m)} ${y}</div>`;
+    html += '<div class="doc-cal-grid">';
+    ['S','M','T','W','T','F','S'].forEach(dn=>{ html += `<div class="doc-cal-dh">${dn}</div>`; });
+    for(let i=0;i<firstDow;i++) html += '<div class="doc-cal-empty"></div>';
+    for(let d=1; d<=daysInM; d++){
+      const ds = dstr(y, m, d);
+      const sh = sched[ds] || 'OFF';
+      const isWk = (new Date(y,m,d).getDay()===0 || new Date(y,m,d).getDay()===6);
+      const isToday = ds === todayDS;
+      const isPast = parseD(ds) < today;
+      let cls = 'doc-cal-day';
+      if(isWk) cls += ' weekend';
+      if(isToday) cls += ' today';
+      if(isPast) cls += ' past';
+      cls += ' shift-' + sh;
+      const team = (sh==='R'&&S.teams&&S.teams[docId]&&S.teams[docId][ds])||null;
+      const label = sh==='OFF' ? '' : (sh==='R'&&team ? `R${team}` : sh);
+      html += `<div class="${cls}" title="${ds} · ${sh}${team?' · Team '+team:''}">
+        <span class="doc-cal-dnum">${d}</span>
+        ${label ? `<span class="doc-cal-shift">${label}</span>` : ''}
+      </div>`;
+    }
+    html += '</div></div>';
+  });
+  html += '</div>';
+  return html;
+}
+
+// Legacy: render next 3 months from today
+function renderDocCalendars(docId, today){
+  return renderDocCalendarsForView(docId, 'next3', today.getFullYear());
+}
+
+function backToDocList(){
+  document.getElementById('doc-list-view').style.display='';
+  document.getElementById('doc-detail').style.display='none';
+  document.getElementById('doc-back').style.display='none';
+}
+
+// ════════════════════════════════════════════════════════
+//  HOLIDAYS
+// ════════════════════════════════════════════════════════
+function autoAssignHolidays(){
+  const y=parseInt(document.getElementById('hol-yr').value);
+  const hd=holDates(y);
+  const prev=S.hols[y-1]||{};
+  const docs=activeDocs(y).filter(d=>d.type!=='swing-only' && d.type!=='nocturnist');
+
+  let gA=[],gB=[];
+  docs.forEach(doc=>{
+    const p=prev[doc.id]||{};
+    if(p.xm) gA.push(doc);
+    else if(p.tg) gB.push(doc);
+    else (gA.length<=gB.length?gA:gB).push(doc);
+  });
+
+  if(!S.hols[y]) S.hols[y]={};
+  docs.forEach(d=>{S.hols[y][d.id]={tg:false,xm:false}});
+  gA.forEach(d=>{S.hols[y][d.id].tg=true});
+  gB.forEach(d=>{S.hols[y][d.id].xm=true});
+
+  // Apply to schedule
+  docs.forEach(doc=>{
+    if(!S.sched[doc.id]) return;
+    const h=S.hols[y][doc.id];
+    if(h.tg&&S.sched[doc.id][hd.tg]) S.sched[doc.id][hd.tg]='H';
+    if(h.xm&&S.sched[doc.id][hd.xm]) S.sched[doc.id][hd.xm]='H';
+  });
+
+  renderHolidayTable();
+  toast('Holidays assigned','success');
+}
+function renderHolidayTable(){
+  const y=parseInt(document.getElementById('hol-yr').value);
+  S.ui.holYear=y;
+  document.getElementById('hol-yr-lbl').textContent=y;
+  const hd=holDates(y);
+  const hols=S.hols[y]||{};
+  const prev=S.hols[y-1]||{};
+  const docs=activeDocs(y)
+    .filter(d=>d.type!=='swing-only' && d.type!=='nocturnist')
+    .sort((a,b)=>a.last.localeCompare(b.last));
+
+  // Figure out who worked each tracked holiday by looking at their schedule
+  const holKeys=['ny','mem','jul4','lab','tg','xm'];
+  const holWorked={}; // docId → {key:bool}
+  docs.forEach(doc=>{
+    holWorked[doc.id]={};
+    holKeys.forEach(key=>{
+      const ds=hd[key];
+      const sh=(S.sched[doc.id]&&S.sched[doc.id][ds]);
+      holWorked[doc.id][key]=sh&&sh!=='OFF';
+    });
+  });
+
+  let html=`<thead><tr>
+    <th style="min-width:140px">Physician</th>
+    <th>🗓️ New Year's<br><span style="color:var(--ink3);font-weight:400;font-size:10px">${hd.ny}</span></th>
+    <th>🪖 Memorial Day<br><span style="color:var(--ink3);font-weight:400;font-size:10px">${hd.mem}</span></th>
+    <th>🎆 July 4th<br><span style="color:var(--ink3);font-weight:400;font-size:10px">${hd.jul4}</span></th>
+    <th>👷 Labor Day<br><span style="color:var(--ink3);font-weight:400;font-size:10px">${hd.lab}</span></th>
+    <th>🦃 Thanksgiving<br><span style="color:var(--ink3);font-weight:400;font-size:10px">${hd.tg}</span></th>
+    <th>🎄 Christmas<br><span style="color:var(--ink3);font-weight:400;font-size:10px">${hd.xm}</span></th>
+    <th>Xmas ${y-1}?</th>
+    <th>Rule</th>
+  </tr></thead><tbody>`;
+  docs.forEach(doc=>{
+    const h=hols[doc.id]||{};
+    const prevXm=!!(prev[doc.id]&&prev[doc.id].xm);
+    // T&C rule: assigned Thanksgiving means they should not also get Christmas
+    const violated=h.xm&&prevXm;
+    const tgXmBoth=h.tg&&h.xm;
+    const cells=holKeys.map(key=>{
+      const strictKey=key==='tg'||key==='xm';
+      const worked=holWorked[doc.id][key];
+      const assigned=h[key];
+      if(strictKey){
+        return assigned
+          ? `<td style="background:#e6dffb"><span class="sh sh-H">Assigned</span></td>`
+          : `<td><span class="tx-mu">—</span></td>`;
+      } else {
+        // Tracked-only holidays: just show if they worked that day
+        return worked
+          ? `<td style="background:#fff5dc"><span style="font-size:11px;font-weight:700;color:#a85800">Worked</span></td>`
+          : `<td><span class="tx-mu">—</span></td>`;
+      }
+    }).join('');
+    const ruleCell=tgXmBoth
+      ? '<td><span style="color:#a01918;font-weight:700">⚠ Both T+C</span></td>'
+      : violated
+        ? '<td><span style="color:#a01918;font-weight:700">⚠ 2 Xmas</span></td>'
+        : '<td><span style="color:#0a7044">✓</span></td>';
+    html+=`<tr>
+      <td><strong>${dname(doc)}</strong></td>
+      ${cells}
+      <td>${prevXm?'<span style="color:#a85800">Yes</span>':'No'}</td>
+      ${ruleCell}
+    </tr>`;
+  });
+  html+='</tbody>';
+  document.getElementById('hol-table').innerHTML=html;
+}
+
+// ════════════════════════════════════════════════════════
+//  SETTINGS / ROSTER
+// ════════════════════════════════════════════════════════
+function renderRoster(){
+  const docs=[...S.docs].sort((a,b)=>a.last.localeCompare(b.last));
+  document.getElementById('roster-count').textContent=docs.filter(d=>d.active).length;
+  let html='<table class="htbl"><thead><tr><th>Name</th><th>Role</th><th>FTE</th><th>Type</th><th>Schedule</th><th>Pref R</th><th>Title</th><th>Start</th><th>Actions</th></tr></thead><tbody>';
+  docs.forEach(d=>{
+    const prefR=(d.preferences&&d.preferences.preferredR);
+    const prefDisplay = prefR && prefR !== 5
+      ? `<span class="sh sh-R" style="font-size:10px">${prefR}R</span>`
+      : '<span class="tx-mu">5R</span>';
+    const style=(d.preferences&&d.preferences.scheduleStyle)||'variable';
+    const styleBadge=style==='strict'
+      ? '<span style="background:#dde9f7;color:#1b4d8f;font-size:10px;font-weight:700;padding:1px 6px;border-radius:2px;border:1px solid #b8d4f0">7on/7off</span>'
+      : '<span class="tx-mu" style="font-size:11px">Variable</span>';
+    html+=`<tr style="opacity:${d.active?1:.5}">
+      <td>${dname(d)}</td><td>${d.role}</td><td>${d.fte}</td><td>${d.type}</td>
+      <td>${styleBadge}</td>
+      <td>${prefDisplay}</td>
+      <td class="tx-mu">${d.title||''}</td>
+      <td class="tx-mu" style="font-family:'JetBrains Mono',monospace;font-size:11px">${d.startDate||''}</td>
+      <td style="white-space:nowrap">
+        <button class="btn btn-xs" onclick="openEditDoc('${d.id}')">Edit</button>
+        <button class="btn btn-xs ${d.active?'btn-d':''}" onclick="toggleDoc('${d.id}')">${d.active?'Deactivate':'Activate'}</button>
+      </td>
+    </tr>`;
+  });
+  html+='</tbody></table>';
+  document.getElementById('roster-list').innerHTML=html;
+}
+function toggleDoc(id){const d=byId(id);if(d){d.active=!d.active;renderRoster();renderDocList();populatePhysPicker()}}
+
+function openEditDoc(id){
+  const doc=byId(id);
+  if(!doc) return;
+  const prefR=(doc.preferences&&doc.preferences.preferredR)||5;
+  const maxW=(doc.preferences&&doc.preferences.maxWork)||7;
+  const body=`
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;align-items:flex-end">
+      <div class="fg"><label>Last Name</label><input type="text" id="ed-last" value="${doc.last||''}" style="width:130px"></div>
+      <div class="fg"><label>First Name</label><input type="text" id="ed-first" value="${doc.first||''}" style="width:120px"></div>
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;align-items:flex-end">
+      <div class="fg"><label>Role</label>
+        <select id="ed-role" style="width:80px">
+          <option ${doc.role==='MD'?'selected':''}>MD</option>
+          <option ${doc.role==='NP'?'selected':''}>NP</option>
+        </select>
+      </div>
+      <div class="fg"><label>FTE</label>
+        <select id="ed-fte" style="width:80px">
+          <option value="1.0" ${doc.fte===1.0?'selected':''}>1.0</option>
+          <option value="0.5" ${doc.fte===0.5?'selected':''}>0.5</option>
+          <option value="0.75" ${doc.fte===0.75?'selected':''}>0.75</option>
+        </select>
+      </div>
+      <div class="fg"><label>Type</label>
+        <select id="ed-type" style="width:140px">
+          <option value="standard" ${doc.type==='standard'?'selected':''}>Standard</option>
+          <option value="swing-only" ${doc.type==='swing-only'?'selected':''}>Swing Only</option>
+          <option value="weekday-only" ${doc.type==='weekday-only'?'selected':''}>Weekday Only (Mon–Fri)</option>
+          <option value="nocturnist" ${doc.type==='nocturnist'?'selected':''}>Nocturnist</option>
+        </select>
+      </div>
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;align-items:flex-end">
+      <div class="fg"><label>Start Date</label><input type="date" id="ed-start" value="${doc.startDate||''}" style="width:150px"></div>
+      <div class="fg"><label>Title</label><input type="text" id="ed-title" value="${doc.title||''}" style="width:200px"></div>
+    </div>
+    <div style="border-top:1px solid var(--line);margin-top:6px;padding-top:10px">
+      <div style="font-weight:700;font-size:12px;color:var(--ink2);margin-bottom:8px">Scheduling Preferences</div>
+      <div style="margin-bottom:10px">
+        <div class="tx-xs tx-mu" style="margin-bottom:6px;font-weight:700">Scheduling Style</div>
+        <label style="display:flex;align-items:flex-start;gap:8px;padding:8px 10px;border:1.5px solid var(--line);border-radius:4px;margin-bottom:6px;cursor:pointer;background:${(doc.preferences&&doc.preferences.scheduleStyle==='strict')?'#eef5fb':'#fff'}">
+          <input type="radio" name="ed-style" value="strict" id="ed-style-strict" ${(doc.preferences&&doc.preferences.scheduleStyle==='strict')?'checked':''} style="margin-top:2px">
+          <div>
+            <div style="font-weight:700;font-size:12px;color:#1b4d8f">Strict 7-on / 7-off</div>
+            <div class="tx-xs tx-mu">Repeating schedule: 5R + 2S every two weeks (give or take a swing for group fairness). Very predictable cycle.</div>
+          </div>
+        </label>
+        <label style="display:flex;align-items:flex-start;gap:8px;padding:8px 10px;border:1.5px solid var(--line);border-radius:4px;cursor:pointer;background:${(!doc.preferences||doc.preferences.scheduleStyle!=='strict')?'#eef5fb':'#fff'}">
+          <input type="radio" name="ed-style" value="variable" id="ed-style-variable" ${(!doc.preferences||doc.preferences.scheduleStyle!=='strict')?'checked':''} style="margin-top:2px">
+          <div>
+            <div style="font-weight:700;font-size:12px;color:#1b4d8f">Variable</div>
+            <div class="tx-xs tx-mu">Meets all shift and swing quotas following block rules, but the day-on / day-off pattern varies. More flexible.</div>
+          </div>
+        </label>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+        <div class="fg">
+          <label>Preferred R-Block Length</label>
+          <input type="number" id="ed-prefR" value="${prefR}" min="3" max="14" style="width:90px">
+        </div>
+        <div class="fg">
+          <label>Max Consecutive Work Days</label>
+          <input type="number" id="ed-maxW" value="${maxW}" min="3" max="21" style="width:90px">
+        </div>
+      </div>
+      <div class="tx-xs tx-mu" style="margin-top:6px">
+        Default: 5-day R blocks, max 7 consecutive work days. Set preferred R higher (e.g. 10) for providers who prefer longer rounding stretches.
+        Max work must be ≥ preferred R + 2 to allow a 2-day swing tail.
+      </div>
+    </div>`;
+  showModal(`Edit ${dname(doc)}`, body, 'Save Changes', ()=>saveEditDoc(id));
+  // Add Reset Password button to modal footer (admin only)
+  if(isAdmin()){
+    setTimeout(()=>{
+      const footer=document.querySelector('#modal .fl.mt');
+      if(footer&&!footer.querySelector('.btn-reset-pw')){
+        const btn=document.createElement('button');
+        btn.className='btn btn-sm btn-reset-pw';
+        btn.style.cssText='background:#fff5dc;border-color:#f0c040;color:#7a5000;margin-right:auto';
+        btn.textContent='🔑 Reset Password';
+        btn.onclick=()=>adminResetPassword(id);
+        footer.prepend(btn);
+      }
+    },10);
+  }
+}
+
+function saveEditDoc(id){
+  const doc=byId(id);
+  if(!doc){document.getElementById('modal').style.display='none';return;}
+  doc.last=document.getElementById('ed-last').value.trim()||doc.last;
+  doc.first=document.getElementById('ed-first').value.trim();
+  doc.role=document.getElementById('ed-role').value;
+  doc.fte=parseFloat(document.getElementById('ed-fte').value);
+  doc.type=document.getElementById('ed-type').value;
+  doc.startDate=document.getElementById('ed-start').value||null;
+  doc.title=document.getElementById('ed-title').value.trim();
+  // Preferences
+  const prefR=parseInt(document.getElementById('ed-prefR').value)||5;
+  const maxW=parseInt(document.getElementById('ed-maxW').value)||7;
+  const safeMaxW=Math.max(maxW, prefR+2);
+  const styleEl=document.querySelector('input[name="ed-style"]:checked');
+  const scheduleStyle=styleEl?styleEl.value:'variable';
+  if(!doc.preferences) doc.preferences={};
+  doc.preferences.preferredR=prefR;
+  doc.preferences.maxWork=safeMaxW;
+  doc.preferences.scheduleStyle=scheduleStyle;
+  saveData();
+  document.getElementById('modal').style.display='none';
+  renderRoster();
+  renderDocList();
+  populatePhysPicker();
+  toast(`Updated ${dname(doc)}`,'success');
+}
+function addPhysician(){
+  const last=document.getElementById('n-last').value.trim();
+  const first=document.getElementById('n-first').value.trim();
+  if(!last){toast('Last name required','error');return}
+  const id=(last+first).toLowerCase().replace(/\s+/g,'')+'_'+Date.now();
+  S.docs.push({
+    id,last,first,
+    role:document.getElementById('n-role').value,
+    fte:parseFloat(document.getElementById('n-fte').value),
+    type:document.getElementById('n-type').value,
+    active:true,
+    startDate:document.getElementById('n-start').value||null,
+    title:document.getElementById('n-title').value.trim()
+  });
+  renderRoster();renderDocList();populatePhysPicker();
+  ['n-last','n-first','n-title'].forEach(i=>document.getElementById(i).value='');
+  toast(`Added ${last}`,'success');
+}
+function saveCfg(){
+  S.cfg.annual=parseInt(document.getElementById('c-annual').value);
+  S.cfg.R=parseInt(document.getElementById('c-r').value);
+  S.cfg.S=parseInt(document.getElementById('c-s').value);
+  S.cfg.maxReq=parseInt(document.getElementById('c-max-req').value);
+  S.cfg.maxWeekendReq=parseInt(document.getElementById('c-max-wk').value);
+  saveData();toast('Settings saved','success');
+}
+
+// ════════════════════════════════════════════════════════
+//  ROLE SWITCHING
+// ════════════════════════════════════════════════════════
+function switchRole(role){
+  S.ui.role=role;
+  document.getElementById('r-admin').classList.toggle('on',role==='admin');
+  document.getElementById('r-phys').classList.toggle('on',role==='phys');
+  document.getElementById('tabs-admin').style.display=role==='admin'?'flex':'none';
+  // Old phys tab bar always hidden (navigation is now in page header)
+  document.getElementById('tabs-phys').style.display='none';
+  // Legacy phys-pick (keep for backward compat but hide)
+  const legPick=document.getElementById('phys-pick');
+  if(legPick) legPick.style.display='none';
+
+  if(role==='admin'){
+    nav('sched');
+  } else {
+    populatePhysPicker();
+    nav('myreq');
+  }
+}
+function populatePhysPicker(){
+  const docs=[...S.docs].filter(d=>d.active).sort((a,b)=>a.last.localeCompare(b.last));
+  const opts=docs.map(d=>`<option value="${d.id}"${d.id===S.ui.currentPhysId?' selected':''}>${dname(d)}</option>`).join('');
+  // Populate both page-header pickers
+  const reqPick=document.getElementById('phys-pick-req');
+  const schdPick=document.getElementById('phys-pick-schd');
+  if(reqPick) reqPick.innerHTML=opts;
+  if(schdPick) schdPick.innerHTML=opts;
+  // Keep legacy hidden one in sync
+  const legPick=document.getElementById('phys-pick');
+  if(legPick) legPick.innerHTML=opts;
+  updatePhysHeaders();
+}
+function updatePhysHeaders(){
+  const doc=byId(S.ui.currentPhysId);
+  const name=doc?dname(doc):'—';
+  ['phys-hdr-name-req','phys-hdr-name-schd'].forEach(id=>{
+    const el=document.getElementById(id);
+    if(el) el.textContent=name;
+  });
+  // Announcement: prominent inline chip below name
+  const ann=S.announcement||'';
+  const annDisplay = ann ? `📢 ${ann}` : '';
+  ['phys-announcement-req','phys-announcement-schd'].forEach(id=>{
+    const el=document.getElementById(id);
+    if(el){
+      el.textContent=annDisplay;
+      el.style.display=ann?'block':'none';
+    }
+  });
+}
+function onPhysPickReq(){
+  S.ui.currentPhysId=document.getElementById('phys-pick-req').value;
+  // Sync the other picker
+  const schdPick=document.getElementById('phys-pick-schd');
+  if(schdPick) schdPick.value=S.ui.currentPhysId;
+  updatePhysHeaders();
+  renderMyRequestCal();
+}
+function onPhysPickSchd(){
+  S.ui.currentPhysId=document.getElementById('phys-pick-schd').value;
+  const reqPick=document.getElementById('phys-pick-req');
+  if(reqPick) reqPick.value=S.ui.currentPhysId;
+  updatePhysHeaders();
+  renderMySchedule();
+}
+// Legacy — keep for any code that still calls it
+function onPhysPick(){
+  S.ui.currentPhysId=document.getElementById('phys-pick').value;
+  populatePhysPicker();
+  if(S.ui.role==='phys'){
+    if(document.getElementById('pg-myreq').classList.contains('on')) renderMyRequestCal();
+    if(document.getElementById('pg-myschd').classList.contains('on')) renderMySchedule();
+  }
+}
+
+// ════════════════════════════════════════════════════════
+//  NAV
+// ════════════════════════════════════════════════════════
+function nav(p){
+  document.querySelectorAll('.pg').forEach(x=>x.classList.remove('on'));
+  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('on'));
+  document.getElementById('pg-'+p).classList.add('on');
+  const tab=document.getElementById('t-'+p);
+  if(tab) tab.classList.add('on');
+
+  // Update active state on physician nav buttons
+  if(p==='myreq'||p==='myschd'){
+    ['phys-nav-req','phys-nav-schd','phys-nav-req2','phys-nav-schd2'].forEach(id=>{
+      const el=document.getElementById(id);
+      if(el) el.classList.remove('active');
+    });
+    if(p==='myreq'){
+      const a=document.getElementById('phys-nav-req');
+      const b=document.getElementById('phys-nav-req2');
+      if(a) a.classList.add('active');
+      if(b) b.classList.add('active');
+    } else {
+      const a=document.getElementById('phys-nav-schd');
+      const b=document.getElementById('phys-nav-schd2');
+      if(a) a.classList.add('active');
+      if(b) b.classList.add('active');
+    }
+  }
+
+  if(p==='sched'){updateQuarterInfo();renderSchedule();updateGenButton();}
+  else {
+    const panel=document.getElementById('sheet-qtot-panel');
+    if(panel) panel.style.display='none';
+  }
+  if(p==='week'){if(!S.ui.wkStart)S.ui.wkStart=wkStart(new Date());renderWeek()}
+  if(p==='requests') renderRequestsAdmin();
+  if(p==='docs'){backToDocList();renderDocList()}
+  if(p==='hol') renderHolidayTable();
+  if(p==='cfg') renderRoster();
+  if(p==='myreq'){ populatePhysPicker(); renderMyRequestCal(); }
+  if(p==='myschd'){ populatePhysPicker(); renderMySchedule(); }
+}
+
+// Navigate from the schedule grid to a physician's detail page
+function navToDoc(docId){
+  nav('docs');
+  // Defer so the page is rendered before opening detail
+  setTimeout(()=>showDocDetail(docId), 30);
+}
+
+// ════════════════════════════════════════════════════════
+//  INIT
+// ════════════════════════════════════════════════════════
+loadData();
+
+// Populate quarter selectors with reasonable defaults
+const now=new Date();
+const curYear=now.getFullYear();
+const curQ=Math.floor(now.getMonth()/3)+1;
+document.getElementById('yr-sel').value=curYear;
+document.getElementById('q-sel').value=curQ;
+S.ui.year=curYear; S.ui.quarter=curQ;
+
+// Set defaults
+document.getElementById('c-annual').value=S.cfg.annual;
+document.getElementById('c-r').value=S.cfg.R;
+document.getElementById('c-s').value=S.cfg.S;
+document.getElementById('c-max-req').value=S.cfg.maxReq;
+document.getElementById('c-max-wk').value=S.cfg.maxWeekendReq;
+
+// Default request quarter to next quarter
+let defReqQ=curQ+1; let defReqY=curYear;
+if(defReqQ>4){defReqQ=1;defReqY++}
+document.getElementById('myq-sel').value=`${defReqY}-${defReqQ}`;
+document.getElementById('req-q-sel').value=`${defReqY}-${defReqQ}`;
+S.ui.requestQuarter=`${defReqY}-${defReqQ}`;
+S.ui.adminReqQuarter=`${defReqY}-${defReqQ}`;
+
+// ── ASYNC STARTUP ──────────────────────────────────────────
+async function appInit(){
+  const supabaseEl = document.getElementById('supabase-status');
+
+  // Check if Supabase is configured
+  const sb = getSB();
+  if(!sb){
+    if(supabaseEl) supabaseEl.textContent = '⚠ No database configured — running in local mode';
+    // Skip login — just use localStorage and grant admin
+    isAdmin = true;
+    document.getElementById('login-overlay').style.display='none';
+    await loadData();
+    finishInit();
+    return;
+  }
+
+  if(supabaseEl) supabaseEl.textContent = '✓ Connected — enter password or continue as viewer';
+
+  // Check if already logged in this session
+  if(sessionStorage.getItem('hs_admin') === '1'){
+    isAdmin = true;
+    document.getElementById('login-overlay').style.display='none';
+    setReadOnly(false);
+    await loadData();
+    finishInit();
+    return;
+  }
+
+  // Show login — user will call finishInit after choosing
+}
+
+function finishInit(){
+  populatePhysPicker();
+  updateQuarterInfo();
+  renderSchedule();
+  updateGenButton();
+  renderRoster();
+  renderDocList();
+  renderHolidayTable();
+  loadAnnouncement();
+  lastSyncTime = Date.now();
+  if(!isAdmin){
+    setReadOnly(true);
+    // Viewers auto-refresh every 30s
+    setInterval(async ()=>{
+      await loadData();
+      renderSchedule();
+    }, 30000);
+  }
+}
+
+// ── STARTUP ───────────────────────────────────────────────
+async function appInit(){
+  const sb=getSB();
+  const statusEl=document.getElementById('supabase-status');
+  const saved=sessionStorage.getItem('hs_user');
+  if(saved){try{currentUser=JSON.parse(saved);}catch(e){sessionStorage.removeItem('hs_user');currentUser=null;}}
+  if(!sb){
+    if(statusEl)statusEl.textContent='⚠ No database — local mode (admin/admin)';
+    if(!currentUser){currentUser={username:'admin',role:'admin',docId:null};document.getElementById('login-overlay').style.display='none';}
+    await loadData();finishInit();return;
+  }
+  if(statusEl)statusEl.textContent='✓ Connected — enter your credentials';
+  if(currentUser){document.getElementById('login-overlay').style.display='none';await loadData();finishInit();}
+}
+
+async function finishInit(){
+  updateHeaderForUser();
+  setReadOnly(!isAdmin());
+  populatePhysPicker();
+  updateQuarterInfo();
+  renderSchedule();
+  updateGenButton();
+  renderRoster();
+  renderDocList();
+  renderHolidayTable();
+  loadAnnouncement();
+  lastSyncTime=Date.now();
+  if(isPhysician())switchRole('phys');
+}
+
+appInit();
+
+</script>
+</body>
+</html>
