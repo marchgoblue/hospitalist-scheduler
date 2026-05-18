@@ -941,12 +941,13 @@ function updateHeaderForUser(){
 
 async function saveData(){
   if(!currentUser){toast('Not logged in','error');return;}
-  if(!isAdmin()){toast('View-only — changes not saved','error');return;}
+  // Both admin and physicians can save (physicians only save their own requests)
+  // Admin-only writes are blocked at the function level (cycleCell, generateQuarter, etc.)
   const sb=getSB();
-  if(!sb){localStorage.setItem('hsq',JSON.stringify(S));toast('Saved locally','info');return;}
+  if(!sb){localStorage.setItem('hsq',JSON.stringify(S));if(isAdmin())toast('Saved locally','info');return;}
   if(isSaving){pendingSave=true;return;}
   isSaving=true;setSyncStatus('saving');
-  try{const{error}=await sb.from('schedule_data').upsert({id:DATA_ROW_ID,data:JSON.stringify(S),updated_at:new Date().toISOString()},{onConflict:'id'});if(error)throw error;setSyncStatus('saved');toast('Saved','success');}
+  try{const{error}=await sb.from('schedule_data').upsert({id:DATA_ROW_ID,data:JSON.stringify(S),updated_at:new Date().toISOString()},{onConflict:'id'});if(error)throw error;setSyncStatus('saved');if(isAdmin())toast('Saved','success');}
   catch(e){console.error(e);setSyncStatus('error');toast('Save failed','error');}
   finally{isSaving=false;if(pendingSave){pendingSave=false;saveData();}}
 }
@@ -1005,6 +1006,8 @@ function completeLogin(){
   document.getElementById('login-overlay').style.display='none';
   if(isPhysician()&&currentUser.docId)S.ui.currentPhysId=currentUser.docId;
   updateHeaderForUser();
+  // Load data and initialize the app after login
+  loadData().then(()=>finishInit());
 }
 function logout(){sessionStorage.removeItem('hs_user');currentUser=null;location.reload();}
 
@@ -1589,6 +1592,7 @@ function updateGenButton(){
 }
 
 function tryGenerateQuarter(){
+  if(!isAdmin()){ toast('View-only — admin access required','error'); return; }
   const year=parseInt(document.getElementById('yr-sel').value)||S.ui.year;
   const q=parseInt(document.getElementById('q-sel').value)||S.ui.quarter;
   const qKey=`${year}-${q}`;
@@ -2148,6 +2152,7 @@ function toggleColHighlight(ds){
 
 // ── Fill mode (Fill R / Fill S / Fill OFF buttons) ─────
 function setShiftMode(mode){
+  if(!isAdmin()&&mode){ toast('View-only — admin access required','error'); return; }
   S.ui.fillMode=mode;
   document.getElementById('fill-mode-label').textContent =
     mode ? `Fill mode: ${mode} — click cells to apply` : 'Click cell to cycle R→S→N→OFF · Double-click name to open';
@@ -2164,6 +2169,7 @@ function setShiftMode(mode){
 // ── Cell click: cycles R→S→N→OFF, or applies fill mode ─
 const SHIFT_CYCLE=['R','S','N','OFF'];
 function cycleCell(docId,ds){
+  if(!isAdmin()){ toast('View-only — sign in as admin to edit','error'); return; }
   // If fill mode is active, apply it directly (no cycle)
   if(S.ui.fillMode){
     if(!S.sched[docId]) S.sched[docId]={};
@@ -3081,6 +3087,7 @@ function backToDocList(){
 //  HOLIDAYS
 // ════════════════════════════════════════════════════════
 function autoAssignHolidays(){
+  if(!isAdmin()){ toast('Admin only','error'); return; }
   const y=parseInt(document.getElementById('hol-yr').value);
   const hd=holDates(y);
   const prev=S.hols[y-1]||{};
@@ -3212,7 +3219,7 @@ function renderRoster(){
   html+='</tbody></table>';
   document.getElementById('roster-list').innerHTML=html;
 }
-function toggleDoc(id){const d=byId(id);if(d){d.active=!d.active;renderRoster();renderDocList();populatePhysPicker()}}
+function toggleDoc(id){if(!isAdmin()){toast('Admin only','error');return;}const d=byId(id);if(d){d.active=!d.active;saveData();renderRoster();renderDocList();populatePhysPicker()}}
 
 function openEditDoc(id){
   const doc=byId(id);
@@ -3303,6 +3310,7 @@ function openEditDoc(id){
 }
 
 function saveEditDoc(id){
+  if(!isAdmin()){ toast('View-only — admin access required','error'); return; }
   const doc=byId(id);
   if(!doc){document.getElementById('modal').style.display='none';return;}
   doc.last=document.getElementById('ed-last').value.trim()||doc.last;
@@ -3348,6 +3356,7 @@ function addPhysician(){
   toast(`Added ${last}`,'success');
 }
 function saveCfg(){
+  if(!isAdmin()){ toast('Admin only','error'); return; }
   S.cfg.annual=parseInt(document.getElementById('c-annual').value);
   S.cfg.R=parseInt(document.getElementById('c-r').value);
   S.cfg.S=parseInt(document.getElementById('c-s').value);
@@ -3510,57 +3519,6 @@ document.getElementById('myq-sel').value=`${defReqY}-${defReqQ}`;
 document.getElementById('req-q-sel').value=`${defReqY}-${defReqQ}`;
 S.ui.requestQuarter=`${defReqY}-${defReqQ}`;
 S.ui.adminReqQuarter=`${defReqY}-${defReqQ}`;
-
-// ── ASYNC STARTUP ──────────────────────────────────────────
-async function appInit(){
-  const supabaseEl = document.getElementById('supabase-status');
-
-  // Check if Supabase is configured
-  const sb = getSB();
-  if(!sb){
-    if(supabaseEl) supabaseEl.textContent = '⚠ No database configured — running in local mode';
-    // Skip login — just use localStorage and grant admin
-    isAdmin = true;
-    document.getElementById('login-overlay').style.display='none';
-    await loadData();
-    finishInit();
-    return;
-  }
-
-  if(supabaseEl) supabaseEl.textContent = '✓ Connected — enter password or continue as viewer';
-
-  // Check if already logged in this session
-  if(sessionStorage.getItem('hs_admin') === '1'){
-    isAdmin = true;
-    document.getElementById('login-overlay').style.display='none';
-    setReadOnly(false);
-    await loadData();
-    finishInit();
-    return;
-  }
-
-  // Show login — user will call finishInit after choosing
-}
-
-function finishInit(){
-  populatePhysPicker();
-  updateQuarterInfo();
-  renderSchedule();
-  updateGenButton();
-  renderRoster();
-  renderDocList();
-  renderHolidayTable();
-  loadAnnouncement();
-  lastSyncTime = Date.now();
-  if(!isAdmin){
-    setReadOnly(true);
-    // Viewers auto-refresh every 30s
-    setInterval(async ()=>{
-      await loadData();
-      renderSchedule();
-    }, 30000);
-  }
-}
 
 // ── STARTUP ───────────────────────────────────────────────
 async function appInit(){
