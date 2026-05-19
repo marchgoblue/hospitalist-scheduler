@@ -672,7 +672,8 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
         <div class="fg"><label>Swing/Day</label><input type="number" id="c-s" value="3" style="width:80px"></div>
       </div>
       <div class="row">
-        <div class="fg"><label>Max Requests/Quarter</label><input type="number" id="c-max-req" value="20" style="width:90px"></div>
+        <div class="fg"><label>Max Requests/Quarter</label><input type="number" id="c-max-req" value="15" style="width:90px"></div>
+        <div class="fg"><label>Max Required Requests</label><input type="number" id="c-max-required" value="5" style="width:90px"></div>
         <div class="fg"><label>Max Weekend Requests</label><input type="number" id="c-max-wk" value="6" style="width:90px"></div>
       </div>
       <button class="btn btn-p btn-sm" onclick="saveCfg()">Save</button>
@@ -763,7 +764,8 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
       <div class="fb mb">
         <h3>Your Selections</h3>
         <div class="fl" style="gap:6px">
-          <span class="req-counter" id="cnt-total">0 / 20</span>
+          <span class="req-counter" id="cnt-total">0 / 15</span>
+          <span class="req-counter" id="cnt-required">0 / 5 req</span>
           <span class="req-counter" id="cnt-weekend">0 / 6 wkend</span>
         </div>
       </div>
@@ -892,7 +894,7 @@ let S = {
   cycleStarts: {},         // {quarterKey: {docId: dateStr}}  -- their cycle start day for that quarter
   hols: {},                // {year: {docId: {tg:bool, xm:bool}}}
   announcement: '',        // admin message displayed in physician portal
-  cfg: {annual:182, R:13, S:3, maxReq:20, maxWeekendReq:6},
+  cfg: {annual:182, R:13, S:3, maxReq:15, maxWeekendReq:6, maxRequired:5},
   ui: {
     role:'admin',          // 'admin' or 'phys'
     currentPhysId: 'adelore',  // physician viewing as
@@ -1175,6 +1177,8 @@ function holName(key){
 //    Each R-shift doc gets team 1-13; persists through their block;
 //    new blocks avoid last 3 team numbers where possible
 // ════════════════════════════════════════════════════════
+function isStrictStyle(doc){const s=doc&&doc.preferences&&doc.preferences.scheduleStyle;return s==='strict'||s==='strict-swing-block';}
+function isSwingBlock(doc){return doc&&doc.preferences&&doc.preferences.scheduleStyle==='strict-swing-block';}
 function getPreferredR(doc){
   return (doc.preferences && doc.preferences.preferredR) || 5;
 }
@@ -1193,6 +1197,7 @@ function generateQuarter(){
   const totalDays=Math.floor((range.end-startD)/86400000)+1;
 
   const allActive=activeDocs(year,range.months[0]);
+  // Swing-block providers are in the normal rotation — same as variable, just S blocks of 7
   const rotation=allActive.filter(d=>d.type==='standard' && d.fte===1.0);
   const partTime=allActive.filter(d=>d.type==='standard' && d.fte<1.0);
   const swingOnly=allActive.filter(d=>d.type==='swing-only');
@@ -1238,7 +1243,9 @@ function generateQuarter(){
         workInBlock:workDay, lastShift, runLen,
         qR:0, qS:0, monthCount:[0,0,0,0,0,0,0,0,0,0,0,0],
         preferredR:getPreferredR(doc), maxWork:getMaxWork(doc),
-        teamHistory:[]
+        teamHistory:[],
+        swingBlockUsed: false,  // for strict-swing-block style: tracks if 7S block used
+        isSwingBlockStyle: isSwingBlock(doc)
       };
     } else {
       const restDay=phase-7;
@@ -1247,7 +1254,9 @@ function generateQuarter(){
         workInBlock:0, lastShift:null, runLen:restDay,
         qR:0, qS:0, monthCount:[0,0,0,0,0,0,0,0,0,0,0,0],
         preferredR:getPreferredR(doc), maxWork:getMaxWork(doc),
-        teamHistory:[]
+        teamHistory:[],
+        swingBlockUsed: false,
+        isSwingBlockStyle: isSwingBlock(doc)
       };
     }
   });
@@ -1267,11 +1276,25 @@ function generateQuarter(){
     if(s.lastShift==='S') return s.runLen<MAX_S_BLOCK;  // continuation: cap at MAX_S_BLOCK
     return false;
   }
+  function getMaxS(docId){
+    // Swing-block providers get a single 7-day S block per quarter;
+    // once used, they get no more S (MAX_S_BLOCK=0).
+    // All others: MAX_S_BLOCK=2 (standard couplet).
+    const s=state[docId];
+    if(!s) return MAX_S_BLOCK;
+    if(s.isSwingBlockStyle){
+      if(s.swingBlockUsed) return 0;  // already used their block this quarter
+      return 7;                        // allow up to 7 consecutive S
+    }
+    return MAX_S_BLOCK;
+  }
   function canBeS_normal(docId){
     const s=state[docId];
     if(!s||s.block!=='W') return false;
     if(s.workInBlock>=s.maxWork) return false;
-    if(s.lastShift==='S') return s.runLen<MAX_S_BLOCK;
+    const maxS=getMaxS(docId);
+    if(maxS===0) return false;
+    if(s.lastShift==='S') return s.runLen<maxS;
     if(s.lastShift==='R' && s.runLen>=s.preferredR)
       return s.workInBlock+1<=s.maxWork;
     return false;
@@ -1280,7 +1303,9 @@ function generateQuarter(){
     const s=state[docId];
     if(!s||s.block!=='W') return false;
     if(s.workInBlock>=s.maxWork) return false;
-    if(s.lastShift==='S') return s.runLen<MAX_S_BLOCK;
+    const maxS=getMaxS(docId);
+    if(maxS===0) return false;
+    if(s.lastShift==='S') return s.runLen<maxS;
     if(s.lastShift==='R' && s.runLen>=MIN_R_HARD)
       return s.workInBlock+1<=s.maxWork;
     return false;
@@ -1288,6 +1313,7 @@ function generateQuarter(){
   function canBeS_lastResort(docId){
     const s=state[docId];
     if(!s||s.block!=='O') return false;
+    if(s.isSwingBlockStyle&&s.swingBlockUsed) return false;  // no more S after block used
     return s.dayInBlock>=MIN_R_HARD;
   }
   function mustContinueR(docId){
@@ -1297,15 +1323,23 @@ function generateQuarter(){
   }
   function mustContinueS_couplet(docId){
     const s=state[docId];
-    // Must complete couplet: exactly 1 S done, haven't hit MAX_S_BLOCK yet
-    return s&&s.block==='W'&&s.lastShift==='S'
-        &&s.runLen===1&&s.runLen<MAX_S_BLOCK&&s.workInBlock<s.maxWork;
+    if(!s||s.block!=='W'||s.lastShift!=='S'||s.workInBlock>=s.maxWork) return false;
+    const maxS=getMaxS(docId);
+    if(maxS===0) return false;
+    if(s.isSwingBlockStyle&&!s.swingBlockUsed){
+      // Force continuation of swing block up to 7 days
+      return s.runLen < 7;
+    }
+    // Standard: force 2-day couplet completion
+    return s.runLen===1 && s.runLen<MAX_S_BLOCK;
   }
   function canBeOff(docId){
     const s=state[docId];
     if(!s) return true;
     if(s.block==='W'&&s.lastShift==='R'&&s.runLen<MIN_R_HARD) return false;
-    if(s.block==='W'&&s.lastShift==='S'&&s.runLen<MAX_S_BLOCK&&s.workInBlock<s.maxWork) return false;
+    // Swing-block in progress must not be interrupted
+    if(s.block==='W'&&s.lastShift==='S'&&s.isSwingBlockStyle&&!s.swingBlockUsed&&s.runLen<7) return false;
+    if(s.block==='W'&&s.lastShift==='S'&&!s.isSwingBlockStyle&&s.runLen<MAX_S_BLOCK&&s.workInBlock<s.maxWork) return false;
     return true;
   }
   function assign(docId,shift,month){
@@ -1319,6 +1353,10 @@ function generateQuarter(){
       s.lastShift=shift;
       if(shift==='R') s.qR++; else s.qS++;
       s.monthCount[month]++;
+      // Mark swing block as used once the 7th consecutive S day is assigned
+      if(shift==='S' && s.isSwingBlockStyle && !s.swingBlockUsed && s.runLen>=7){
+        s.swingBlockUsed=true;
+      }
     } else {
       if(s.block==='W'&&s.workInBlock>0){
         s.lastWorkSize=s.workInBlock;
@@ -1369,6 +1407,8 @@ function generateQuarter(){
       if(pos<7){S.sched[doc.id][ds]='S';slavinaS++;}
       else{S.sched[doc.id][ds]='OFF';}
     });
+
+
 
     let marchR=0,marchS=0;
     partTime.forEach(doc=>{
@@ -2071,7 +2111,7 @@ function renderMyRequestCal(){
   const peerBanner=document.getElementById('req-peer-banner');
   if(peerBanner){
     const curDocReq=byId(S.ui.currentPhysId);
-    const isStrictDoc=curDocReq&&curDocReq.preferences&&curDocReq.preferences.scheduleStyle==='strict';
+    const isStrictDoc=isStrictStyle(curDocReq);
     if(isStrictDoc){
       peerBanner.style.display='none';
     } else {
@@ -2103,7 +2143,7 @@ function renderMyRequestCal(){
 
   // Check if provider has strict 7-on/7-off — grey out calendar if so
   const curDocForReq=byId(S.ui.currentPhysId);
-  const isStrict=curDocForReq&&curDocForReq.preferences&&curDocForReq.preferences.scheduleStyle==='strict';
+  const isStrict=isStrictStyle(curDocForReq);
   if(isStrict){
     document.getElementById('my-req-cal').innerHTML='';
     const statusEl=document.getElementById('active-phys-status');
@@ -2246,6 +2286,8 @@ function toggleRequestDate(ds){
       return;
     }
     if(requestType === 'required'){
+      const maxReq2 = S.cfg.maxRequired || 5;
+      if(entry.required.length >= maxReq2){toast(`Required limit: max ${maxReq2} required dates per quarter`,'error');return;}
       entry.required.push(ds);
       entry.required.sort();
     } else {
@@ -2268,10 +2310,12 @@ function renderMyRequestList(){
   const total = req.length + opt.length;
   const weekendCount = [...req, ...opt].filter(s=>isWeekend(parseD(s))).length;
 
+  const maxRequired2 = S.cfg.maxRequired || 5;
   const totalEl=document.getElementById('cnt-total');
   totalEl.textContent=`${total} / ${S.cfg.maxReq}`;
-  totalEl.className='req-counter '+(total>=S.cfg.maxReq?'bad':total>=S.cfg.maxReq-3?'warn':'ok');
-
+  totalEl.className='req-counter '+(total>=S.cfg.maxReq?'bad':total>=S.cfg.maxReq-2?'warn':'ok');
+  const reqEl=document.getElementById('cnt-required');
+  if(reqEl){reqEl.textContent=`${req.length} / ${maxRequired2} req`;reqEl.className='req-counter '+(req.length>=maxRequired2?'bad':req.length>=maxRequired2-1?'warn':'ok');}
   const wkEl=document.getElementById('cnt-weekend');
   wkEl.textContent=`${weekendCount} / ${S.cfg.maxWeekendReq} wkend`;
   wkEl.className='req-counter '+(weekendCount>=S.cfg.maxWeekendReq?'bad':weekendCount>=S.cfg.maxWeekendReq-1?'warn':'ok');
@@ -2487,7 +2531,7 @@ function renderMySchedule(){
 
   // Request honoring peer comparison — skip for strict 7on/7off providers
   let peerHTML='';
-  if(!doc.preferences||doc.preferences.scheduleStyle!=='strict'){
+  if(!isStrictStyle(doc)){
     const myRate=getHonoringRate(docId, yr);
     const allRates=getHonoringStats(yr);
     if(allRates.length>1){
@@ -3029,8 +3073,10 @@ function renderRoster(){
       : '<span class="tx-mu">5R</span>';
     const style=(d.preferences&&d.preferences.scheduleStyle)||'variable';
     const styleBadge=style==='strict'
-      ? '<span style="background:#dde9f7;color:#1b4d8f;font-size:10px;font-weight:700;padding:1px 6px;border-radius:2px;border:1px solid #b8d4f0">7on/7off</span>'
-      : '<span class="tx-mu" style="font-size:11px">Variable</span>';
+      ?'<span style="background:#dde9f7;color:#1b4d8f;font-size:10px;font-weight:700;padding:1px 6px;border-radius:2px;border:1px solid #b8d4f0">7on/7off</span>'
+      :style==='strict-swing-block'
+        ?'<span style="background:#e8f5e9;color:#0a7044;font-size:10px;font-weight:700;padding:1px 6px;border-radius:2px;border:1px solid #a8d8b8">7on/7off swing</span>'
+        :'<span class="tx-mu" style="font-size:11px">Variable</span>';
     html+=`<tr style="opacity:${d.active?1:.5}">
       <td>${dname(d)}</td><td>${d.role}</td><td>${d.fte}</td><td>${d.type}</td>
       <td>${styleBadge}</td>
@@ -3089,18 +3135,25 @@ function openEditDoc(id){
       <div style="font-weight:700;font-size:12px;color:var(--ink2);margin-bottom:8px">Scheduling Preferences</div>
       <div style="margin-bottom:10px">
         <div class="tx-xs tx-mu" style="margin-bottom:6px;font-weight:700">Scheduling Style</div>
-        <label style="display:flex;align-items:flex-start;gap:8px;padding:8px 10px;border:1.5px solid var(--line);border-radius:4px;margin-bottom:6px;cursor:pointer;background:${(doc.preferences&&doc.preferences.scheduleStyle==='strict')?'#eef5fb':'#fff'}">
+        <label style="display:flex;align-items:flex-start;gap:8px;padding:8px 10px;border:1.5px solid var(--line);border-radius:4px;margin-bottom:6px;cursor:pointer">
           <input type="radio" name="ed-style" value="strict" id="ed-style-strict" ${(doc.preferences&&doc.preferences.scheduleStyle==='strict')?'checked':''} style="margin-top:2px">
           <div>
-            <div style="font-weight:700;font-size:12px;color:#1b4d8f">Strict 7-on / 7-off</div>
-            <div class="tx-xs tx-mu">Repeating schedule: 5R + 2S every two weeks (give or take a swing for group fairness). Very predictable cycle.</div>
+            <div style="font-weight:700;font-size:12px;color:#1b4d8f">Strict 7-on / 7-off (mixed shifts)</div>
+            <div class="tx-xs tx-mu">Repeating 5R+2S pattern every two weeks. Swing shifts are 2-day couplets at the end of rounding blocks. Time-off requests disabled.</div>
           </div>
         </label>
-        <label style="display:flex;align-items:flex-start;gap:8px;padding:8px 10px;border:1.5px solid var(--line);border-radius:4px;cursor:pointer;background:${(!doc.preferences||doc.preferences.scheduleStyle!=='strict')?'#eef5fb':'#fff'}">
-          <input type="radio" name="ed-style" value="variable" id="ed-style-variable" ${(!doc.preferences||doc.preferences.scheduleStyle!=='strict')?'checked':''} style="margin-top:2px">
+        <label style="display:flex;align-items:flex-start;gap:8px;padding:8px 10px;border:1.5px solid var(--line);border-radius:4px;margin-bottom:6px;cursor:pointer">
+          <input type="radio" name="ed-style" value="strict-swing-block" id="ed-style-swing-block" ${(doc.preferences&&doc.preferences.scheduleStyle==='strict-swing-block')?'checked':''} style="margin-top:2px">
+          <div>
+            <div style="font-weight:700;font-size:12px;color:#1b4d8f">Strict 7-on / 7-off (swing block)</div>
+            <div class="tx-xs tx-mu">Alternating pure weeks: 7R one week on, then 7S the next working week. Full swing blocks rather than couplets. Staggered with other swing-block providers. Time-off requests disabled.</div>
+          </div>
+        </label>
+        <label style="display:flex;align-items:flex-start;gap:8px;padding:8px 10px;border:1.5px solid var(--line);border-radius:4px;cursor:pointer">
+          <input type="radio" name="ed-style" value="variable" id="ed-style-variable" ${(!doc.preferences||doc.preferences.scheduleStyle==='variable'||!doc.preferences.scheduleStyle)?'checked':''} style="margin-top:2px">
           <div>
             <div style="font-weight:700;font-size:12px;color:#1b4d8f">Variable</div>
-            <div class="tx-xs tx-mu">Meets all shift and swing quotas following block rules, but the day-on / day-off pattern varies. More flexible.</div>
+            <div class="tx-xs tx-mu">Meets all shift and swing quotas. Day-on / day-off pattern varies week to week. Most flexible, with time-off requests enabled.</div>
           </div>
         </label>
       </div>
@@ -3188,6 +3241,7 @@ function saveCfg(){
   S.cfg.R=parseInt(document.getElementById('c-r').value);
   S.cfg.S=parseInt(document.getElementById('c-s').value);
   S.cfg.maxReq=parseInt(document.getElementById('c-max-req').value);
+  S.cfg.maxRequired=parseInt(document.getElementById('c-max-required')?.value)||5;
   S.cfg.maxWeekendReq=parseInt(document.getElementById('c-max-wk').value);
   saveData();toast('Settings saved','success');
 }
@@ -3336,6 +3390,8 @@ document.getElementById('c-annual').value=S.cfg.annual;
 document.getElementById('c-r').value=S.cfg.R;
 document.getElementById('c-s').value=S.cfg.S;
 document.getElementById('c-max-req').value=S.cfg.maxReq;
+if(document.getElementById('c-max-required'))
+  document.getElementById('c-max-required').value=S.cfg.maxRequired||5;
 document.getElementById('c-max-wk').value=S.cfg.maxWeekendReq;
 
 // Default request quarter to next quarter
