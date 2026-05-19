@@ -1180,9 +1180,13 @@ function holName(key){
 function isStrictStyle(doc){const s=doc&&doc.preferences&&doc.preferences.scheduleStyle;return s==='strict'||s==='strict-swing-block';}
 function isSwingBlock(doc){return doc&&doc.preferences&&doc.preferences.scheduleStyle==='strict-swing-block';}
 function getPreferredR(doc){
+  // Swing-block providers prefer 7 R days before transitioning into their 7 S days
+  if(isSwingBlock(doc)) return 7;
   return (doc.preferences && doc.preferences.preferredR) || 5;
 }
 function getMaxWork(doc){
+  // Swing-block providers need 14 (7R + 7S) consecutive when their block lands
+  if(isSwingBlock(doc)) return Math.max(14, (doc.preferences&&doc.preferences.maxWork)||14);
   return (doc.preferences && doc.preferences.maxWork) || 7;
 }
 
@@ -2072,10 +2076,58 @@ function renderSchedule(){
 
 
 // ════════════════════════════════════════════════════════
-//  QUARTER TOTAL PANEL — two-table layout
-//  Main table scrolls horizontally; right panel is fixed-width,
-//  heights synced via JS, vertical scroll locked together.
+//  CELL INTERACTION — click cycles, fill mode, row/col highlight
 // ════════════════════════════════════════════════════════
+
+function toggleRowHighlight(docId){
+  S.ui.selectedRow = (S.ui.selectedRow===docId) ? null : docId;
+  renderSchedule();
+}
+function toggleColHighlight(ds){
+  if(!(S.ui.selectedCols instanceof Set)) S.ui.selectedCols=new Set();
+  if(S.ui.selectedCols.has(ds)) S.ui.selectedCols.delete(ds);
+  else S.ui.selectedCols.add(ds);
+  renderSchedule();
+}
+
+// ── Fill mode (Fill R / Fill S / Fill OFF buttons) ─────
+function setShiftMode(mode){
+  if(!isAdmin()&&mode){ toast('View-only — admin access required','error'); return; }
+  S.ui.fillMode=mode;
+  const lbl=document.getElementById('fill-mode-label');
+  if(lbl) lbl.textContent = mode
+    ? `Fill mode: ${mode} — click cells to apply`
+    : 'Click cell to cycle R→S→N→OFF · Double-click name to open';
+  ['R','S','OFF','none'].forEach(m=>{
+    const btn=document.getElementById('m-fill-'+(m==='none'?'none':m.toLowerCase()));
+    if(btn) btn.classList.remove('btn-p');
+  });
+  if(mode){
+    const btn=document.getElementById('m-fill-'+mode.toLowerCase());
+    if(btn) btn.classList.add('btn-p');
+  }
+}
+
+// ── Cell click: cycles R→S→N→OFF, or applies fill mode ─
+const SHIFT_CYCLE=['R','S','N','OFF'];
+function cycleCell(docId,ds){
+  if(!isAdmin()){ toast('View-only — sign in as admin to edit','error'); return; }
+  if(S.ui.fillMode){
+    if(!S.sched[docId]) S.sched[docId]={};
+    S.sched[docId][ds]=S.ui.fillMode;
+    saveData();
+    renderSchedule();
+    return;
+  }
+  const cur=(S.sched[docId]&&S.sched[docId][ds])||'OFF';
+  const idx=SHIFT_CYCLE.indexOf(cur);
+  const next=SHIFT_CYCLE[(idx+1)%SHIFT_CYCLE.length];
+  if(!S.sched[docId]) S.sched[docId]={};
+  S.sched[docId][ds]=next;
+  saveData();
+  renderSchedule();
+}
+function cellClick(docId,ds){ cycleCell(docId,ds); }
 
 // ════════════════════════════════════════════════════════
 //  WEEKLY VIEW
