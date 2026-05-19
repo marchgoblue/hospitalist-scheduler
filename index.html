@@ -480,6 +480,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
     <span id="user-display" style="font-size:12px;color:var(--ink3);font-weight:600;margin-right:4px"></span>
     <span id="sync-status">⏳ loading</span>
     <button class="btn btn-p btn-sm" id="save-btn" onclick="saveData()" disabled>💾 Save</button>
+    <button class="btn btn-sm" onclick="showChangePasswordModal()" title="Change your password">🔒 Pwd</button>
     <button class="btn btn-sm" style="background:#f3f3f3;border-color:#ccc" onclick="logout()" title="Sign out">↩ Out</button>
   </div>
 </div>
@@ -899,7 +900,7 @@ let S = {
     wkStart:null,
     fillMode:null,
     calMode:'next3',   // physician calendar view mode
-    calYear:2026,      // physician calendar view year
+    calYear:new Date().getFullYear(), // physician calendar view year
     selectedRow:null,  // docId of highlighted row
     selectedCols:new Set(), // set of date strings with highlighted cols
     requestQuarter:'2025-1',
@@ -967,7 +968,23 @@ function setSyncStatus(state){
 let lastSyncTime=0;
 async function pollForChanges(){
   const sb=getSB();if(!sb)return;
-  try{const{data}=await sb.from('schedule_data').select('updated_at').eq('id',DATA_ROW_ID).single();if(data){const t=new Date(data.updated_at).getTime();if(t>lastSyncTime&&lastSyncTime>0){await loadData();renderSchedule();toast('Schedule updated','info');}lastSyncTime=t;}}catch(e){}
+  try{
+    const{data}=await sb.from('schedule_data').select('updated_at').eq('id',DATA_ROW_ID).single();
+    if(data){
+      const t=new Date(data.updated_at).getTime();
+      if(t>lastSyncTime&&lastSyncTime>0){
+        // Don't auto-refresh if physician is actively entering requests
+        const onReqPage=document.getElementById('pg-myreq')?.classList.contains('on');
+        if(onReqPage&&isPhysician()){lastSyncTime=t;return;}
+        await loadData();
+        renderSchedule();
+        // Only show toast if we're on the schedule page
+        if(document.getElementById('pg-sched')?.classList.contains('on'))
+          toast('Schedule updated by admin','info');
+      }
+      lastSyncTime=t;
+    }
+  }catch(e){}
 }
 setInterval(pollForChanges,30000);
 
@@ -3333,15 +3350,36 @@ S.ui.adminReqQuarter=`${defReqY}-${defReqQ}`;
 async function appInit(){
   const sb=getSB();
   const statusEl=document.getElementById('supabase-status');
-  const saved=sessionStorage.getItem('hs_user');
-  if(saved){try{currentUser=JSON.parse(saved);}catch(e){sessionStorage.removeItem('hs_user');currentUser=null;}}
+
   if(!sb){
     if(statusEl)statusEl.textContent='⚠ No database — local mode (admin/admin)';
-    if(!currentUser){currentUser={username:'admin',role:'admin',docId:null};document.getElementById('login-overlay').style.display='none';}
+    currentUser={username:'admin',role:'admin',docId:null};
+    document.getElementById('login-overlay').style.display='none';
     await loadData();finishInit();return;
   }
+
   if(statusEl)statusEl.textContent='✓ Connected — enter your credentials';
-  if(currentUser){document.getElementById('login-overlay').style.display='none';await loadData();finishInit();}
+
+  // Restore session — but VERIFY against database to prevent sessionStorage tampering
+  const saved=sessionStorage.getItem('hs_user');
+  if(saved){
+    let parsed=null;
+    try{parsed=JSON.parse(saved);}catch(e){}
+    if(parsed&&parsed.username){
+      // Re-verify this user actually exists in the DB with the stored role
+      const dbUser=await getUser(parsed.username);
+      if(dbUser&&dbUser.role===parsed.role&&dbUser.doc_id===parsed.docId){
+        currentUser=parsed;
+        document.getElementById('login-overlay').style.display='none';
+        await loadData();finishInit();return;
+      } else {
+        // Session tampered or user deleted — force re-login
+        sessionStorage.removeItem('hs_user');
+        currentUser=null;
+      }
+    }
+  }
+  // Show login overlay
 }
 
 async function finishInit(){
