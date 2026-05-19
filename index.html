@@ -1314,7 +1314,9 @@ function generateQuarter(){
     const s=state[docId];
     if(!s||s.block!=='O') return false;
     if(s.isSwingBlockStyle&&s.swingBlockUsed) return false;  // no more S after block used
-    return s.dayInBlock>=MIN_R_HARD;
+    // Allow ANY rested provider — even just 1 day off — when coverage is critical.
+    // The alternative is leaving the swing slot empty, which is worse.
+    return s.dayInBlock>=1;
   }
   function mustContinueR(docId){
     const s=state[docId];
@@ -1535,7 +1537,7 @@ function generateQuarter(){
       }
     }
 
-    // STEP 5: Fill R
+    // STEP 5a: Normal R fill — candidates eligible by rest rules
     const rCandidates=rotation
       .filter(d=>!assigned.has(d.id)&&canBeR(d.id))
       .sort((a,b)=>{
@@ -1553,6 +1555,56 @@ function generateQuarter(){
     while(needR>0&&ri<rCandidates.length){
       const doc=rCandidates[ri];
       S.sched[doc.id][ds]='R';assign(doc.id,'R',month);assigned.add(doc.id);needR--;ri++;
+    }
+
+    // STEP 5b: Emergency R — relax rest requirement, allow rest ≥ MIN_R_HARD
+    if(needR>0){
+      const rEmerg=rotation
+        .filter(d=>{
+          if(assigned.has(d.id)) return false;
+          const s=state[d.id];
+          if(!s||s.lastShift==='S') return false;
+          if(s.block==='W') return s.workInBlock<s.maxWork; // already eligible, just not picked
+          // OFF block: relax rest from lastWorkSize to MIN_R_HARD
+          return s.dayInBlock>=MIN_R_HARD;
+        })
+        .sort((a,b)=>{
+          const sa=state[a.id],sb=state[b.id];
+          if(sa.monthCount[month]!==sb.monthCount[month]) return sa.monthCount[month]-sb.monthCount[month];
+          if(sa.qR!==sb.qR) return sa.qR-sb.qR;
+          const aRest=(sa.block==='O')?sa.dayInBlock:0;
+          const bRest=(sb.block==='O')?sb.dayInBlock:0;
+          return bRest-aRest;
+        });
+      let rei=0;
+      while(needR>0&&rei<rEmerg.length){
+        const doc=rEmerg[rei];
+        S.sched[doc.id][ds]='R';assign(doc.id,'R',month);assigned.add(doc.id);needR--;rei++;
+      }
+    }
+
+    // STEP 5c: Last resort R — any rested OFF doc (lifts rest requirement entirely)
+    // Guarantees 13 rounders unless literally every provider is mid-block or just finished one
+    if(needR>0){
+      const rLast=rotation
+        .filter(d=>{
+          if(assigned.has(d.id)) return false;
+          const s=state[d.id];
+          if(!s) return false;
+          if(s.lastShift==='S') return false;       // no S→R transition allowed
+          if(s.block==='W') return false;            // mid-block already handled above
+          return s.dayInBlock>=1;                    // at least 1 day off
+        })
+        .sort((a,b)=>{
+          const sa=state[a.id],sb=state[b.id];
+          if(sa.qR!==sb.qR) return sa.qR-sb.qR;
+          return sb.dayInBlock-sa.dayInBlock;
+        });
+      let rli=0;
+      while(needR>0&&rli<rLast.length){
+        const doc=rLast[rli];
+        S.sched[doc.id][ds]='R';assign(doc.id,'R',month);assigned.add(doc.id);needR--;rli++;
+      }
     }
 
     // STEP 6: Everyone else OFF
