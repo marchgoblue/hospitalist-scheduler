@@ -1189,6 +1189,14 @@ function getMaxWork(doc){
 }
 
 function generateQuarter(){
+  try {
+    _generateQuarter();
+  } catch(e) {
+    console.error('generateQuarter error:', e);
+    toast('Schedule generation error: ' + e.message, 'error');
+  }
+}
+function _generateQuarter(){
   const year=parseInt(document.getElementById('yr-sel').value);
   const q=parseInt(document.getElementById('q-sel').value);
   S.ui.year=year; S.ui.quarter=q;
@@ -2113,8 +2121,15 @@ function toggleRowHighlight(docId){
 }
 function toggleColHighlight(ds){
   if(!(S.ui.selectedCols instanceof Set)) S.ui.selectedCols=new Set();
-  if(S.ui.selectedCols.has(ds)) S.ui.selectedCols.delete(ds);
-  else S.ui.selectedCols.add(ds);
+  // Single-select: clicking a new column clears the previous one
+  if(S.ui.selectedCols.has(ds)){
+    // Clicking the already-selected column deselects it
+    S.ui.selectedCols.clear();
+  } else {
+    // Select this column, clearing any previous selection
+    S.ui.selectedCols.clear();
+    S.ui.selectedCols.add(ds);
+  }
   renderSchedule();
 }
 
