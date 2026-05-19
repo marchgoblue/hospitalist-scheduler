@@ -196,6 +196,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
 .sheet tbody td.cell.selected{outline:2px solid var(--selected);outline-offset:-2px;z-index:3}
 .sheet tbody td.cell.month-sep{border-left:2px solid #999}
 .sheet tbody td.cell.has-request{box-shadow:inset 0 0 0 2px var(--req-tx)}
+.sheet tbody td.cell.has-req-required{background:#fde2e2!important;color:#a01918!important;font-weight:700;box-shadow:inset 0 0 0 2px #a01918}
 
 /* Shift backgrounds */
 .cell-R{background:var(--R)!important;color:var(--R-tx)}
@@ -1180,8 +1181,6 @@ function holName(key){
 function isStrictStyle(doc){const s=doc&&doc.preferences&&doc.preferences.scheduleStyle;return s==='strict'||s==='strict-swing-block';}
 function isSwingBlock(doc){return doc&&doc.preferences&&doc.preferences.scheduleStyle==='strict-swing-block';}
 function getPreferredR(doc){
-  // Swing-block providers prefer 7 R days before transitioning into their 7 S days
-  if(isSwingBlock(doc)) return 7;
   return (doc.preferences && doc.preferences.preferredR) || 5;
 }
 function getMaxWork(doc){
@@ -1207,14 +1206,86 @@ function _generateQuarter(){
   const totalDays=Math.floor((range.end-startD)/86400000)+1;
 
   const allActive=activeDocs(year,range.months[0]);
-  // Swing-block providers are in the normal rotation — same as variable, just S blocks of 7
-  const rotation=allActive.filter(d=>d.type==='standard' && d.fte===1.0);
-  const partTime=allActive.filter(d=>d.type==='standard' && d.fte<1.0);
   const swingOnly=allActive.filter(d=>d.type==='swing-only');
   const weekdayOnly=allActive.filter(d=>d.type==='weekday-only');
   const nocturnists=allActive.filter(d=>d.type==='nocturnist');
 
+  // Strict providers are pre-assigned before variable scheduling
+  const strictMixed=allActive.filter(d=>d.type==='standard'&&d.preferences&&d.preferences.scheduleStyle==='strict');
+  const strictSwing=allActive.filter(d=>d.type==='standard'&&d.preferences&&d.preferences.scheduleStyle==='strict-swing-block');
+  const strictAll=[...strictMixed,...strictSwing];
+
+  // Variable providers: everyone else (full-time and part-time)
+  const rotation=allActive.filter(d=>d.type==='standard'&&d.fte===1.0&&!isStrictStyle(d));
+  const partTime=allActive.filter(d=>d.type==='standard'&&d.fte<1.0&&!isStrictStyle(d));
+
   rotation.sort((a,b)=>a.last.localeCompare(b.last)||a.first.localeCompare(b.first));
+
+  // ── PRE-ASSIGN STRICT PROVIDERS ─────────────────────────────────────────
+  // Phase is determined by roster position so it's consistent every quarter.
+  // strict-mixed: 14-day cycle (5R + 2S on, 7 off), staggered across providers
+  // strict-swing-block: 28-day cycle (7R on, 7 off, 7S on, 7 off), staggered
+  // The starting day of the quarter relative to the cycle is fixed by the year
+  // so schedules repeat identically quarter over quarter.
+  const qStartDay=Math.floor((startD-new Date(year,0,1))/(86400000)); // day of year
+
+  // Target ~8 S per quarter total for strict providers (same as variable)
+  const strictSTarget = Math.round(S.cfg.S * totalDays / (rotation.length + strictAll.length || 1));
+
+  // ── STRICT-MIXED: 7on/7off, append 0-2 S days to each work week ──────────
+  // Work week = days 0-6 of 14-day cycle, rest = days 7-13.
+  // S days are appended at end of work week (positions 5-6) only when
+  // the provider is below their quarterly S target.
+  // Stagger phases so work weeks are spread across the group.
+  strictMixed.forEach((doc,idx)=>{
+    const phase=Math.round(idx*14/Math.max(strictMixed.length,1))%14;
+    let qS=0; // running quarterly S count for this provider
+    for(let di=0;di<totalDays;di++){
+      const ds=dstrD(addD(startD,di));
+      if(doc.startDate&&doc.startDate>ds){S.sched[doc.id][ds]='OFF';continue;}
+      const pos=((di+phase)%14+14)%14;
+      if(pos<5){
+        S.sched[doc.id][ds]='R';
+      } else if(pos<7){
+        if(qS<strictSTarget){
+          S.sched[doc.id][ds]='S'; qS++;
+        } else {
+          S.sched[doc.id][ds]='R';
+        }
+      } else {
+        S.sched[doc.id][ds]='OFF';
+      }
+    }
+  });
+
+  // ── STRICT SWING-BLOCK: 7on/7off, one full 7S week per quarter ───────────
+  // All work weeks are pure 7R EXCEPT one dedicated swing week per quarter.
+  // The swing week is placed at a fixed position in the quarter (week 4 of ~6.5 cycles)
+  // and staggered between providers so their swing weeks don't overlap.
+  // Pattern per quarter: 7R+7off, 7R+7off, 7R+7off, 7S+7off, 7R+7off, 7R+7off...
+  // The swing week index (which 14-day cycle gets the S week) is fixed per provider.
+  strictSwing.forEach((doc,idx)=>{
+    const phase=Math.round(idx*14/Math.max(strictSwing.length,1))%14;
+    // Swing week placement: roughly week 4 of the quarter, staggered by provider.
+    // Each provider's swing week is 14 days apart from the next.
+    // With ~6.5 cycles per quarter, placing at cycle 3,4,5... gives mid-quarter swing weeks.
+    const totalCycles=Math.round(totalDays/14); // ~6-7 cycles per quarter
+    const swingCycle=(3+idx)%totalCycles;       // which 14-day cycle is the swing week
+    for(let di=0;di<totalDays;di++){
+      const ds=dstrD(addD(startD,di));
+      if(doc.startDate&&doc.startDate>ds){S.sched[doc.id][ds]='OFF';continue;}
+      // Position within the 14-day cycle (phase-adjusted for staggering)
+      const pos=((di+phase)%14+14)%14;
+      // Which cycle are we in (based on raw quarter day, not phase-adjusted)
+      const cycleIdx=Math.floor(di/14)%totalCycles;
+      const isSwingWeek=(cycleIdx===swingCycle);
+      if(pos<7){
+        S.sched[doc.id][ds]=isSwingWeek?'S':'R';
+      } else {
+        S.sched[doc.id][ds]='OFF';
+      }
+    }
+  });
 
   if(!S.requests[qKey]) S.requests[qKey]={};
   const requests=S.requests[qKey];
@@ -1236,9 +1307,45 @@ function _generateQuarter(){
   // Target ~8 S per quarter → ~2.67 per month → we use 3 as soft cap
   const MONTHLY_S_TARGET=Math.round(8/3);  // 3
 
-  // State init — stagger across 14-phase cycle
+  // State init — look back at prior quarter to maintain continuity
+  // Read last 14 days of prior quarter to seed each provider's state.
+  // Fall back to staggered phase if no prior data exists.
   const state={};
   rotation.forEach((doc,i)=>{
+    // Try to read trailing state from prior quarter
+    let seededState=null;
+    {
+      const lookback=14;
+      let lastShift=null,runLen=0,block='O',workInBlock=0,dayInBlock=0,lastWorkSize=0;
+      let foundAny=false;
+      for(let lb=lookback;lb>=1;lb--){
+        const priorD=addD(startD,-lb);
+        const priorDs=dstrD(priorD);
+        const sh=(S.sched[doc.id]&&S.sched[doc.id][priorDs]);
+        if(!sh) continue;
+        foundAny=true;
+        if(sh==='R'||sh==='S'){
+          if(block==='O'){block='W';workInBlock=0;dayInBlock=0;}
+          workInBlock++;dayInBlock++;
+          runLen=(lastShift===sh)?runLen+1:1;
+          lastShift=sh;
+        } else {
+          if(block==='W'){lastWorkSize=workInBlock;}
+          block='O';dayInBlock++;runLen++;
+          lastShift=null;
+        }
+      }
+      if(foundAny){
+        seededState={
+          block,lastWorkSize,dayInBlock,workInBlock,lastShift,runLen,
+          qR:0,qS:0,monthCount:[0,0,0,0,0,0,0,0,0,0,0,0],
+          preferredR:getPreferredR(doc),maxWork:getMaxWork(doc),
+          teamHistory:[]
+        };
+      }
+    }
+    if(seededState){state[doc.id]=seededState;return;}
+    // No prior data — use staggered phase as before
     const phase=i%14;
     if(phase<7){
       const workDay=phase;
@@ -1253,9 +1360,7 @@ function _generateQuarter(){
         workInBlock:workDay, lastShift, runLen,
         qR:0, qS:0, monthCount:[0,0,0,0,0,0,0,0,0,0,0,0],
         preferredR:getPreferredR(doc), maxWork:getMaxWork(doc),
-        teamHistory:[],
-        swingBlockUsed: false,  // for strict-swing-block style: tracks if 7S block used
-        isSwingBlockStyle: isSwingBlock(doc)
+        teamHistory:[]
       };
     } else {
       const restDay=phase-7;
@@ -1264,12 +1369,10 @@ function _generateQuarter(){
         workInBlock:0, lastShift:null, runLen:restDay,
         qR:0, qS:0, monthCount:[0,0,0,0,0,0,0,0,0,0,0,0],
         preferredR:getPreferredR(doc), maxWork:getMaxWork(doc),
-        teamHistory:[],
-        swingBlockUsed: false,
-        isSwingBlockStyle: isSwingBlock(doc)
+        teamHistory:[]
       };
     }
-  });
+  }); // end rotation.forEach state init
 
   function canBeR(docId){
     const s=state[docId];
@@ -1287,24 +1390,13 @@ function _generateQuarter(){
     return false;
   }
   function getMaxS(docId){
-    // Swing-block providers get a single 7-day S block per quarter;
-    // once used, they get no more S (MAX_S_BLOCK=0).
-    // All others: MAX_S_BLOCK=2 (standard couplet).
-    const s=state[docId];
-    if(!s) return MAX_S_BLOCK;
-    if(s.isSwingBlockStyle){
-      if(s.swingBlockUsed) return 0;  // already used their block this quarter
-      return 7;                        // allow up to 7 consecutive S
-    }
     return MAX_S_BLOCK;
   }
   function canBeS_normal(docId){
     const s=state[docId];
     if(!s||s.block!=='W') return false;
     if(s.workInBlock>=s.maxWork) return false;
-    const maxS=getMaxS(docId);
-    if(maxS===0) return false;
-    if(s.lastShift==='S') return s.runLen<maxS;
+    if(s.lastShift==='S') return s.runLen<MAX_S_BLOCK;
     if(s.lastShift==='R' && s.runLen>=s.preferredR)
       return s.workInBlock+1<=s.maxWork;
     return false;
@@ -1313,9 +1405,7 @@ function _generateQuarter(){
     const s=state[docId];
     if(!s||s.block!=='W') return false;
     if(s.workInBlock>=s.maxWork) return false;
-    const maxS=getMaxS(docId);
-    if(maxS===0) return false;
-    if(s.lastShift==='S') return s.runLen<maxS;
+    if(s.lastShift==='S') return s.runLen<MAX_S_BLOCK;
     if(s.lastShift==='R' && s.runLen>=MIN_R_HARD)
       return s.workInBlock+1<=s.maxWork;
     return false;
@@ -1323,9 +1413,6 @@ function _generateQuarter(){
   function canBeS_lastResort(docId){
     const s=state[docId];
     if(!s||s.block!=='O') return false;
-    if(s.isSwingBlockStyle&&s.swingBlockUsed) return false;  // no more S after block used
-    // Allow ANY rested provider — even just 1 day off — when coverage is critical.
-    // The alternative is leaving the swing slot empty, which is worse.
     return s.dayInBlock>=1;
   }
   function mustContinueR(docId){
@@ -1336,22 +1423,13 @@ function _generateQuarter(){
   function mustContinueS_couplet(docId){
     const s=state[docId];
     if(!s||s.block!=='W'||s.lastShift!=='S'||s.workInBlock>=s.maxWork) return false;
-    const maxS=getMaxS(docId);
-    if(maxS===0) return false;
-    if(s.isSwingBlockStyle&&!s.swingBlockUsed){
-      // Force continuation of swing block up to 7 days
-      return s.runLen < 7;
-    }
-    // Standard: force 2-day couplet completion
     return s.runLen===1 && s.runLen<MAX_S_BLOCK;
   }
   function canBeOff(docId){
     const s=state[docId];
     if(!s) return true;
     if(s.block==='W'&&s.lastShift==='R'&&s.runLen<MIN_R_HARD) return false;
-    // Swing-block in progress must not be interrupted
-    if(s.block==='W'&&s.lastShift==='S'&&s.isSwingBlockStyle&&!s.swingBlockUsed&&s.runLen<7) return false;
-    if(s.block==='W'&&s.lastShift==='S'&&!s.isSwingBlockStyle&&s.runLen<MAX_S_BLOCK&&s.workInBlock<s.maxWork) return false;
+    if(s.block==='W'&&s.lastShift==='S'&&s.runLen<MAX_S_BLOCK&&s.workInBlock<s.maxWork) return false;
     return true;
   }
   function assign(docId,shift,month){
@@ -1365,10 +1443,6 @@ function _generateQuarter(){
       s.lastShift=shift;
       if(shift==='R') s.qR++; else s.qS++;
       s.monthCount[month]++;
-      // Mark swing block as used once the 7th consecutive S day is assigned
-      if(shift==='S' && s.isSwingBlockStyle && !s.swingBlockUsed && s.runLen>=7){
-        s.swingBlockUsed=true;
-      }
     } else {
       if(s.block==='W'&&s.workInBlock>0){
         s.lastWorkSize=s.workInBlock;
@@ -1434,6 +1508,13 @@ function _generateQuarter(){
 
     let needR=S.cfg.R-tahirR-marchR;
     let needS=S.cfg.S-slavinaS-marchS;
+
+    // Deduct strict pre-assigned shifts
+    strictAll.forEach(doc=>{
+      const sh=S.sched[doc.id]&&S.sched[doc.id][ds];
+      if(sh==='R') needR--;
+      else if(sh==='S') needS--;
+    });
     const assigned=new Set();
 
     // STEP 1: Required OFF
@@ -1480,34 +1561,6 @@ function _generateQuarter(){
     function sSortKey(docId){
       const s=state[docId];
       return [s.monthCount[month], s.qS];
-    }
-
-    // STEP 4-pre: Swing-block providers — start their 7-day swing block when behind on quota
-    if(needS>0){
-      const targetQS = Math.round(S.cfg.S * totalDays / rotation.length); // ~8 S/quarter
-      const swingBlockCands = rotation
-        .filter(d=>{
-          if(assigned.has(d.id)) return false;
-          const s=state[d.id];
-          if(!s) return false;
-          if(!s.isSwingBlockStyle) return false;
-          if(s.swingBlockUsed) return false;
-          if(s.block!=='O') return false;        // only pull from rest blocks
-          if(s.dayInBlock<MIN_R_HARD) return false; // need at least minimum rest
-          // Trigger when their qS is materially below target — i.e. they haven't done their block yet
-          return s.qS < targetQS;
-        })
-        .sort((a,b)=>{
-          const sa=state[a.id], sb=state[b.id];
-          // Most rested first, then lowest qS
-          if(sb.dayInBlock!==sa.dayInBlock) return sb.dayInBlock-sa.dayInBlock;
-          return sa.qS-sb.qS;
-        });
-      // Only pick at most 1 swing-block provider per day to stagger their blocks
-      if(swingBlockCands.length>0){
-        const doc=swingBlockCands[0];
-        S.sched[doc.id][ds]='S';assign(doc.id,'S',month);assigned.add(doc.id);needS--;
-      }
     }
 
     // STEP 4a: Normal S — BELOW monthly target (strongest fairness tier)
@@ -1645,12 +1698,18 @@ function _generateQuarter(){
       }
     }
 
-    // STEP 6: Everyone else OFF
+    // STEP 6: Everyone else OFF (variable providers only — strict already pre-assigned)
     rotation.forEach(doc=>{
       if(assigned.has(doc.id)) return;
       if(mustContinueR(doc.id)){S.sched[doc.id][ds]='R';assign(doc.id,'R',month);return;}
       if(mustContinueS_couplet(doc.id)){S.sched[doc.id][ds]='S';assign(doc.id,'S',month);return;}
       S.sched[doc.id][ds]='OFF';assign(doc.id,'OFF',month);
+    });
+    // Part-time providers also get OFF if not already assigned
+    partTime.forEach(doc=>{
+      if(!assigned.has(doc.id)&&S.sched[doc.id]&&S.sched[doc.id][ds]===undefined){
+        S.sched[doc.id][ds]='OFF';
+      }
     });
 
     assignTeamNumbers(allActive,ds,state,di);
@@ -2053,7 +2112,8 @@ function renderSchedule(){
       const conflict=isReq&&(sh==='R'||sh==='S');
       const isColHl=selCols.has(ds);
       const cls=['cell','cell-'+sh];
-      if(isW)cls.push('weekend');if(isT)cls.push('today');if(isReq)cls.push('has-request');
+      if(isW)cls.push('weekend');if(isT)cls.push('today');
+      if(isReq)cls.push(isReqRequired?'has-req-required':'has-request');
       if(conflict)cls.push(isReqRequired?'cell-REQCONFLICT':'cell-CONFLICT');
       if(i>0&&d.getDate()===1)cls.push('month-sep');
       if(isHighlighted)cls.push('row-hl-cell');if(isColHl)cls.push('col-hl');
@@ -3018,8 +3078,24 @@ function showDocDetail(docId){
       </div>
     </div>
     <div class="card">
-      <h3>Schedule — Next 3 Months</h3>
-      <div id="doc-cal-grid">${renderDocCalendars(docId, today)}</div>
+      <div class="fb mb">
+        <h3>Schedule</h3>
+        <div class="fl" style="gap:6px">
+          <select id="doc-cal-mode" onchange="refreshDocCal('${docId}')" style="padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:3px">
+            <option value="next3">Next 3 Months</option>
+            <option value="q1">Q1 (Jan–Mar)</option>
+            <option value="q2">Q2 (Apr–Jun)</option>
+            <option value="q3">Q3 (Jul–Sep)</option>
+            <option value="q4">Q4 (Oct–Dec)</option>
+          </select>
+          <select id="doc-cal-year" onchange="refreshDocCal('${docId}')" style="padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:3px">
+            <option value="${year-1}">${year-1}</option>
+            <option value="${year}" selected>${year}</option>
+            <option value="${year+1}">${year+1}</option>
+          </select>
+        </div>
+      </div>
+      <div id="doc-cal-grid">${renderDocCalendarsForView(docId, 'next3', year)}</div>
     </div>
     <div class="card">
       <h3>Monthly Breakdown — ${year}</h3>
@@ -3284,14 +3360,14 @@ function openEditDoc(id){
           <input type="radio" name="ed-style" value="strict" id="ed-style-strict" ${(doc.preferences&&doc.preferences.scheduleStyle==='strict')?'checked':''} style="margin-top:2px">
           <div>
             <div style="font-weight:700;font-size:12px;color:#1b4d8f">Strict 7-on / 7-off (mixed shifts)</div>
-            <div class="tx-xs tx-mu">Repeating 7 day blocks every two weeks. Swing shifts are 1 or 2 days at the end of rounding blocks. Time-off requests disabled.</div>
+            <div class="tx-xs tx-mu">Repeating 5R+2S pattern every two weeks. Swing shifts are 2-day couplets at the end of rounding blocks. Time-off requests disabled.</div>
           </div>
         </label>
         <label style="display:flex;align-items:flex-start;gap:8px;padding:8px 10px;border:1.5px solid var(--line);border-radius:4px;margin-bottom:6px;cursor:pointer">
           <input type="radio" name="ed-style" value="strict-swing-block" id="ed-style-swing-block" ${(doc.preferences&&doc.preferences.scheduleStyle==='strict-swing-block')?'checked':''} style="margin-top:2px">
           <div>
             <div style="font-weight:700;font-size:12px;color:#1b4d8f">Strict 7-on / 7-off (swing block)</div>
-            <div class="tx-xs tx-mu">Classic style of 7 day rounding blocks with a 7 day swing block every 6th block. Time-off requests disabled.</div>
+            <div class="tx-xs tx-mu">Alternating pure weeks: 7R one week on, then 7S the next working week. Full swing blocks rather than couplets. Staggered with other swing-block providers. Time-off requests disabled.</div>
           </div>
         </label>
         <label style="display:flex;align-items:flex-start;gap:8px;padding:8px 10px;border:1.5px solid var(--line);border-radius:4px;cursor:pointer">
@@ -3511,6 +3587,13 @@ function nav(p){
 }
 
 // Navigate from the schedule grid to a physician's detail page
+function refreshDocCal(docId){
+  const mode=document.getElementById('doc-cal-mode')?.value||'next3';
+  const yr=parseInt(document.getElementById('doc-cal-year')?.value)||new Date().getFullYear();
+  const grid=document.getElementById('doc-cal-grid');
+  if(grid) grid.innerHTML=renderDocCalendarsForView(docId,mode,yr);
+}
+
 function navToDoc(docId){
   nav('docs');
   // Defer so the page is rendered before opening detail
@@ -3584,6 +3667,10 @@ async function appInit(){
 }
 
 async function finishInit(){
+  // Re-apply physician's own docId after loadData may have overwritten S.ui
+  if(isPhysician()&&currentUser&&currentUser.docId){
+    S.ui.currentPhysId=currentUser.docId;
+  }
   updateHeaderForUser();
   setReadOnly(!isAdmin());
   populatePhysPicker();
