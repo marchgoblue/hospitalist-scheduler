@@ -1483,10 +1483,8 @@ function _generateQuarter(){
     }
 
     // STEP 4-pre: Swing-block providers — start their 7-day swing block when behind on quota
-    // These providers are OFF most of the time; they need to be picked up specifically
-    // when fairness says they need their S shifts (roughly once per quarter)
     if(needS>0){
-      const targetQS = Math.round(S.cfg.S * days.length / rotation.length); // ~8 S/quarter
+      const targetQS = Math.round(S.cfg.S * totalDays / rotation.length); // ~8 S/quarter
       const swingBlockCands = rotation
         .filter(d=>{
           if(assigned.has(d.id)) return false;
