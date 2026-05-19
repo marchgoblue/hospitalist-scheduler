@@ -3284,14 +3284,14 @@ function openEditDoc(id){
           <input type="radio" name="ed-style" value="strict" id="ed-style-strict" ${(doc.preferences&&doc.preferences.scheduleStyle==='strict')?'checked':''} style="margin-top:2px">
           <div>
             <div style="font-weight:700;font-size:12px;color:#1b4d8f">Strict 7-on / 7-off (mixed shifts)</div>
-            <div class="tx-xs tx-mu">Repeating 5R+2S pattern every two weeks. Swing shifts are 2-day couplets at the end of rounding blocks. Time-off requests disabled.</div>
+            <div class="tx-xs tx-mu">Repeating 7 day blocks every two weeks. Swing shifts are 1 or 2 days at the end of rounding blocks. Time-off requests disabled.</div>
           </div>
         </label>
         <label style="display:flex;align-items:flex-start;gap:8px;padding:8px 10px;border:1.5px solid var(--line);border-radius:4px;margin-bottom:6px;cursor:pointer">
           <input type="radio" name="ed-style" value="strict-swing-block" id="ed-style-swing-block" ${(doc.preferences&&doc.preferences.scheduleStyle==='strict-swing-block')?'checked':''} style="margin-top:2px">
           <div>
             <div style="font-weight:700;font-size:12px;color:#1b4d8f">Strict 7-on / 7-off (swing block)</div>
-            <div class="tx-xs tx-mu">Alternating pure weeks: 7R one week on, then 7S the next working week. Full swing blocks rather than couplets. Staggered with other swing-block providers. Time-off requests disabled.</div>
+            <div class="tx-xs tx-mu">Classic style of 7 day rounding blocks with a 7 day swing block every 6th block. Time-off requests disabled.</div>
           </div>
         </label>
         <label style="display:flex;align-items:flex-start;gap:8px;padding:8px 10px;border:1.5px solid var(--line);border-radius:4px;cursor:pointer">
