@@ -1185,8 +1185,6 @@ function getPreferredR(doc){
   return (doc.preferences && doc.preferences.preferredR) || 5;
 }
 function getMaxWork(doc){
-  // Swing-block providers need 14 (7R + 7S) consecutive when their block lands
-  if(isSwingBlock(doc)) return Math.max(14, (doc.preferences&&doc.preferences.maxWork)||14);
   return (doc.preferences && doc.preferences.maxWork) || 7;
 }
 
@@ -1474,6 +1472,36 @@ function generateQuarter(){
     function sSortKey(docId){
       const s=state[docId];
       return [s.monthCount[month], s.qS];
+    }
+
+    // STEP 4-pre: Swing-block providers — start their 7-day swing block when behind on quota
+    // These providers are OFF most of the time; they need to be picked up specifically
+    // when fairness says they need their S shifts (roughly once per quarter)
+    if(needS>0){
+      const targetQS = Math.round(S.cfg.S * days.length / rotation.length); // ~8 S/quarter
+      const swingBlockCands = rotation
+        .filter(d=>{
+          if(assigned.has(d.id)) return false;
+          const s=state[d.id];
+          if(!s) return false;
+          if(!s.isSwingBlockStyle) return false;
+          if(s.swingBlockUsed) return false;
+          if(s.block!=='O') return false;        // only pull from rest blocks
+          if(s.dayInBlock<MIN_R_HARD) return false; // need at least minimum rest
+          // Trigger when their qS is materially below target — i.e. they haven't done their block yet
+          return s.qS < targetQS;
+        })
+        .sort((a,b)=>{
+          const sa=state[a.id], sb=state[b.id];
+          // Most rested first, then lowest qS
+          if(sb.dayInBlock!==sa.dayInBlock) return sb.dayInBlock-sa.dayInBlock;
+          return sa.qS-sb.qS;
+        });
+      // Only pick at most 1 swing-block provider per day to stagger their blocks
+      if(swingBlockCands.length>0){
+        const doc=swingBlockCands[0];
+        S.sched[doc.id][ds]='S';assign(doc.id,'S',month);assigned.add(doc.id);needS--;
+      }
     }
 
     // STEP 4a: Normal S — BELOW monthly target (strongest fairness tier)
