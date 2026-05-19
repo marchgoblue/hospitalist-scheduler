@@ -109,9 +109,8 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
 .tb-label{font-size:10px;color:var(--ink3);font-weight:600;text-transform:uppercase;letter-spacing:.5px;margin-right:4px}
 
 /* SCHEDULE GRID — Excel-like spreadsheet */
-.sheet-outer{position:relative;border:1px solid var(--line);border-radius:0 0 4px 4px;background:#fff;max-height:calc(100vh - 220px);overflow:hidden}
-.sheet-wrap{overflow:auto;width:100%;max-height:calc(100vh - 220px);padding-right:66px;box-sizing:border-box}
-.sheet-qtot-panel{position:absolute;right:0;top:0;bottom:0;width:63px;overflow:hidden;border-left:3px solid #1b4d8f;box-shadow:-4px 0 10px rgba(0,0,0,.15);z-index:10;background:transparent}
+.sheet-outer{border:1px solid var(--line);border-radius:0 0 4px 4px;background:#fff;overflow:auto;max-height:calc(100vh - 220px)}
+.sheet-wrap{overflow:visible}
 .sheet{border-collapse:collapse;background:#fff;table-layout:fixed;font-size:11px}
 .sheet th,.sheet td{border:1px solid var(--line);padding:0;text-align:center;vertical-align:middle;height:24px;line-height:1;background:#fff;position:relative}
 
@@ -160,20 +159,14 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
 /* N (nocturnist shift) */
 .cell-N{background:#1a1a2e!important;color:#c9b8f5!important}
 /* Sticky quarter-total column — works with border-collapse:collapse */
-/* Quarter-total right panel — two-table layout for reliable frozen column */
-.qtot-hdr-cell{
-  background:#1b4d8f;color:#fff;font-size:11px;font-weight:700;
-  text-align:center;padding:3px 4px;white-space:nowrap;
+/* Quarter-total embedded in name cell — no separate column needed */
+.qtot-inline{
+  font-size:11px;font-weight:700;min-width:36px;text-align:right;
+  flex-shrink:0;line-height:1.2;
 }
-.qtot-data-cell{
-  text-align:center;padding:2px 3px;font-size:11px;
-  border-top:1px solid #c8dcf0;background:#eef4fc;
-  white-space:nowrap;
-}
-.qtot-data-cell.even{background:#e4effa}
-.qtot-data-cell.hl{background:#fff5cc}
-.qtot-data-cell.section{background:#dfe6ec;height:24px}
-.qtot-data-cell.cov{background:#f0f5fb;border-top:2px solid #b8d4f0}
+/* Remove old qtot-hdr/qtot-cell rules */
+.qtot-hdr{display:none}
+.qtot-cell{display:none}
 .month-sum-hdr{
   background:#1b4d8f!important;color:#fff;font-size:10px;font-weight:700;
   text-align:center;padding:2px 3px;min-width:32px;width:32px;
@@ -428,9 +421,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
   body{background:#fff!important}
   #hdr,.no-print,.toolbar{display:none!important}
   .pg{padding:0}
-  .sheet-outer{max-height:none;overflow:visible;position:static}
-  .sheet-wrap{max-height:none;overflow:visible;padding-right:0}
-  .sheet-qtot-panel{display:none}
+  .sheet-outer{max-height:none;overflow:visible}
   .sheet thead th{background:#f0f0f0!important;color:#333!important;print-color-adjust:exact;-webkit-print-color-adjust:exact}
   .cell-R{background:#dde9f7!important;color:#1b4d8f!important;print-color-adjust:exact;-webkit-print-color-adjust:exact}
   .cell-S{background:#fdebc7!important;color:#8a5400!important;print-color-adjust:exact;-webkit-print-color-adjust:exact}
@@ -545,9 +536,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
     <div class="sheet-wrap" id="sheet-wrap">
       <div style="padding:40px;text-align:center;color:var(--ink3)">Pick a quarter and click <strong>Generate Schedule</strong> to begin.</div>
     </div>
-    <div class="sheet-qtot-panel" id="sheet-qtot-panel" style="display:none">
-      <table class="sheet" id="qtot-table" style="table-layout:auto"></table>
-    </div>
+
   </div>
 
   <!-- Fairness Dashboard -->
@@ -792,7 +781,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
         <strong>Rules:</strong> Maximum <strong>20 OFF dates per quarter</strong>. Of those, no more than <strong>6 can span weekends</strong>. Required dates count toward both limits.
       </div>
       <div id="my-req-list"><div class="tx-mu tx-sm">No dates selected yet. Choose Required or Optional above, then click days on the calendar.</div></div>
-      <div class="fl mt">
+      <div class="fl mt" id="req-action-area">
         <button class="btn btn-p btn-sm" onclick="submitMyRequests()">✓ Submit Requests</button>
         <button class="btn btn-sm" onclick="clearMyRequests()">Clear All</button>
         <span class="tx-xs tx-mu" id="submit-status"></span>
@@ -1684,6 +1673,7 @@ function loadAnnouncement(){
 //  FAIRNESS DASHBOARD
 // ════════════════════════════════════════════════════════
 function recheckFairness(){
+  if(!isAdmin()){ toast('Fairness check is admin-only','error'); return; }
   const year=S.ui.year, q=S.ui.quarter;
   const days=quarterDays(year,q);
   const qKey=`${year}-${q}`;
@@ -1833,35 +1823,30 @@ function renderSchedule(){
   const days=quarterDays(year,q);
   const today=dstrD(new Date());
   const filterText=(document.getElementById('filter-name')?.value||'').toLowerCase().trim();
-
   const allDocs=activeDocs(year);
   const consultDocs=allDocs.filter(d=>d.type==='weekday-only');
   const nocturnistDocs=allDocs.filter(d=>d.type==='nocturnist').sort((a,b)=>a.last.localeCompare(b.last));
-  let rotationDocs=allDocs.filter(d=>d.type!=='weekday-only' && d.type!=='nocturnist');
+  const rotationDocs=allDocs.filter(d=>d.type!=='weekday-only'&&d.type!=='nocturnist');
   const fConsult=filterText?consultDocs.filter(d=>dname(d).toLowerCase().includes(filterText)):consultDocs;
   const fRotation=filterText?rotationDocs.filter(d=>dname(d).toLowerCase().includes(filterText)):rotationDocs;
   const fNocturnist=filterText?nocturnistDocs.filter(d=>dname(d).toLowerCase().includes(filterText)):nocturnistDocs;
-
-  if(fConsult.length===0 && fRotation.length===0 && fNocturnist.length===0){
-    document.getElementById('sheet-wrap').innerHTML='<div style="padding:40px;text-align:center;color:var(--ink3)">No physicians match filter.</div>';
+  if(!fConsult.length&&!fRotation.length&&!fNocturnist.length){
+    document.getElementById('sheet-outer').innerHTML='<div class="sheet-wrap" id="sheet-wrap"><div style="padding:40px;text-align:center;color:var(--ink3)">No physicians match filter.</div></div>';
     return;
   }
 
-  // Month boundary computation
-  let currentMonth=-1; let monthCells=[];
+  // Month cells
+  let currentMonth=-1; const monthCells=[];
   days.forEach((d,i)=>{
-    if(d.getMonth()!==currentMonth){
-      monthCells.push({month:d.getMonth(),start:i,span:1,end:i});
-      currentMonth=d.getMonth();
-    } else { monthCells[monthCells.length-1].span++; monthCells[monthCells.length-1].end=i; }
+    if(d.getMonth()!==currentMonth){monthCells.push({month:d.getMonth(),span:1,end:i});currentMonth=d.getMonth();}
+    else{monthCells[monthCells.length-1].span++;monthCells[monthCells.length-1].end=i;}
   });
-  // No ∑ summary columns — monthly counts shown in qtot panel per-row instead
-  const monthEndIdx=new Set();  // empty: no summary cols inserted
+  const nCols=days.length;
 
-  // ─── HEADER ───
-  // Each month block = month-days + 1 summary col. Plus 1 name col + 1 TOTAL col at end.
-  let html='<table class="sheet"><thead>';
-  html+='<tr><th class="name-col" rowspan="2">PHYSICIAN</th>';
+  // ── HEADER: single name-col th with Q∑ label embedded ──
+  let html='<table class="sheet"><thead><tr>';
+  // Name column header — includes Q∑ label in the bottom-right corner
+  html+='<th class="name-col" rowspan="2"><div style="display:flex;justify-content:space-between;align-items:flex-end"><span>PHYSICIAN</span><span style="font-size:9px;font-weight:700;color:#1b4d8f;background:#dde9f7;padding:1px 4px;border-radius:2px;letter-spacing:.3px">Q∑</span></div></th>';
   monthCells.forEach((m,mi)=>{
     html+=`<th colspan="${m.span}" class="${mi>0?'month-sep':''}" style="background:#dfe6ec;font-size:11px;text-transform:uppercase">${monN(m.month)} ${year}</th>`;
   });
@@ -1869,15 +1854,9 @@ function renderSchedule(){
   days.forEach((d,i)=>{
     const ds=dstrD(d);
     const cls=[];
-    if(isWeekend(d)) cls.push('weekend');
-    if(ds===today) cls.push('today');
-    if(isHol(ds,year)) cls.push('holiday');
-    if(i>0 && d.getDate()===1) cls.push('month-sep');
-    // Date header is clickable to highlight the column
-    html+=`<th class="${cls.join(' ')} col-hdr" data-date="${ds}" onclick="toggleColHighlight('${ds}')" title="Click to highlight column · ${d.toDateString()}">${d.getDate()}<br><span style="font-weight:400;font-size:9px;color:var(--ink3)">${['S','M','T','W','T','F','S'][d.getDay()]}</span></th>`;
-    if(monthEndIdx.has(i)){
-      html+='<th class="month-sum-hdr" title="Monthly total">∑</th>';
-    }
+    if(isWeekend(d))cls.push('weekend');if(ds===today)cls.push('today');
+    if(isHol(ds,year))cls.push('holiday');if(i>0&&d.getDate()===1)cls.push('month-sep');
+    html+=`<th class="${cls.join(' ')} col-hdr" data-date="${ds}" onclick="toggleColHighlight('${ds}')" title="${d.toDateString()}">${d.getDate()}<br><span style="font-weight:400;font-size:9px;color:var(--ink3)">${['S','M','T','W','T','F','S'][d.getDay()]}</span></th>`;
   });
   html+='</tr></thead><tbody>';
 
@@ -1885,131 +1864,100 @@ function renderSchedule(){
   const requests=S.requests[qKey]||{};
   function getDocReqs(docId){
     const r=requests[docId];
-    if(!r) return {all:new Set(),req:new Set()};
-    if(Array.isArray(r)) return {all:new Set(r),req:new Set()};
-    const all=new Set([...(r.required||[]),...(r.optional||[])]);
-    return {all,req:new Set(r.required||[])};
+    if(!r)return{all:new Set(),req:new Set()};
+    if(Array.isArray(r))return{all:new Set(r),req:new Set()};
+    return{all:new Set([...(r.required||[]),...(r.optional||[])]),req:new Set(r.required||[])};
   }
-
   const selRow=S.ui.selectedRow||null;
-  // selectedCols is stored as Set but JSON.parse turns it into {} — always coerce
-  if(!(S.ui.selectedCols instanceof Set)){
-    S.ui.selectedCols = S.ui.selectedCols
-      ? new Set(Object.keys(S.ui.selectedCols))
-      : new Set();
-  }
+  if(!(S.ui.selectedCols instanceof Set))S.ui.selectedCols=S.ui.selectedCols?new Set(Object.keys(S.ui.selectedCols)):new Set();
   const selCols=S.ui.selectedCols;
 
-  const qtotRows = [];  // collects per-row totals for the overlay
   function buildRow(doc,isConsult){
-    const {all:docReqs,req:docRequired}=getDocReqs(doc.id);
-    // Per-month counts for summary column
-    const mc={}; monthCells.forEach(m=>{mc[m.month]={r:0,s:0};});
-    let qTotalR=0, qTotalS=0;
+    const{all:docReqs,req:docRequired}=getDocReqs(doc.id);
+    let qTotalR=0,qTotalS=0;
+    const mc={};
+    monthCells.forEach(m=>{mc[m.month]={r:0,s:0};});
     days.forEach(d=>{
       const sh=(S.sched[doc.id]&&S.sched[doc.id][dstrD(d)])||'OFF';
-      const m=d.getMonth();
-      if(mc[m]){
-        if(sh==='R'){mc[m].r++;qTotalR++;}
-        if(sh==='S'||sh==='H'){mc[m].s++;qTotalS++;}
-      }
+      if(sh==='R'){mc[d.getMonth()].r++;qTotalR++;}
+      if(sh==='S'||sh==='H'){mc[d.getMonth()].s++;qTotalS++;}
     });
-    const isHighlighted = selRow===doc.id;
-    const rowCls=isHighlighted?'row-hl':'';
-    let row=`<tr class="${rowCls}" id="row-${doc.id}">`;
-    // Name cell: click to toggle row highlight WITHOUT opening detail
-    row+=`<td class="name-col${isHighlighted?' name-col-hl':''}" onclick="toggleRowHighlight('${doc.id}')" title="Click to highlight · Double-click to open"ondblclick="navToDoc('${doc.id}')">${isConsult?'<span class="consult-badge">CONSULT</span>':''}${dname(doc)}</td>`;
-    days.forEach((d,i)=>{
-      const ds=dstrD(d);
-      const sh=(S.sched[doc.id]&&S.sched[doc.id][ds])||'OFF';
-      const isW=isWeekend(d);
-      const isT=ds===today;
-      const isReq=docReqs.has(ds);
-      const isReqRequired=docRequired.has(ds);
-      const conflict=isReq&&(sh==='R'||sh==='S');
-      const isColHl=selCols.has(ds);
-      const cls=['cell','cell-'+sh];
-      if(isW) cls.push('weekend');
-      if(isT) cls.push('today');
-      if(isReq) cls.push('has-request');
-      if(conflict) cls.push(isReqRequired?'cell-REQCONFLICT':'cell-CONFLICT');
-      if(i>0 && d.getDate()===1) cls.push('month-sep');
-      if(isHighlighted) cls.push('row-hl-cell');
-      if(isColHl) cls.push('col-hl');
-      const label=sh==='OFF'?'':sh;
-      const tip=(isReqRequired&&conflict?'⚠ REQUIRED OFF but scheduled! ':isReq?'Requested OFF · ':'')+(sh==='OFF'?'off':sh);
-      // cellClick now cycles, data-shift is the current value
-      row+=`<td class="${cls.join(' ')}" data-doc="${doc.id}" data-date="${ds}" data-shift="${sh}" onclick="cycleCell('${doc.id}','${ds}')" title="${tip}">${label}</td>`;
-      if(monthEndIdx.has(i)){
-        const m=mc[d.getMonth()];
-        row+=`<td class="month-sum-cell"><span class="msc-r">R${m.r}</span><span class="msc-s">S${m.s}</span></td>`;
-      }
-    });
-    // Store qtot data for overlay
     const qTotal=qTotalR+qTotalS;
     const target=Math.round(doc.fte*S.cfg.annual/4);
     const qColor=qTotal>target+3?'#a01918':qTotal<target-3?'#a85800':'#0a7044';
-    // Monthly breakdown for qtot panel (replaces removed ∑ columns)
-    const monthlyBreakdown=monthCells.map(m=>`${mc[m.month].r}R ${mc[m.month].s}S`);
-    qtotRows.push({docId:doc.id, qTotal, qTotalR, qTotalS, target, qColor, monthlyBreakdown});
+    const mTip=monthCells.map(m=>`${monAbbr(m.month)}:${mc[m.month].r}R${mc[m.month].s}S`).join(' | ');
+    const isHighlighted=selRow===doc.id;
+    const rowCls=isHighlighted?'row-hl':'';
+
+    let row=`<tr class="${rowCls}" id="row-${doc.id}">`;
+    // Single sticky name cell — Q∑ total embedded in bottom-right of the cell
+    row+=`<td class="name-col${isHighlighted?' name-col-hl':''}" onclick="toggleRowHighlight('${doc.id}')" ondblclick="navToDoc('${doc.id}')" title="Q${q} total: ${qTotalR}R+${qTotalS}S=${qTotal} (target ~${target})&#10;${mTip}&#10;Double-click to open detail">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:4px">
+        <span>${isConsult?'<span class="consult-badge">CONSULT</span>':''}${dname(doc)}</span>
+        <span class="qtot-inline" style="color:${qColor}">${qTotal}<span style="font-size:8px;color:#999;display:block;line-height:1;text-align:right">${qTotalR}R ${qTotalS}S</span></span>
+      </div>
+    </td>`;
+    // Day cells
+    days.forEach((d,i)=>{
+      const ds=dstrD(d);
+      const sh=(S.sched[doc.id]&&S.sched[doc.id][ds])||'OFF';
+      const isW=isWeekend(d);const isT=ds===today;
+      const isReq=docReqs.has(ds);const isReqRequired=docRequired.has(ds);
+      const conflict=isReq&&(sh==='R'||sh==='S');
+      const isColHl=selCols.has(ds);
+      const cls=['cell','cell-'+sh];
+      if(isW)cls.push('weekend');if(isT)cls.push('today');if(isReq)cls.push('has-request');
+      if(conflict)cls.push(isReqRequired?'cell-REQCONFLICT':'cell-CONFLICT');
+      if(i>0&&d.getDate()===1)cls.push('month-sep');
+      if(isHighlighted)cls.push('row-hl-cell');if(isColHl)cls.push('col-hl');
+      const label=sh==='OFF'?'':sh;
+      const tip=(isReqRequired&&conflict?'⚠ REQUIRED OFF! ':isReq?'Requested OFF · ':'')+( sh==='OFF'?'off':sh);
+      row+=`<td class="${cls.join(' ')}" data-doc="${doc.id}" data-date="${ds}" onclick="cycleCell('${doc.id}','${ds}')" title="${tip}">${label}</td>`;
+    });
     row+='</tr>';
     return row;
   }
 
-  // nCols = day columns only (no summary cols)
-  const nCols=days.length;
-  if(fConsult.length>0){
-    html+=`<tr><td class="section-hdr consult-hdr" colspan="${nCols+1}">▶ Consult Team</td></tr>`;
-    fConsult.forEach(doc=>{ html+=buildRow(doc,true); });
+  const allCols=nCols+1; // name + days
+  if(fConsult.length){
+    html+=`<tr><td class="section-hdr consult-hdr" colspan="${allCols}">▶ Consult Team</td></tr>`;
+    fConsult.forEach(d=>html+=buildRow(d,true));
   }
-  if(fRotation.length>0){
-    if(fConsult.length>0){
-      html+=`<tr><td class="section-hdr rounds-hdr" colspan="${nCols+1}">▶ Rounding Physicians (${S.cfg.R})</td></tr>`;
-    }
-    fRotation.forEach(doc=>{ html+=buildRow(doc,false); });
+  if(fRotation.length){
+    if(fConsult.length)html+=`<tr><td class="section-hdr rounds-hdr" colspan="${allCols}">▶ Rounding Physicians (${S.cfg.R})</td></tr>`;
+    fRotation.forEach(d=>html+=buildRow(d,false));
   }
-  if(fNocturnist.length>0){
-    html+=`<tr><td class="section-hdr noct-hdr" colspan="${nCols+1}">▶ Nocturnists</td></tr>`;
-    fNocturnist.forEach(doc=>{ html+=buildRow(doc,false); });
+  if(fNocturnist.length){
+    html+=`<tr><td class="section-hdr noct-hdr" colspan="${allCols}">▶ Nocturnists</td></tr>`;
+    fNocturnist.forEach(d=>html+=buildRow(d,false));
   }
-  html+='</tbody>';
 
-  // Coverage rows
+  // Coverage footer
   html+='<tfoot>';
   const targetR=S.cfg.R+consultDocs.length;
   html+='<tr class="cov"><td class="name-col">ROUNDERS</td>';
-  let covRTotal=0;
   days.forEach((d,i)=>{
     const ds=dstrD(d);
     const v=allDocs.filter(doc=>S.sched[doc.id]&&S.sched[doc.id][ds]==='R').length;
-    covRTotal+=v;
     let cls='cell';
-    if(v===targetR) cls+=' cov-ok'; else if(v<targetR-1) cls+=' cov-bad'; else cls+=' cov-low';
-    if(i>0 && d.getDate()===1) cls+=' month-sep';
-    const isColHl=selCols.has(ds);
-    if(isColHl) cls+=' col-hl';
+    if(v===targetR)cls+=' cov-ok';else if(v<targetR-1)cls+=' cov-bad';else cls+=' cov-low';
+    if(i>0&&d.getDate()===1)cls+=' month-sep';
+    if(selCols.has(ds))cls+=' col-hl';
     html+=`<td class="${cls}">${v}</td>`;
-    if(monthEndIdx.has(i)) html+='<td class="month-sum-cell"></td>';
   });
   html+='</tr><tr class="cov"><td class="name-col">SWING</td>';
-  let covSTotal=0;
   days.forEach((d,i)=>{
     const ds=dstrD(d);
     const v=allDocs.filter(doc=>S.sched[doc.id]&&(S.sched[doc.id][ds]==='S'||S.sched[doc.id][ds]==='H')).length;
-    covSTotal+=v;
     let cls='cell';
-    if(v===S.cfg.S) cls+=' cov-ok'; else if(v<S.cfg.S-1) cls+=' cov-bad'; else cls+=' cov-low';
-    if(i>0 && d.getDate()===1) cls+=' month-sep';
-    const isColHl=selCols.has(ds);
-    if(isColHl) cls+=' col-hl';
+    if(v===S.cfg.S)cls+=' cov-ok';else if(v<S.cfg.S-1)cls+=' cov-bad';else cls+=' cov-low';
+    if(i>0&&d.getDate()===1)cls+=' month-sep';
+    if(selCols.has(ds))cls+=' col-hl';
     html+=`<td class="${cls}">${v}</td>`;
-    if(monthEndIdx.has(i)) html+='<td class="month-sum-cell"></td>';
   });
   html+='</tr></tfoot></table>';
 
-  document.getElementById('sheet-wrap').innerHTML=html;
-  // Build the quarter-total overlay panel (replaces broken CSS sticky approach)
-  buildQtotOverlay(qtotRows, q);
+  document.getElementById('sheet-outer').innerHTML='<div class="sheet-wrap" id="sheet-wrap">'+html+'</div>';
 }
 
 
@@ -2019,176 +1967,6 @@ function renderSchedule(){
 //  Main table scrolls horizontally; right panel is fixed-width,
 //  heights synced via JS, vertical scroll locked together.
 // ════════════════════════════════════════════════════════
-function buildQtotOverlay(qtotRows, q){
-  const wrap=document.getElementById('sheet-wrap');
-  const panel=document.getElementById('sheet-qtot-panel');
-  const qtotTable=document.getElementById('qtot-table');
-  if(!wrap||!panel||!qtotTable) return;
-
-  const mainTable=wrap.querySelector('table');
-  if(!mainTable){ panel.style.display='none'; return; }
-
-  // Build matching rows for the right-panel table
-  // Walk all rows in main table thead, tbody, tfoot
-  let html='<thead>';
-  const theadRows=mainTable.querySelectorAll('thead tr');
-  theadRows.forEach((tr,i)=>{
-    if(i===0){
-      // First header row: single tall cell spanning all header rows
-      html+=`<tr><th class="qtot-hdr-cell" rowspan="${theadRows.length}" style="vertical-align:middle">Q${q}<br><span style="font-size:9px;font-weight:400;opacity:.8">Total</span></th></tr>`;
-    }
-    // subsequent header rows already covered by rowspan
-  });
-  html+='</thead><tbody>';
-
-  const tbodyRows=mainTable.querySelectorAll('tbody tr');
-  tbodyRows.forEach((tr,i)=>{
-    const docId=tr.querySelector('td[data-doc]')?.getAttribute('data-doc');
-    const isEven=(i%2===1);
-    if(!docId){
-      // Section header or spacer row
-      html+=`<tr><td class="qtot-data-cell section"></td></tr>`;
-      return;
-    }
-    const row=qtotRows.find(r=>r.docId===docId);
-    const isHl=S.ui.selectedRow===docId;
-    const cls='qtot-data-cell'+(isEven?' even':'')+(isHl?' hl':'');
-    if(row){
-      const mTip=row.monthlyBreakdown?row.monthlyBreakdown.join(' | '):'';
-      html+=`<tr><td class="${cls}" title="Q${q} total: ${row.qTotalR}R + ${row.qTotalS}S = ${row.qTotal} (target ~${row.target})&#10;${mTip}">
-        <span style="color:${row.qColor};font-weight:700;font-size:12px;display:block;line-height:1.2">${row.qTotal}</span>
-        <span style="color:#666;font-size:9px;display:block;line-height:1.2">${row.qTotalR}R ${row.qTotalS}S</span>
-      </td></tr>`;
-    } else {
-      html+=`<tr><td class="${cls}"></td></tr>`;
-    }
-  });
-
-  html+='</tbody><tfoot>';
-  const tfootRows=mainTable.querySelectorAll('tfoot tr');
-  tfootRows.forEach((tr,i)=>{
-    html+=`<tr><td class="qtot-data-cell cov"></td></tr>`;
-  });
-  html+='</tfoot>';
-
-  qtotTable.innerHTML=html;
-
-  // Keep invisible until heights synced — prevents blank blue column flash
-  panel.style.visibility='hidden';
-  panel.style.display='';
-  panel.style.overflowY='hidden';
-
-  function showAfterSync(){
-    syncQtotHeights();
-    panel.style.visibility='visible';
-  }
-  requestAnimationFrame(function(){
-    requestAnimationFrame(function(){ showAfterSync(); });
-  });
-  setTimeout(showAfterSync, 80);
-  setTimeout(showAfterSync, 250);
-
-  wrap.onscroll=function(){
-    // Sync vertical scroll — panel is absolute so doesn't scroll on its own
-    panel.scrollTop=wrap.scrollTop;
-  };
-}
-
-function syncQtotHeights(){
-  const wrap=document.getElementById('sheet-wrap');
-  const panel=document.getElementById('sheet-qtot-panel');
-  if(!wrap||!panel) return;
-  const mainTable=wrap.querySelector('table');
-  const qtotTable=panel.querySelector('table');
-  if(!mainTable||!qtotTable) return;
-
-  // Sync thead height
-  const mainTheadRows=mainTable.querySelectorAll('thead tr');
-  const qtotTheadCell=qtotTable.querySelector('thead th');
-  if(mainTheadRows.length&&qtotTheadCell){
-    let totalH=0;
-    mainTheadRows.forEach(tr=>{ totalH+=tr.getBoundingClientRect().height; });
-    qtotTheadCell.style.height=totalH+'px';
-    qtotTheadCell.style.minHeight=totalH+'px';
-  }
-
-  // Sync tbody rows
-  const mainTbodyRows=mainTable.querySelectorAll('tbody tr');
-  const qtotTbodyRows=qtotTable.querySelectorAll('tbody tr');
-  mainTbodyRows.forEach((tr,i)=>{
-    if(qtotTbodyRows[i]){
-      const h=tr.getBoundingClientRect().height;
-      qtotTbodyRows[i].style.height=h+'px';
-      const td=qtotTbodyRows[i].querySelector('td');
-      if(td) td.style.height=h+'px';
-    }
-  });
-
-  // Sync tfoot rows
-  const mainTfootRows=mainTable.querySelectorAll('tfoot tr');
-  const qtotTfootRows=qtotTable.querySelectorAll('tfoot tr');
-  mainTfootRows.forEach((tr,i)=>{
-    if(qtotTfootRows[i]){
-      const h=tr.getBoundingClientRect().height;
-      qtotTfootRows[i].style.height=h+'px';
-      const td=qtotTfootRows[i].querySelector('td');
-      if(td) td.style.height=h+'px';
-    }
-  });
-}
-
-
-
-function toggleRowHighlight(docId){
-  S.ui.selectedRow = (S.ui.selectedRow===docId) ? null : docId;
-  renderSchedule();
-}
-function toggleColHighlight(ds){
-  if(!(S.ui.selectedCols instanceof Set)) S.ui.selectedCols=new Set();
-  if(S.ui.selectedCols.has(ds)) S.ui.selectedCols.delete(ds);
-  else S.ui.selectedCols.add(ds);
-  renderSchedule();
-}
-
-// ── Fill mode (Fill R / Fill S / Fill OFF buttons) ─────
-function setShiftMode(mode){
-  if(!isAdmin()&&mode){ toast('View-only — admin access required','error'); return; }
-  S.ui.fillMode=mode;
-  document.getElementById('fill-mode-label').textContent =
-    mode ? `Fill mode: ${mode} — click cells to apply` : 'Click cell to cycle R→S→N→OFF · Double-click name to open';
-  ['R','S','OFF','none'].forEach(m=>{
-    const btn=document.getElementById('m-fill-'+(m==='none'?'none':m.toLowerCase()));
-    if(btn) btn.classList.remove('btn-p');
-  });
-  if(mode){
-    const btn=document.getElementById('m-fill-'+mode.toLowerCase());
-    if(btn) btn.classList.add('btn-p');
-  }
-}
-
-// ── Cell click: cycles R→S→N→OFF, or applies fill mode ─
-const SHIFT_CYCLE=['R','S','N','OFF'];
-function cycleCell(docId,ds){
-  if(!isAdmin()){ toast('View-only — sign in as admin to edit','error'); return; }
-  // If fill mode is active, apply it directly (no cycle)
-  if(S.ui.fillMode){
-    if(!S.sched[docId]) S.sched[docId]={};
-    S.sched[docId][ds]=S.ui.fillMode;
-    saveData();
-    renderSchedule();
-    return;
-  }
-  // Cycle through R → S → N → OFF → R
-  const cur=(S.sched[docId]&&S.sched[docId][ds])||'OFF';
-  const idx=SHIFT_CYCLE.indexOf(cur);
-  const next=SHIFT_CYCLE[(idx+1)%SHIFT_CYCLE.length];
-  if(!S.sched[docId]) S.sched[docId]={};
-  S.sched[docId][ds]=next;
-  saveData();
-  renderSchedule();
-}
-// Legacy cellClick kept for compatibility (now same as cycleCell)
-function cellClick(docId,ds){ cycleCell(docId,ds); }
 
 // ════════════════════════════════════════════════════════
 //  WEEKLY VIEW
@@ -2256,11 +2034,18 @@ function renderMyRequestCal(){
   const reqSet=new Set(entry.required);
   const optSet=new Set(entry.optional);
 
-  // Update physician header names
-  updatePhysHeaders();
-  // Sync pickers to current physId
-  const reqPick=document.getElementById('phys-pick-req');
-  if(reqPick) reqPick.value=S.ui.currentPhysId;
+  // Check if this physician can edit this calendar
+  const viewingOwnPage = isAdmin() || (currentUser && currentUser.docId === S.ui.currentPhysId);
+
+  // Sync picker to current physId (no locking — physicians can view others' calendars)
+  const reqPickWrap = document.getElementById('phys-pick-req');
+  if(reqPickWrap){
+    reqPickWrap.value = S.ui.currentPhysId;
+    reqPickWrap.disabled = false;
+  }
+
+  // Disable radio buttons when viewing another physician's page
+  document.querySelectorAll('input[name="req-type"]').forEach(r=>{ r.disabled = !viewingOwnPage; });
 
   const ss=document.getElementById('submit-status');
   if(ss) ss.textContent='';
@@ -2367,8 +2152,9 @@ function renderMyRequestCal(){
       if(isW) cls.push('weekend');
       if(isReq) cls.push('req-required');
       if(isOpt) cls.push('req-optional');
-      if(isPast) cls.push('disabled');
-      html+=`<div class="${cls.join(' ')}" onclick="toggleRequestDate('${ds}')" data-date="${ds}">
+      if(isPast||!viewingOwnPage) cls.push('disabled');
+      const clickable = !isPast && viewingOwnPage;
+      html+=`<div class="${cls.join(' ')}" ${clickable?`onclick="toggleRequestDate('${ds}')"`:''} data-date="${ds}">
         <span class="day-num">${d.getDate()}</span>
         ${isW?'<span style="font-size:8px;color:var(--ink3);text-transform:uppercase;letter-spacing:.5px">wknd</span>':''}
         ${isReq?'<span style="font-size:8px;color:#a01918;font-weight:700;letter-spacing:.5px">REQ</span>':''}
@@ -2380,9 +2166,30 @@ function renderMyRequestCal(){
 
   document.getElementById('my-req-cal').innerHTML=html;
   renderMyRequestList();
+
+  // Show/hide the action controls based on whether this is the physician's own page
+  const actionArea = document.getElementById('req-action-area');
+  if(actionArea){
+    if(viewingOwnPage){
+      // Restore normal buttons if they were replaced
+      if(!actionArea.querySelector('.btn-p')){
+        actionArea.innerHTML=`<button class="btn btn-p btn-sm" onclick="submitMyRequests()">✓ Submit Requests</button>
+          <button class="btn btn-sm" onclick="clearMyRequests()">Clear All</button>
+          <span class="tx-xs tx-mu" id="submit-status"></span>`;
+      }
+    } else {
+      actionArea.innerHTML=`<div style="background:#f0f4f8;border:1px solid #c8d8e8;border-radius:4px;padding:8px 12px;color:#5a6a7a;font-size:12px">
+        👁️ View only — you can only submit requests for your own schedule
+      </div>`;
+    }
+  }
 }
 
 function toggleRequestDate(ds){
+  // Physicians can only modify their own requests
+  if(!isAdmin() && isPhysician() && currentUser.docId !== S.ui.currentPhysId){
+    toast('You can only edit your own time-off requests','error'); return;
+  }
   const qKey=S.ui.requestQuarter;
   if(!S.requests[qKey]) S.requests[qKey]={};
   let entry=S.requests[qKey][S.ui.currentPhysId];
@@ -2471,6 +2278,9 @@ function renderMyRequestList(){
 }
 
 function submitMyRequests(){
+  if(!isAdmin() && isPhysician() && currentUser.docId !== S.ui.currentPhysId){
+    toast('You can only submit your own time-off requests','error'); return;
+  }
   const qKey=S.ui.requestQuarter;
   if(!S.requests[qKey]) S.requests[qKey]={};
   const docId=S.ui.currentPhysId;
@@ -3473,10 +3283,9 @@ function nav(p){
 
   if(p==='sched'){updateQuarterInfo();renderSchedule();updateGenButton();}
   else {
-    const panel=document.getElementById('sheet-qtot-panel');
-    if(panel) panel.style.display='none';
+    // qtot panel removed (now inline column)
   }
-  if(p==='week'){if(!S.ui.wkStart)S.ui.wkStart=wkStart(new Date());renderWeek()}
+  if(p==='week'){S.ui.wkStart=wkStart(new Date());renderWeek()}
   if(p==='requests') renderRequestsAdmin();
   if(p==='docs'){backToDocList();renderDocList()}
   if(p==='hol') renderHolidayTable();
