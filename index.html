@@ -1221,72 +1221,6 @@ function _generateQuarter(){
 
   rotation.sort((a,b)=>a.last.localeCompare(b.last)||a.first.localeCompare(b.first));
 
-  // ── PRE-ASSIGN STRICT PROVIDERS ─────────────────────────────────────────
-  // Phase is determined by roster position so it's consistent every quarter.
-  // strict-mixed: 14-day cycle (5R + 2S on, 7 off), staggered across providers
-  // strict-swing-block: 28-day cycle (7R on, 7 off, 7S on, 7 off), staggered
-  // The starting day of the quarter relative to the cycle is fixed by the year
-  // so schedules repeat identically quarter over quarter.
-  const qStartDay=Math.floor((startD-new Date(year,0,1))/(86400000)); // day of year
-
-  // Target ~8 S per quarter total for strict providers (same as variable)
-  const strictSTarget = Math.round(S.cfg.S * totalDays / (rotation.length + strictAll.length || 1));
-
-  // ── STRICT-MIXED: 7on/7off, append 0-2 S days to each work week ──────────
-  // Work week = days 0-6 of 14-day cycle, rest = days 7-13.
-  // S days are appended at end of work week (positions 5-6) only when
-  // the provider is below their quarterly S target.
-  // Stagger phases so work weeks are spread across the group.
-  strictMixed.forEach((doc,idx)=>{
-    const phase=Math.round(idx*14/Math.max(strictMixed.length,1))%14;
-    let qS=0; // running quarterly S count for this provider
-    for(let di=0;di<totalDays;di++){
-      const ds=dstrD(addD(startD,di));
-      if(doc.startDate&&doc.startDate>ds){S.sched[doc.id][ds]='OFF';continue;}
-      const pos=((di+phase)%14+14)%14;
-      if(pos<5){
-        S.sched[doc.id][ds]='R';
-      } else if(pos<7){
-        if(qS<strictSTarget){
-          S.sched[doc.id][ds]='S'; qS++;
-        } else {
-          S.sched[doc.id][ds]='R';
-        }
-      } else {
-        S.sched[doc.id][ds]='OFF';
-      }
-    }
-  });
-
-  // ── STRICT SWING-BLOCK: 7on/7off, one full 7S week per quarter ───────────
-  // All work weeks are pure 7R EXCEPT one dedicated swing week per quarter.
-  // The swing week is placed at a fixed position in the quarter (week 4 of ~6.5 cycles)
-  // and staggered between providers so their swing weeks don't overlap.
-  // Pattern per quarter: 7R+7off, 7R+7off, 7R+7off, 7S+7off, 7R+7off, 7R+7off...
-  // The swing week index (which 14-day cycle gets the S week) is fixed per provider.
-  strictSwing.forEach((doc,idx)=>{
-    const phase=Math.round(idx*14/Math.max(strictSwing.length,1))%14;
-    // Swing week placement: roughly week 4 of the quarter, staggered by provider.
-    // Each provider's swing week is 14 days apart from the next.
-    // With ~6.5 cycles per quarter, placing at cycle 3,4,5... gives mid-quarter swing weeks.
-    const totalCycles=Math.round(totalDays/14); // ~6-7 cycles per quarter
-    const swingCycle=(3+idx)%totalCycles;       // which 14-day cycle is the swing week
-    for(let di=0;di<totalDays;di++){
-      const ds=dstrD(addD(startD,di));
-      if(doc.startDate&&doc.startDate>ds){S.sched[doc.id][ds]='OFF';continue;}
-      // Position within the 14-day cycle (phase-adjusted for staggering)
-      const pos=((di+phase)%14+14)%14;
-      // Which cycle are we in (based on raw quarter day, not phase-adjusted)
-      const cycleIdx=Math.floor(di/14)%totalCycles;
-      const isSwingWeek=(cycleIdx===swingCycle);
-      if(pos<7){
-        S.sched[doc.id][ds]=isSwingWeek?'S':'R';
-      } else {
-        S.sched[doc.id][ds]='OFF';
-      }
-    }
-  });
-
   if(!S.requests[qKey]) S.requests[qKey]={};
   const requests=S.requests[qKey];
 
@@ -1469,7 +1403,73 @@ function _generateQuarter(){
     return Array.isArray(r.optional)&&r.optional.indexOf(ds)>=0;
   }
 
-  // ──────── DAILY LOOP ────────
+  // ── PRE-ASSIGN STRICT PROVIDERS ─────────────────────────────────────────
+  // Phase is determined by roster position so it's consistent every quarter.
+  // strict-mixed: 14-day cycle (5R + 2S on, 7 off), staggered across providers
+  // strict-swing-block: 28-day cycle (7R on, 7 off, 7S on, 7 off), staggered
+  // The starting day of the quarter relative to the cycle is fixed by the year
+  // so schedules repeat identically quarter over quarter.
+  const qStartDay=Math.floor((startD-new Date(year,0,1))/(86400000)); // day of year
+
+  // Target ~8 S per quarter total for strict providers (same as variable)
+  const strictSTarget = Math.round(S.cfg.S * totalDays / (rotation.length + strictAll.length || 1));
+
+  // ── STRICT-MIXED: 7on/7off, append 0-2 S days to each work week ──────────
+  // Work week = days 0-6 of 14-day cycle, rest = days 7-13.
+  // S days are appended at end of work week (positions 5-6) only when
+  // the provider is below their quarterly S target.
+  // Stagger phases so work weeks are spread across the group.
+  strictMixed.forEach((doc,idx)=>{
+    const phase=Math.round(idx*14/Math.max(strictMixed.length,1))%14;
+    let qS=0; // running quarterly S count for this provider
+    for(let di=0;di<totalDays;di++){
+      const ds=dstrD(addD(startD,di));
+      if(doc.startDate&&doc.startDate>ds){S.sched[doc.id][ds]='OFF';continue;}
+      const pos=((di+phase)%14+14)%14;
+      if(pos<5){
+        S.sched[doc.id][ds]='R';
+      } else if(pos<7){
+        if(qS<strictSTarget){
+          S.sched[doc.id][ds]='S'; qS++;
+        } else {
+          S.sched[doc.id][ds]='R';
+        }
+      } else {
+        S.sched[doc.id][ds]='OFF';
+      }
+    }
+  });
+
+  // ── STRICT SWING-BLOCK: 7on/7off, one full 7S week per quarter ───────────
+  // All work weeks are pure 7R EXCEPT one dedicated swing week per quarter.
+  // The swing week is placed at a fixed position in the quarter (week 4 of ~6.5 cycles)
+  // and staggered between providers so their swing weeks don't overlap.
+  // Pattern per quarter: 7R+7off, 7R+7off, 7R+7off, 7S+7off, 7R+7off, 7R+7off...
+  // The swing week index (which 14-day cycle gets the S week) is fixed per provider.
+  strictSwing.forEach((doc,idx)=>{
+    const phase=Math.round(idx*14/Math.max(strictSwing.length,1))%14;
+    // Swing week placement: roughly week 4 of the quarter, staggered by provider.
+    // Each provider's swing week is 14 days apart from the next.
+    // With ~6.5 cycles per quarter, placing at cycle 3,4,5... gives mid-quarter swing weeks.
+    const totalCycles=Math.round(totalDays/14); // ~6-7 cycles per quarter
+    const swingCycle=(3+idx)%totalCycles;       // which 14-day cycle is the swing week
+    for(let di=0;di<totalDays;di++){
+      const ds=dstrD(addD(startD,di));
+      if(doc.startDate&&doc.startDate>ds){S.sched[doc.id][ds]='OFF';continue;}
+      // Position within the 14-day cycle (phase-adjusted for staggering)
+      const pos=((di+phase)%14+14)%14;
+      // Which cycle are we in (based on raw quarter day, not phase-adjusted)
+      const cycleIdx=Math.floor(di/14)%totalCycles;
+      const isSwingWeek=(cycleIdx===swingCycle);
+      if(pos<7){
+        S.sched[doc.id][ds]=isSwingWeek?'S':'R';
+      } else {
+        S.sched[doc.id][ds]='OFF';
+      }
+    }
+  });
+
+    // ──────── DAILY LOOP ────────
   for(let di=0;di<totalDays;di++){
     const date=addD(startD,di);
     const ds=dstrD(date);
