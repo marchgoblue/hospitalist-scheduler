@@ -2661,6 +2661,17 @@ function renderRequestsAdmin(){
 function renderMySchedule(){
   const docId=S.ui.currentPhysId;
   const doc=byId(docId);
+  if(!doc){
+    // currentPhysId not set or invalid — try to use logged-in physician's doc
+    if(isPhysician()&&currentUser&&currentUser.docId){
+      S.ui.currentPhysId=currentUser.docId;
+      renderMySchedule();
+    } else {
+      document.getElementById('my-schd-content').innerHTML=
+        '<div style="padding:40px;text-align:center;color:var(--ink3)">Select a physician above to view their schedule.</div>';
+    }
+    return;
+  }
   // Sync picker and header
   const schdPick=document.getElementById('phys-pick-schd');
   if(schdPick) schdPick.value=docId;
@@ -2669,6 +2680,7 @@ function renderMySchedule(){
   if(nameLbl) nameLbl.textContent=`Viewing as: ${dname(doc)}`;
 
   // Read calendar view mode BEFORE innerHTML replacement (preserve user's selection)
+  try {
   const calModeEl=document.getElementById('my-cal-mode');
   const calYearEl=document.getElementById('my-cal-year');
   // If elements exist, use their current value; otherwise fall back to stored or default
@@ -2890,6 +2902,11 @@ function renderMySchedule(){
   const newYearEl=document.getElementById('my-cal-year');
   if(newModeEl) newModeEl.value=calMode;
   if(newYearEl) newYearEl.value=String(calYear);
+  } catch(e) {
+    console.error('renderMySchedule error:', e);
+    document.getElementById('my-schd-content').innerHTML=
+      `<div style="padding:40px;text-align:center;color:#a01918">Error loading schedule: ${e.message}</div>`;
+  }
 }
 
 // ════════════════════════════════════════════════════════
