@@ -6,6 +6,7 @@
 <title>Hospitalist Schedule</title>
 <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script>
 // ══════════════════════════════════════════════════════
 //  SUPABASE CONFIG — fill in your project URL and anon key
@@ -417,6 +418,17 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
 .readonly-banner.on{display:block}
 #sync-status{font-size:11px;color:var(--ink3);font-family:'JetBrains Mono',monospace}
 
+/* qGenda Import */
+.qg-match-row{display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--line);font-size:12px}
+.qg-match-row:last-child{border-bottom:none}
+.qg-name-raw{min-width:160px;font-family:'JetBrains Mono',monospace;color:var(--ink3);font-size:11px}
+.qg-arrow{color:var(--ink3);flex-shrink:0}
+.qg-match-sel{flex:1;padding:3px 6px;border:1px solid var(--line);border-radius:3px;font-size:12px}
+.qg-match-sel.matched{border-color:#0a7044;background:#f0faf4}
+.qg-match-sel.unmatched{border-color:#a85800;background:#fff8f0}
+.qg-progress{height:6px;background:var(--line);border-radius:3px;margin-top:8px;overflow:hidden}
+.qg-progress-bar{height:100%;background:#1b4d8f;border-radius:3px;transition:width .3s}
+
 /* PRINT *//* PRINT */
 @media print{
   body{background:#fff!important}
@@ -702,11 +714,13 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
     </div>
     <div class="card">
       <h3>Data Management</h3>
-      <div class="fl">
+      <div class="fl" style="flex-wrap:wrap;gap:6px">
         <button class="btn btn-sm" onclick="exportData()">📤 Export JSON</button>
         <button class="btn btn-sm" onclick="importData()">📥 Import JSON</button>
+        <button class="btn btn-p btn-sm" onclick="importQgenda()">📊 Import qGenda Excel</button>
         <button class="btn btn-d btn-sm" onclick="if(confirm('Reset ALL data? This cannot be undone.')){localStorage.clear();location.reload()}">🗑️ Reset All</button>
       </div>
+      <div class="tx-xs tx-mu" style="margin-top:6px">qGenda import reads historical shifts from an exported daily-view xlsx and writes them into the schedule as R/S/N shifts. Only past dates are written; existing future shifts are not affected.</div>
     </div>
   </div>
 </div>
@@ -1071,6 +1085,265 @@ async function adminResetPassword(docId){
 }
 
 // loadData is now async (Supabase version above)
+// ════════════════════════════════════════════════════════
+//  QGENDA EXCEL IMPORT
+// ════════════════════════════════════════════════════════
+
+// qGenda shift type → internal shift code
+const QGENDA_SHIFT_MAP = {
+  'md par dir':   'R',   // Director rounding
+  'par rounder':  'R',   // Standard rounding
+  'par swing':    'S',   // Swing shift
+  'par night md': 'N',   // Nocturnist shift
+};
+const QGENDA_IGNORE = ['backup','app','cross cover','cross-cover'];
+
+// Normalise a qGenda shift name to a key
+function qgNormShift(raw){
+  if(!raw) return null;
+  const s=String(raw).trim().toLowerCase();
+  if(QGENDA_IGNORE.some(x=>s.includes(x))) return 'IGNORE';
+  for(const [k,v] of Object.entries(QGENDA_SHIFT_MAP)){
+    if(s.includes(k)) return v;
+  }
+  return null; // unknown
+}
+
+// Convert "Last, First" → normalised key for fuzzy matching
+function qgNameKey(raw){
+  const s=String(raw||'').trim();
+  // Remove suffixes like MD, DO, PA, APRN, NP, etc.
+  const clean=s.replace(/,?\s*(MD|DO|PA-C|PA|APRN|NP|FNP|RN|DIR\.?|DIRECTOR)\b\.?/gi,'').trim();
+  // "Last, First" → "first last"
+  const m=clean.match(/^([^,]+),\s*(.+)$/);
+  if(m) return (m[2]+' '+m[1]).toLowerCase().replace(/\s+/g,' ').trim();
+  return clean.toLowerCase().replace(/\s+/g,' ').trim();
+}
+
+// Fuzzy score: count matching characters in order (simple subsequence score)
+function qgFuzzyScore(a,b){
+  let i=0,j=0,score=0;
+  while(i<a.length&&j<b.length){
+    if(a[i]===b[j]){score++;i++;j++;}
+    else j++;
+  }
+  return score/Math.max(a.length,b.length);
+}
+
+// Match a qGenda name to the closest roster doc
+function qgMatchName(rawName){
+  const key=qgNameKey(rawName);
+  let best=null, bestScore=0;
+  S.docs.filter(d=>d.active).forEach(doc=>{
+    const docKey=(doc.first+' '+doc.last).toLowerCase();
+    const score=qgFuzzyScore(key,docKey);
+    if(score>bestScore){bestScore=score;best=doc;}
+  });
+  return bestScore>=0.55 ? best : null; // threshold for auto-match
+}
+
+// Main import entry point
+function importQgenda(){
+  if(!isAdmin()){ toast('Admin only','error'); return; }
+  const inp=document.createElement('input');
+  inp.type='file'; inp.accept='.xlsx,.xls';
+  inp.onchange=e=>{
+    const file=e.target.files[0];
+    if(!file) return;
+    const reader=new FileReader();
+    reader.onload=ev=>{
+      try{
+        const wb=XLSX.read(ev.target.result,{type:'array',cellDates:true});
+        parseQgendaWorkbook(wb, file.name);
+      } catch(err){
+        toast('Could not read Excel file: '+err.message,'error');
+        console.error(err);
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+  inp.click();
+}
+
+function parseQgendaWorkbook(wb, filename){
+  const sheetName=wb.SheetNames[0];
+  const ws=wb.Sheets[sheetName];
+  // Convert to array of arrays (raw, keep dates as date objects)
+  const rows=XLSX.utils.sheet_to_json(ws,{header:1,raw:false,dateNF:'yyyy-mm-dd'});
+  if(!rows||rows.length<2){ toast('Excel file appears empty','error'); return; }
+
+  // Auto-detect columns:
+  // Look for a header row containing "date", "provider", "shift" etc.
+  let headerRow=-1, dateCol=-1, nameCol=-1, shiftCol=-1;
+  for(let r=0;r<Math.min(10,rows.length);r++){
+    const row=rows[r].map(c=>String(c||'').toLowerCase());
+    const dIdx=row.findIndex(c=>c.includes('date'));
+    const nIdx=row.findIndex(c=>c.includes('provider')||c.includes('staff')||c.includes('name'));
+    const sIdx=row.findIndex(c=>c.includes('shift')||c.includes('task')||c.includes('activity'));
+    if(dIdx>=0||nIdx>=0||sIdx>=0){
+      headerRow=r; dateCol=dIdx; nameCol=nIdx; shiftCol=sIdx;
+      break;
+    }
+  }
+  // Fallback: assume first 3 columns are date, name, shift
+  if(headerRow<0){ headerRow=0; dateCol=0; nameCol=1; shiftCol=2; }
+
+  showQgendaMapModal(rows, headerRow, dateCol, nameCol, shiftCol, filename);
+}
+
+function showQgendaMapModal(rows, headerRow, dateCol, nameCol, shiftCol, filename){
+  // Extract unique provider names from data
+  const dataRows=rows.slice(headerRow+1).filter(r=>r&&r.length>0&&r[dateCol]);
+  const uniqueNames=[...new Set(dataRows.map(r=>String(r[nameCol]||'').trim()).filter(n=>n))].sort();
+
+  // Build name mapping (auto-matched where possible)
+  const nameMap={}; // rawName → docId or null
+  uniqueNames.forEach(n=>{ const doc=qgMatchName(n); nameMap[n]=doc?doc.id:null; });
+
+  // Stats preview
+  const totalRows=dataRows.length;
+  const today=new Date(); today.setHours(0,0,0,0);
+  const pastRows=dataRows.filter(r=>{
+    const d=new Date(r[dateCol]); return d instanceof Date&&!isNaN(d)&&d<today;
+  }).length;
+
+  // Header columns for the column-picker selects
+  const headers=rows[headerRow]||[];
+  const colOpts=headers.map((h,i)=>`<option value="${i}" ${i===dateCol?'selected':''}>${i}: ${h}</option>`).join('');
+  const colOptsN=headers.map((h,i)=>`<option value="${i}" ${i===nameCol?'selected':''}>${i}: ${h}</option>`).join('');
+  const colOptsS=headers.map((h,i)=>`<option value="${i}" ${i===shiftCol?'selected':''}>${i}: ${h}</option>`).join('');
+
+  // Provider match rows
+  const matchRows=uniqueNames.map(rawName=>{
+    const matched=nameMap[rawName];
+    const opts=`<option value="">— skip —</option>`+
+      S.docs.filter(d=>d.active).sort((a,b)=>a.last.localeCompare(b.last))
+        .map(d=>`<option value="${d.id}" ${matched===d.id?'selected':''}>${d.last}, ${d.first}</option>`).join('');
+    const cls=matched?'matched':'unmatched';
+    return `<div class="qg-match-row">
+      <span class="qg-name-raw">${rawName}</span>
+      <span class="qg-arrow">→</span>
+      <select class="qg-match-sel ${cls}" data-raw="${rawName.replace(/"/g,'&quot;')}"
+        onchange="this.className='qg-match-sel '+(this.value?'matched':'unmatched')">${opts}</select>
+    </div>`;
+  }).join('');
+
+  showModal(`📊 Import qGenda — ${filename}`,
+    `<div style="font-size:12px;color:var(--ink3);margin-bottom:12px">
+      File: <strong>${filename}</strong> · ${totalRows} total rows · <strong>${pastRows} past shifts</strong> to import
+     </div>
+
+     <div style="background:#f0f5fc;border-radius:4px;padding:10px 12px;margin-bottom:12px">
+       <div style="font-weight:700;font-size:12px;margin-bottom:8px">Column Mapping</div>
+       <div style="display:grid;grid-template-columns:auto 1fr;gap:6px 10px;align-items:center;font-size:12px">
+         <label>Date column:</label>
+         <select id="qg-col-date" style="padding:3px 6px;font-size:12px">${colOpts}</select>
+         <label>Provider name column:</label>
+         <select id="qg-col-name" style="padding:3px 6px;font-size:12px">${colOptsN}</select>
+         <label>Shift type column:</label>
+         <select id="qg-col-shift" style="padding:3px 6px;font-size:12px">${colOptsS}</select>
+       </div>
+     </div>
+
+     <div style="font-weight:700;font-size:12px;margin-bottom:6px">Provider Name Matching
+       <span style="font-weight:400;color:var(--ink3)"> — verify each match, set to "skip" to ignore</span>
+     </div>
+     <div style="max-height:260px;overflow-y:auto;border:1px solid var(--line);border-radius:4px;padding:6px 10px" id="qg-match-container">
+       ${matchRows}
+     </div>
+
+     <div style="margin-top:10px;font-size:11px;color:var(--ink3)">
+       ℹ️ Only past dates (before today) will be imported. Shift mapping: PAR Rounder/MD PAR Dir→R, PAR Swing→S, PAR Night MD→N. Backup/APP/Cross Cover ignored.
+     </div>
+     <div id="qg-import-progress" style="display:none">
+       <div class="qg-progress"><div class="qg-progress-bar" id="qg-bar" style="width:0%"></div></div>
+       <div id="qg-status" style="font-size:11px;color:var(--ink3);margin-top:4px">Importing…</div>
+     </div>`,
+    'Import Shifts',
+    ()=>runQgendaImport(rows, headerRow, uniqueNames)
+  );
+}
+
+async function runQgendaImport(rows, headerRow, uniqueNames){
+  // Read column indices from modal selects
+  const dateCol=parseInt(document.getElementById('qg-col-date')?.value||0);
+  const nameCol=parseInt(document.getElementById('qg-col-name')?.value||1);
+  const shiftCol=parseInt(document.getElementById('qg-col-shift')?.value||2);
+
+  // Build final name→docId map from the match selects
+  const nameMap={};
+  document.querySelectorAll('#qg-match-container .qg-match-sel').forEach(sel=>{
+    const raw=sel.getAttribute('data-raw');
+    nameMap[raw]=sel.value||null;
+  });
+
+  // Show progress
+  const progDiv=document.getElementById('qg-import-progress');
+  const bar=document.getElementById('qg-bar');
+  const status=document.getElementById('qg-status');
+  if(progDiv) progDiv.style.display='block';
+
+  const today=new Date(); today.setHours(0,0,0,0);
+  const dataRows=rows.slice(headerRow+1).filter(r=>r&&r.length>0);
+  let imported=0, skipped=0, unmatched=0, future=0;
+
+  for(let i=0;i<dataRows.length;i++){
+    const row=dataRows[i];
+    const rawDate=row[dateCol];
+    const rawName=String(row[nameCol]||'').trim();
+    const rawShift=String(row[shiftCol]||'').trim();
+
+    // Update progress
+    if(bar) bar.style.width=Math.round((i/dataRows.length)*100)+'%';
+
+    if(!rawDate||!rawName||!rawShift){ skipped++; continue; }
+
+    // Parse date
+    let d;
+    if(rawDate instanceof Date){ d=rawDate; }
+    else {
+      // Try various date formats
+      const s=String(rawDate).trim();
+      // Try M/D/YYYY, MM/DD/YYYY, YYYY-MM-DD
+      d=new Date(s);
+      if(isNaN(d)){
+        const parts=s.split(/[\/\-]/);
+        if(parts.length===3){
+          // Assume M/D/YYYY
+          d=new Date(parseInt(parts[2]),parseInt(parts[0])-1,parseInt(parts[1]));
+        }
+      }
+    }
+    if(!d||isNaN(d)){ skipped++; continue; }
+    d.setHours(0,0,0,0);
+
+    // Only past dates
+    if(d>=today){ future++; continue; }
+
+    // Shift type
+    const shiftCode=qgNormShift(rawShift);
+    if(!shiftCode||shiftCode==='IGNORE'){ skipped++; continue; }
+
+    // Provider match
+    const docId=nameMap[rawName];
+    if(!docId){ unmatched++; continue; }
+
+    // Write to schedule
+    const ds=dstrD(d);
+    if(!S.sched[docId]) S.sched[docId]={};
+    S.sched[docId][ds]=shiftCode;
+    imported++;
+  }
+
+  if(bar) bar.style.width='100%';
+  if(status) status.textContent=`Done: ${imported} shifts imported, ${future} future dates skipped, ${unmatched} unmatched providers, ${skipped} rows skipped`;
+
+  await saveData();
+  renderSchedule();
+  toast(`Imported ${imported} historical shifts from qGenda`,'success');
+  setTimeout(()=>{ document.getElementById('modal').style.display='none'; }, 2000);
+}
+
 function exportData(){const b=new Blob([JSON.stringify(S,null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=`hospitalist-schedule-${new Date().toISOString().slice(0,10)}.json`;a.click();toast('Exported','success')}
 function importData(){const i=document.createElement('input');i.type='file';i.accept='.json';i.onchange=e=>{const r=new FileReader();r.onload=ev=>{try{S={...S,...JSON.parse(ev.target.result)};localStorage.setItem('hsq',JSON.stringify(S));location.reload()}catch(e){toast('Invalid file','error')}};r.readAsText(e.target.files[0])};i.click()}
 
