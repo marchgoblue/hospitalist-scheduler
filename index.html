@@ -23,6 +23,15 @@ function getSB(){
   }
   return _sb;
 }
+// Safe error stringifier — handles Error objects, Supabase error objects, strings
+function errStr(e){
+  if(!e) return 'unknown error';
+  if(typeof e === 'string') return e;
+  if(e.message) return e.message+(e.code?' ('+e.code+')':'');
+  if(e.error_description) return e.error_description;
+  try{ return JSON.stringify(e); } catch(_){ return String(e); }
+}
+
 async function sha256(str){const buf=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(str));return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');}
 </script>
 <style>
@@ -955,7 +964,7 @@ async function saveData(){
   if(isSaving){pendingSave=true;return;}
   isSaving=true;setSyncStatus('saving');
   try{const{error}=await sb.from('schedule_data').upsert({id:DATA_ROW_ID,data:JSON.stringify(S),updated_at:new Date().toISOString()},{onConflict:'id'});if(error)throw error;setSyncStatus('saved');if(isAdmin())toast('Saved','success');}
-  catch(e){console.error(e);setSyncStatus('error');toast('Save failed','error');}
+  catch(e){console.error('saveData error:',errStr(e),e);setSyncStatus('error');toast('Save failed: '+errStr(e),'error');}
   finally{isSaving=false;if(pendingSave){pendingSave=false;saveData();}}
 }
 
@@ -964,7 +973,7 @@ async function loadData(){
   if(!sb){const d=localStorage.getItem('hsq');if(d){try{S={...S,...JSON.parse(d)};}catch(e){}}applyMigrations();return;}
   setSyncStatus('loading');
   try{const{data,error}=await sb.from('schedule_data').select('data').eq('id',DATA_ROW_ID).single();if(error&&error.code!=='PGRST116')throw error;if(data&&data.data)S={...S,...JSON.parse(data.data)};setSyncStatus('synced');}
-  catch(e){console.error(e);setSyncStatus('error');toast('Load failed','error');}
+  catch(e){console.error('loadData error:',errStr(e),e);setSyncStatus('error');toast('Load failed: '+errStr(e),'error');}
   applyMigrations();
 }
 
@@ -1024,8 +1033,8 @@ async function tryLogin(){
     currentUser={username:user.username,role:user.role,docId:user.doc_id};
     completeLogin();
   }catch(e){
-    errEl.textContent='Login error: '+e.message;
-    console.error('tryLogin error:',e);
+    errEl.textContent='Login error: '+errStr(e);
+    console.error('tryLogin error:', errStr(e), e);
   }finally{if(btn){btn.disabled=false;btn.textContent='Sign In';}}
 }
 
@@ -1156,8 +1165,8 @@ function importQgenda(){
         const wb=XLSX.read(ev.target.result,{type:'array',cellDates:true});
         parseQgendaWorkbook(wb, file.name);
       } catch(err){
-        toast('Could not read Excel file: '+err.message,'error');
-        console.error(err);
+        toast('Could not read Excel file: '+errStr(err),'error');
+        console.error('qGenda parse error:',errStr(err),err);
       }
     };
     reader.readAsArrayBuffer(file);
@@ -1168,25 +1177,43 @@ function importQgenda(){
 function parseQgendaWorkbook(wb, filename){
   const sheetName=wb.SheetNames[0];
   const ws=wb.Sheets[sheetName];
-  // Convert to array of arrays (raw, keep dates as date objects)
-  const rows=XLSX.utils.sheet_to_json(ws,{header:1,raw:false,dateNF:'yyyy-mm-dd'});
+
+  // Parse without cellDates first — let us handle date conversion manually
+  // raw:true keeps numbers as numbers (Excel date serials), false formats them
+  const rows=XLSX.utils.sheet_to_json(ws,{header:1,raw:false,defval:''});
   if(!rows||rows.length<2){ toast('Excel file appears empty','error'); return; }
 
-  // Auto-detect columns:
-  // Look for a header row containing "date", "provider", "shift" etc.
-  let headerRow=-1, dateCol=-1, nameCol=-1, shiftCol=-1;
+  // Auto-detect header row — scan first 10 rows for recognizable column names
+  let headerRow=0, dateCol=0, nameCol=1, shiftCol=2;
   for(let r=0;r<Math.min(10,rows.length);r++){
-    const row=rows[r].map(c=>String(c||'').toLowerCase());
-    const dIdx=row.findIndex(c=>c.includes('date'));
-    const nIdx=row.findIndex(c=>c.includes('provider')||c.includes('staff')||c.includes('name'));
-    const sIdx=row.findIndex(c=>c.includes('shift')||c.includes('task')||c.includes('activity'));
+    const row=rows[r];
+    if(!Array.isArray(row)||row.length===0) continue;
+    // Safely convert each cell to lowercase string
+    const cells=row.map(c=>String(c==null?'':c).toLowerCase().trim());
+    const dIdx=cells.findIndex(c=>c==='date'||c.includes('date'));
+    const nIdx=cells.findIndex(c=>c.includes('provider')||c.includes('staff')||c==='name'||c.includes('physician'));
+    const sIdx=cells.findIndex(c=>c==='shift'||c.includes('shift')||c.includes('task')||c.includes('activity')||c.includes('role'));
     if(dIdx>=0||nIdx>=0||sIdx>=0){
-      headerRow=r; dateCol=dIdx; nameCol=nIdx; shiftCol=sIdx;
+      headerRow=r;
+      if(dIdx>=0) dateCol=dIdx;
+      if(nIdx>=0) nameCol=nIdx;
+      if(sIdx>=0) shiftCol=sIdx;
       break;
     }
   }
-  // Fallback: assume first 3 columns are date, name, shift
-  if(headerRow<0){ headerRow=0; dateCol=0; nameCol=1; shiftCol=2; }
+
+  // If no header found, try to detect by looking at data patterns in row 0
+  // (some qGenda exports have no header row)
+  const testRows=rows.slice(headerRow+1,headerRow+5);
+  const hasHeader=rows[headerRow].some(c=>{
+    const s=String(c||'').toLowerCase();
+    return s.includes('date')||s.includes('provider')||s.includes('shift')||s.includes('name');
+  });
+  if(!hasHeader){
+    // No recognizable header — use column 0=date, 1=name, 2=shift as defaults
+    // and start from row 0
+    headerRow=-1;
+  }
 
   showQgendaMapModal(rows, headerRow, dateCol, nameCol, shiftCol, filename);
 }
@@ -1204,8 +1231,28 @@ function showQgendaMapModal(rows, headerRow, dateCol, nameCol, shiftCol, filenam
   const totalRows=dataRows.length;
   const today=new Date(); today.setHours(0,0,0,0);
   const pastRows=dataRows.filter(r=>{
-    const d=new Date(r[dateCol]); return d instanceof Date&&!isNaN(d)&&d<today;
+    const s=String(r[dateCol]||'').trim();
+    if(!s) return false;
+    const d=new Date(s); return !isNaN(d)&&d<today;
   }).length;
+
+  // Raw data preview (first 3 data rows to help confirm column mapping)
+  const previewRows=dataRows.slice(0,3).map(r=>`
+    <tr style="font-size:11px">
+      <td style="padding:2px 6px;border:1px solid var(--line);font-family:monospace">${String(r[dateCol]||'').slice(0,12)}</td>
+      <td style="padding:2px 6px;border:1px solid var(--line)">${String(r[nameCol]||'').slice(0,30)}</td>
+      <td style="padding:2px 6px;border:1px solid var(--line)">${String(r[shiftCol]||'').slice(0,25)}</td>
+    </tr>`).join('');
+  const previewHtml=previewRows?`
+    <div style="font-weight:700;font-size:11px;color:var(--ink3);margin-bottom:4px">Preview (first 3 rows):</div>
+    <table style="border-collapse:collapse;margin-bottom:12px;width:100%">
+      <thead><tr>
+        <th style="padding:2px 6px;border:1px solid var(--line);font-size:11px;background:#f0f5fc">Date</th>
+        <th style="padding:2px 6px;border:1px solid var(--line);font-size:11px;background:#f0f5fc">Provider</th>
+        <th style="padding:2px 6px;border:1px solid var(--line);font-size:11px;background:#f0f5fc">Shift</th>
+      </tr></thead>
+      <tbody>${previewRows}</tbody>
+    </table>`:'';
 
   // Header columns for the column-picker selects
   const headers=rows[headerRow]||[];
@@ -1232,6 +1279,8 @@ function showQgendaMapModal(rows, headerRow, dateCol, nameCol, shiftCol, filenam
     `<div style="font-size:12px;color:var(--ink3);margin-bottom:12px">
       File: <strong>${filename}</strong> · ${totalRows} total rows · <strong>${pastRows} past shifts</strong> to import
      </div>
+
+     ${previewHtml}
 
      <div style="background:#f0f5fc;border-radius:4px;padding:10px 12px;margin-bottom:12px">
        <div style="font-weight:700;font-size:12px;margin-bottom:8px">Column Mapping</div>
@@ -1298,24 +1347,36 @@ async function runQgendaImport(rows, headerRow, uniqueNames){
 
     if(!rawDate||!rawName||!rawShift){ skipped++; continue; }
 
-    // Parse date
-    let d;
-    if(rawDate instanceof Date){ d=rawDate; }
-    else {
-      // Try various date formats
-      const s=String(rawDate).trim();
-      // Try M/D/YYYY, MM/DD/YYYY, YYYY-MM-DD
-      d=new Date(s);
-      if(isNaN(d)){
-        const parts=s.split(/[\/\-]/);
-        if(parts.length===3){
-          // Assume M/D/YYYY
-          d=new Date(parseInt(parts[2]),parseInt(parts[0])-1,parseInt(parts[1]));
+    // Parse date — handle multiple formats qGenda might export
+    let d=null;
+    try{
+      const s=String(rawDate||'').trim();
+      if(!s){ skipped++; continue; }
+      // Try direct parse first (handles ISO 8601: 2026-04-15)
+      let parsed=new Date(s);
+      if(!isNaN(parsed.getTime())){
+        d=parsed;
+      } else {
+        // Try M/D/YYYY or MM/DD/YYYY
+        const slash=s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+        if(slash){
+          const yr=parseInt(slash[3]); const mo=parseInt(slash[1])-1; const dy=parseInt(slash[2]);
+          d=new Date(yr<100?yr+2000:yr, mo, dy);
+        }
+        // Try D-Mon-YYYY (e.g. 15-Apr-2026)
+        if(!d||isNaN(d.getTime())){
+          const dmy=s.match(/^(\d{1,2})-([A-Za-z]{3})-(\d{4})$/);
+          if(dmy){
+            d=new Date(`${dmy[2]} ${dmy[1]}, ${dmy[3]}`);
+          }
         }
       }
-    }
-    if(!d||isNaN(d)){ skipped++; continue; }
-    d.setHours(0,0,0,0);
+      if(d&&!isNaN(d.getTime())){
+        d.setHours(0,0,0,0);
+      } else {
+        skipped++; continue;
+      }
+    } catch(e2){ skipped++; continue; }
 
     // Only past dates
     if(d>=today){ future++; continue; }
@@ -1469,8 +1530,8 @@ function generateQuarter(){
   try {
     _generateQuarter();
   } catch(e) {
-    console.error('generateQuarter error:', e);
-    toast('Schedule generation error: ' + e.message, 'error');
+    console.error('generateQuarter error:', errStr(e), e);
+    toast('Schedule generation error: ' + errStr(e), 'error');
   }
 }
 function _generateQuarter(){
@@ -3182,9 +3243,9 @@ function renderMySchedule(){
   if(newModeEl) newModeEl.value=calMode;
   if(newYearEl) newYearEl.value=String(calYear);
   } catch(e) {
-    console.error('renderMySchedule error:', e);
+    console.error('renderMySchedule error:', errStr(e), e);
     document.getElementById('my-schd-content').innerHTML=
-      `<div style="padding:40px;text-align:center;color:#a01918">Error loading schedule: ${e.message}</div>`;
+      `<div style="padding:40px;text-align:center;color:#a01918">Error loading schedule: ${errStr(e)}</div>`;
   }
 }
 
@@ -3947,20 +4008,26 @@ async function appInit(){
       let parsed=null;
       try{parsed=JSON.parse(saved);}catch(e){}
       if(parsed&&parsed.username){
+        if(statusEl)statusEl.textContent='Verifying session for '+parsed.username+'…';
         const dbUser=await getUser(parsed.username);
         if(dbUser&&dbUser.role===parsed.role&&dbUser.doc_id===parsed.docId){
           currentUser=parsed;
           document.getElementById('login-overlay').style.display='none';
-          await loadData();finishInit();return;
+          if(statusEl)statusEl.textContent='Loading schedule data…';
+          await loadData();
+          finishInit();
+          return;
         } else {
           sessionStorage.removeItem('hs_user');
           currentUser=null;
+          if(statusEl)statusEl.textContent='Session expired — please sign in again';
         }
       }
     } catch(e){
-      console.error('Session restore error:',e);
+      console.error('Session restore error:',errStr(e),e);
       sessionStorage.removeItem('hs_user');
       currentUser=null;
+      if(statusEl)statusEl.textContent='Session error: '+errStr(e)+' — please sign in';
     }
   }
   // Show login overlay — always reaches here if no valid session
