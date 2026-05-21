@@ -229,6 +229,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
 .consult-hdr{background:#e8f5e9!important;color:#0a7044;border-top:2px solid #0a7044}
 .rounds-hdr{background:#dde9f7!important;color:#1b4d8f;border-top:2px solid #1b4d8f}
 .noct-hdr{background:#1a1a2e!important;color:#c9b8f5;border-top:2px solid #3a3a6e}
+.prn-hdr{background:#f5f0ff!important;color:#6b21a8;border-top:2px solid #9333ea;font-style:italic}
 
 /* Row / column highlights */
 .row-hl td{background:#fff9e6!important}
@@ -803,7 +804,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
         <button class="btn btn-sm" style="background:#eef5fb;border:1px solid #b8d4f0;color:#1b4d8f" onclick="saveVersion()">💾 Save Version</button>
         <button class="btn btn-sm" style="background:#eef5fb;border:1px solid #b8d4f0;color:#1b4d8f" onclick="showVersions()">🕓 Restore Version</button>
         <button class="btn btn-d btn-sm" onclick="confirmClearSchedule()">🗑️ Clear Schedule</button>
-        <button class="btn btn-d btn-sm" onclick="if(confirm('Reset ALL data including providers? This cannot be undone.')){localStorage.clear();location.reload()}">⚠️ Reset All</button>
+        <button class="btn btn-d btn-sm" onclick="if(confirm('FACTORY RESET: Delete ALL data including physician roster, schedule, settings, and saved versions? This cannot be undone and cannot be recovered. Type OK to confirm.')){localStorage.clear();location.reload()}">⚠️ Factory Reset</button>
       </div>
       <div class="tx-xs tx-mu">
         <strong>Save Version</strong> creates a named snapshot you can restore later. <strong>Clear Schedule</strong> wipes all shifts and requests but keeps your roster and settings.
@@ -1580,7 +1581,7 @@ async function runQgendaImport(records){
     const baseId=(np.last+np.first).toLowerCase().replace(/[^a-z]/g,'');
     let uid=baseId; let n=2;
     while(S.docs.find(d=>d.id===uid)) uid=baseId+n++;
-    S.docs.push({id:uid,last:np.last,first:np.first,role:'MD',fte:np.fte,type:np.type,active:true,startDate:null,title:''});
+    S.docs.push({id:uid,last:np.last,first:np.first,role:'MD',fte:np.fte,type:(np.type||'prn'),active:true,startDate:null,title:''});
     corrections[rawName]=uid;
   }
 
@@ -2034,7 +2035,8 @@ function _generateQuarter(){
   function canBeR(docId){
     const s=state[docId];
     if(!s) return false;
-    if(s.lastShift==='S') return false;
+    if(s.lastShift==='S') return false;          // mid-S-block: no R
+    if(s.lastBlockEndedOnS) return false;        // just came off S: must rest ≥1 day first
     if(s.block==='W') return s.workInBlock<s.maxWork;
     return s.dayInBlock>=s.lastWorkSize;
   }
@@ -2116,10 +2118,13 @@ function _generateQuarter(){
     } else {
       if(s.block==='W'&&s.workInBlock>0){
         s.lastWorkSize=s.workInBlock;
+        // Remember if the last work shift was S — enforce a rest day before R
+        s.lastBlockEndedOnS = (s.lastShift==='S');
         s.block='O';s.dayInBlock=1;s.workInBlock=0;
         s.lastShift=null;s.runLen=1;
       } else if(s.block==='O'){
         s.dayInBlock++;s.runLen++;
+        if(s.dayInBlock>1) s.lastBlockEndedOnS=false; // cleared after 1 rest day
       } else {
         s.block='O';s.dayInBlock=1;s.workInBlock=0;
         s.lastShift=null;s.runLen=1;
@@ -2439,7 +2444,7 @@ function _generateQuarter(){
         .filter(d=>{
           if(assigned.has(d.id)) return false;
           const s=state[d.id];
-          if(!s||s.lastShift==='S') return false;
+          if(!s||s.lastShift==='S'||s.lastBlockEndedOnS) return false;
           if(s.block==='W') return s.workInBlock<s.maxWork; // already eligible, just not picked
           // OFF block: relax rest from lastWorkSize to MIN_R_HARD
           return s.dayInBlock>=MIN_R_HARD;
@@ -2467,7 +2472,7 @@ function _generateQuarter(){
           if(assigned.has(d.id)) return false;
           const s=state[d.id];
           if(!s) return false;
-          if(s.lastShift==='S') return false;       // no S→R transition allowed
+          if(s.lastShift==='S'||s.lastBlockEndedOnS) return false;  // no S→R transition
           if(s.block==='W') return false;            // mid-block already handled above
           return s.dayInBlock>=1;                    // at least 1 day off
         })
@@ -2830,11 +2835,14 @@ function renderSchedule(){
   const allDocs=activeDocs(year);
   const consultDocs=allDocs.filter(d=>d.type==='weekday-only');
   const nocturnistDocs=allDocs.filter(d=>d.type==='nocturnist').sort((a,b)=>a.last.localeCompare(b.last));
-  const rotationDocs=allDocs.filter(d=>d.type!=='weekday-only'&&d.type!=='nocturnist');
+  const prnDocs=allDocs.filter(d=>d.type==='prn').sort((a,b)=>a.last.localeCompare(b.last));
+  const rotationDocs=allDocs.filter(d=>d.type!=='weekday-only'&&d.type!=='nocturnist'&&d.type!=='prn')
+    .sort((a,b)=>a.last.localeCompare(b.last));
   const fConsult=filterText?consultDocs.filter(d=>dname(d).toLowerCase().includes(filterText)):consultDocs;
   const fRotation=filterText?rotationDocs.filter(d=>dname(d).toLowerCase().includes(filterText)):rotationDocs;
   const fNocturnist=filterText?nocturnistDocs.filter(d=>dname(d).toLowerCase().includes(filterText)):nocturnistDocs;
-  if(!fConsult.length&&!fRotation.length&&!fNocturnist.length){
+  const fPrn=filterText?prnDocs.filter(d=>dname(d).toLowerCase().includes(filterText)):prnDocs;
+  if(!fConsult.length&&!fRotation.length&&!fNocturnist.length&&!fPrn.length){
     document.getElementById('sheet-outer').innerHTML='<div class="sheet-wrap" id="sheet-wrap"><div style="padding:40px;text-align:center;color:var(--ink3)">No physicians match filter.</div></div>';
     return;
   }
@@ -2936,6 +2944,10 @@ function renderSchedule(){
   if(fNocturnist.length){
     html+=`<tr><td class="section-hdr noct-hdr" colspan="${allCols}">▶ Nocturnists</td></tr>`;
     fNocturnist.forEach(d=>html+=buildRow(d,false));
+  }
+  if(fPrn.length){
+    html+=`<tr><td class="section-hdr prn-hdr" colspan="${allCols}">▶ PRN / Per Diem (not scheduled — shifts filled manually)</td></tr>`;
+    fPrn.forEach(d=>html+=buildRow(d,false));
   }
 
   // Coverage footer
