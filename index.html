@@ -1216,15 +1216,45 @@ function qgFuzzyScore(a,b){
 }
 
 // Match a qGenda name to the closest roster doc
+// Priority: exact last name match → exact last+first → fuzzy fallback
 function qgMatchName(rawName){
+  const raw=String(rawName||'').trim();
+  if(!raw) return null;
+  // Parse "Last, First" format
+  const parts=raw.match(/^([^,]+),\s*(.+)$/);
+  const rawLast=parts ? parts[1].trim().toLowerCase() : raw.toLowerCase();
+  const rawFirst=parts ? parts[2].trim().toLowerCase() : '';
+
+  const activeDocs=S.docs.filter(d=>d.active);
+
+  // Pass 1: exact last+first match (most reliable)
+  if(rawFirst){
+    const exact=activeDocs.find(d=>
+      d.last.toLowerCase()===rawLast && d.first.toLowerCase()===rawFirst);
+    if(exact) return exact;
+  }
+
+  // Pass 2: exact last name match (only if unique)
+  const lastMatches=activeDocs.filter(d=>d.last.toLowerCase()===rawLast);
+  if(lastMatches.length===1) return lastMatches[0];
+
+  // Pass 3: last name + first name starts with (handles middle names, suffixes)
+  if(rawFirst && lastMatches.length>1){
+    const startMatch=lastMatches.find(d=>
+      d.first.toLowerCase().startsWith(rawFirst.split(' ')[0]) ||
+      rawFirst.startsWith(d.first.toLowerCase()));
+    if(startMatch) return startMatch;
+  }
+
+  // Pass 4: fuzzy fallback for edge cases
   const key=qgNameKey(rawName);
   let best=null, bestScore=0;
-  S.docs.filter(d=>d.active).forEach(doc=>{
+  activeDocs.forEach(doc=>{
     const docKey=(doc.first+' '+doc.last).toLowerCase();
     const score=qgFuzzyScore(key,docKey);
     if(score>bestScore){bestScore=score;best=doc;}
   });
-  return bestScore>=0.55 ? best : null; // threshold for auto-match
+  return bestScore>=0.7 ? best : null; // higher threshold to avoid false matches
 }
 
 // Main import entry point
@@ -1336,23 +1366,32 @@ function parseQgendaWorkbook(wb, filename){
 }
 
 function showQgendaMapModal(records, filename, totalParsed, totalIgnored){
+  // Store records globally so the modal button can access them
+  window._qgRecords=records;
+
   const today=new Date(); today.setHours(0,0,0,0);
   const pastRecords=records.filter(r=>r.date<today);
   const futureRecords=records.filter(r=>r.date>=today);
 
-  // Build unique unmatched names for manual correction
-  const unmatchedNames=[...new Set(records.filter(r=>!r.docId).map(r=>r.rawName))].sort();
-  const matchedCount=records.filter(r=>r.docId&&r.date<today).length;
+  // Unique provider names — show ALL (matched and unmatched) for verification
+  const allNames=[...new Set(records.map(r=>r.rawName))].sort();
+  const unmatchedNames=allNames.filter(n=>!records.find(r=>r.rawName===n&&r.docId));
+  const matchedNames=allNames.filter(n=>records.find(r=>r.rawName===n&&r.docId));
+  const matchedCount=pastRecords.filter(r=>r.docId).length;
 
-  // Provider match rows (only unmatched names need attention)
-  const matchRows=unmatchedNames.slice(0,30).map(rawName=>{
+  // Build match rows for ALL names — matched names pre-selected, unmatched need correction
+  const matchRows=allNames.map(rawName=>{
+    const rec=records.find(r=>r.rawName===rawName);
+    const matched=rec?rec.docId:null;
     const opts=`<option value="">— skip —</option>`+
       S.docs.filter(d=>d.active).sort((a,b)=>a.last.localeCompare(b.last))
-        .map(d=>`<option value="${d.id}">${d.last}, ${d.first}</option>`).join('');
+        .map(d=>`<option value="${d.id}" ${matched===d.id?'selected':''}>${d.last}, ${d.first}</option>`).join('');
+    const cls=matched?'matched':'unmatched';
+    const count=pastRecords.filter(r=>r.rawName===rawName).length;
     return `<div class="qg-match-row">
-      <span class="qg-name-raw">${rawName}</span>
+      <span class="qg-name-raw">${rawName} <span style="color:#999;font-size:10px">(${count})</span></span>
       <span class="qg-arrow">→</span>
-      <select class="qg-match-sel unmatched" data-raw="${rawName.replace(/"/g,'&quot;')}"
+      <select class="qg-match-sel ${cls}" data-raw="${rawName.replace(/"/g,'&quot;')}"
         onchange="this.className='qg-match-sel '+(this.value?'matched':'unmatched')">${opts}</select>
     </div>`;
   }).join('');
@@ -1383,26 +1422,105 @@ function showQgendaMapModal(records, filename, totalParsed, totalIgnored){
       </div>
     </div>
     <div style="font-size:11px;color:#555;margin-bottom:12px">
-      Breakdown of matched past shifts: <strong>${rCount} R</strong> · <strong>${sCount} S</strong> · <strong>${nCount} N</strong>
+      Breakdown: <strong>${rCount} R</strong> · <strong>${sCount} S</strong> · <strong>${nCount} N</strong> matched past shifts
     </div>
-    ${unmatchedNames.length>0?`
     <div style="font-weight:700;font-size:12px;margin-bottom:6px">
-      Unmatched providers — assign or skip
-      <span style="font-weight:400;color:var(--ink3)">(${unmatchedNames.length} names)</span>
+      All provider name matches — <span style="color:#0a7044">${matchedNames.length} matched</span>,
+      <span style="color:#a85800">${unmatchedNames.length} unmatched</span>
+      <span style="font-weight:400;color:var(--ink3)"> — verify and correct before importing</span>
     </div>
     <div style="max-height:220px;overflow-y:auto;border:1px solid var(--line);border-radius:4px;padding:6px 10px" id="qg-match-container">
       ${matchRows}
-    </div>`:'<div style="color:#0a7044;font-size:12px">✓ All providers matched automatically.</div>'}
-    <div style="margin-top:10px;font-size:11px;color:var(--ink3)">
-      Only past shifts are imported. Shift mapping: PAR Rounder 1-13 + MD PAR Dir → R, PAR Swing 1-3 → S, PAR Night MD → N.
     </div>
+    <div style="margin-top:10px;display:flex;gap:8px;align-items:center">
+      <button class="btn btn-sm" onclick="previewQgendaImport()" style="background:#eef5fb;color:#1b4d8f;border:1px solid #b8d4f0">
+        👁️ Preview Changes
+      </button>
+      <span style="font-size:11px;color:var(--ink3)">Preview what shifts will be written before importing</span>
+    </div>
+    <div id="qg-preview-area" style="display:none;margin-top:10px;max-height:200px;overflow-y:auto;border:1px solid var(--line);border-radius:4px;font-size:11px"></div>
     <div id="qg-import-progress" style="display:none;margin-top:8px">
       <div class="qg-progress"><div class="qg-progress-bar" id="qg-bar" style="width:0%"></div></div>
       <div id="qg-status" style="font-size:11px;color:var(--ink3);margin-top:4px">Importing…</div>
     </div>`,
     'Import Shifts',
-    ()=>runQgendaImport(records)
+    ()=>runQgendaImport(window._qgRecords)
   );
+}
+
+// Preview function — shows exactly what will be written
+function previewQgendaImport(){
+  const records=window._qgRecords;
+  if(!records){toast('No data loaded','error');return;}
+
+  // Apply manual corrections from modal
+  const corrections={};
+  document.querySelectorAll('#qg-match-container .qg-match-sel').forEach(sel=>{
+    const raw=sel.getAttribute('data-raw');
+    const val=sel.value;
+    corrections[raw]=val||null;
+  });
+
+  const today=new Date(); today.setHours(0,0,0,0);
+  const preview=[];
+
+  records.forEach(rec=>{
+    if(rec.date>=today) return; // skip future
+    const docId=rec.docId||corrections[rec.rawName];
+    if(!docId) return;
+    const doc=byId(docId);
+    if(!doc) return;
+    const ds=dstrD(rec.date);
+    const existing=(S.sched[docId]&&S.sched[docId][ds])||'—';
+    const changed=existing!==rec.shift;
+    // Check if this is a bonus shift (not in base schedule)
+    const qKey2=`${rec.date.getFullYear()}-${Math.floor(rec.date.getMonth()/3)+1}`;
+    const baseSh=S.baseSchedule&&S.baseSchedule[qKey2]&&S.baseSchedule[qKey2][docId]&&S.baseSchedule[qKey2][docId][ds];
+    const isBonus=(!baseSh || baseSh==='OFF') && (rec.shift==='R'||rec.shift==='S'||rec.shift==='N');
+    preview.push({date:ds, name:`${doc.last}, ${doc.first}`, shift:rec.shift, existing, changed, docId, isBonus});
+  });
+
+  // Build preview table sorted by date then name
+  preview.sort((a,b)=>a.date.localeCompare(b.date)||a.name.localeCompare(b.name));
+
+  // Group by provider for a per-provider summary
+  const byDoc={};
+  preview.forEach(p=>{
+    if(!byDoc[p.docId]) byDoc[p.docId]={name:p.name,R:0,S:0,N:0,bonus:0,total:0,changes:0};
+    if(p.shift==='R') byDoc[p.docId].R++;
+    else if(p.shift==='S') byDoc[p.docId].S++;
+    else if(p.shift==='N') byDoc[p.docId].N++;
+    byDoc[p.docId].total++;
+    if(p.isBonus) byDoc[p.docId].bonus++;
+    if(p.changed) byDoc[p.docId].changes++;
+  });
+
+  const summaryRows=Object.values(byDoc).sort((a,b)=>a.name.localeCompare(b.name)).map(d=>
+    `<tr><td style="padding:2px 6px">${d.name}</td>
+     <td style="padding:2px 6px;text-align:center">${d.R}</td>
+     <td style="padding:2px 6px;text-align:center">${d.S}</td>
+     <td style="padding:2px 6px;text-align:center">${d.N}</td>
+     <td style="padding:2px 6px;text-align:center;font-weight:700">${d.total}</td>
+     <td style="padding:2px 6px;text-align:center;color:${d.bonus>0?'#a85800':'#888'}">${d.bonus>0?'+'+d.bonus:'—'}</td></tr>`
+  ).join('');
+
+  const area=document.getElementById('qg-preview-area');
+  area.style.display='block';
+  area.innerHTML=`
+    <div style="padding:6px 10px">
+      <div style="font-weight:700;margin-bottom:6px">Per-provider shift summary (${preview.length} total shifts):</div>
+      <table style="border-collapse:collapse;width:100%">
+        <thead><tr style="background:#f0f5fc">
+          <th style="padding:2px 6px;text-align:left">Provider</th>
+          <th style="padding:2px 6px;text-align:center">R</th>
+          <th style="padding:2px 6px;text-align:center">S</th>
+          <th style="padding:2px 6px;text-align:center">N</th>
+          <th style="padding:2px 6px;text-align:center">Total</th>
+          <th style="padding:2px 6px;text-align:center">Bonus</th>
+        </tr></thead>
+        <tbody>${summaryRows}</tbody>
+      </table>
+    </div>`;
 }
 
 async function runQgendaImport(records){
@@ -1434,6 +1552,25 @@ async function runQgendaImport(records){
 
     const ds=dstrD(rec.date);
     if(!S.sched[rec.docId]) S.sched[rec.docId]={};
+
+    // Detect bonus shifts by comparing against the base schedule
+    const qKey2=`${rec.date.getFullYear()}-${Math.floor(rec.date.getMonth()/3)+1}`;
+    const baseSh=S.baseSchedule&&S.baseSchedule[qKey2]&&S.baseSchedule[qKey2][rec.docId]&&S.baseSchedule[qKey2][rec.docId][ds];
+    if(baseSh){
+      // This date existed in the base schedule
+      if(baseSh!==rec.shift){
+        // Shift type changed (e.g. was OFF in base, now R = bonus shift)
+        if(!S.bonusShifts) S.bonusShifts={};
+        if(!S.bonusShifts[rec.docId]) S.bonusShifts[rec.docId]={};
+        S.bonusShifts[rec.docId][ds]=rec.shift;
+      }
+    } else if(!baseSh || baseSh==='OFF'){
+      // No base schedule entry or was OFF → this is a bonus shift
+      if(!S.bonusShifts) S.bonusShifts={};
+      if(!S.bonusShifts[rec.docId]) S.bonusShifts[rec.docId]={};
+      S.bonusShifts[rec.docId][ds]=rec.shift;
+    }
+
     S.sched[rec.docId][ds]=rec.shift;
     imported++;
   }
@@ -1605,14 +1742,20 @@ function _generateQuarter(){
   if(!S.requests[qKey]) S.requests[qKey]={};
   const requests=S.requests[qKey];
 
+  // Clear schedule for the quarter — but PRESERVE days before today (imported historical data)
+  const todayD=new Date(); todayD.setHours(0,0,0,0);
+  const todayDs=dstrD(todayD);
   allActive.forEach(d=>{
     if(!S.sched[d.id]) S.sched[d.id]={};
     if(!S.teams) S.teams={};
     if(!S.teams[d.id]) S.teams[d.id]={};
     for(let i=0;i<totalDays;i++){
       const ds=dstrD(addD(startD,i));
-      delete S.sched[d.id][ds];
-      delete S.teams[d.id][ds];
+      // Only clear future days; keep historical/imported data for past days
+      if(ds>=todayDs){
+        delete S.sched[d.id][ds];
+        delete S.teams[d.id][ds];
+      }
     }
   });
 
@@ -1621,6 +1764,37 @@ function _generateQuarter(){
   // Monthly S target per provider (~quarterTargetS / 3 months)
   // Target ~8 S per quarter → ~2.67 per month → we use 3 as soft cap
   const MONTHLY_S_TARGET=Math.round(8/3);  // 3
+
+  // ── YTD base schedule counting (for annual fairness) ─────────────────
+  // Count each provider's BASE (not bonus) shifts from prior quarters this year.
+  // This tells us how many shifts each provider has been ASSIGNED so far,
+  // excluding any voluntary extra shifts they picked up.
+  // The generator then uses this to equalize annual totals across providers.
+  const ytdBase={};  // docId → {R:n, S:n, N:n, total:n}
+  rotation.forEach(doc=>{
+    let bR=0, bS=0, bN=0;
+    // Count base schedule shifts from all quarters before this one
+    for(let pq=1; pq<q; pq++){
+      const pqKey=`${year}-${pq}`;
+      const base=S.baseSchedule&&S.baseSchedule[pqKey]&&S.baseSchedule[pqKey][doc.id];
+      if(!base) continue;
+      Object.values(base).forEach(sh=>{
+        if(sh==='R') bR++;
+        else if(sh==='S') bS++;
+        else if(sh==='N') bN++;
+      });
+    }
+    ytdBase[doc.id]={R:bR, S:bS, N:bN, total:bR+bS+bN};
+  });
+
+  // Compute per-provider annual target and remaining budget
+  const annualTarget=S.cfg.annual; // 182 for FTE=1.0
+  const ytdRemaining={};
+  rotation.forEach(doc=>{
+    const target=Math.round(doc.fte*annualTarget);
+    const used=ytdBase[doc.id]?ytdBase[doc.id].total:0;
+    ytdRemaining[doc.id]=Math.max(0, target-used);
+  });
 
   // State init — look back at prior quarter to maintain continuity
   // Read last 14 days of prior quarter to seed each provider's state.
@@ -1758,6 +1932,8 @@ function _generateQuarter(){
       s.lastShift=shift;
       if(shift==='R') s.qR++; else s.qS++;
       s.monthCount[month]++;
+      // Decrement annual remaining budget as shifts are assigned
+      if(ytdRemaining[docId]!==undefined && ytdRemaining[docId]>0) ytdRemaining[docId]--;
     } else {
       if(s.block==='W'&&s.workInBlock>0){
         s.lastWorkSize=s.workInBlock;
@@ -1857,6 +2033,28 @@ function _generateQuarter(){
     const dow=date.getDay();
     const month=date.getMonth();
 
+    // Skip past days that already have imported data — don't overwrite history
+    if(ds<todayDs){
+      // Still need to update state tracking for continuity into future days
+      rotation.forEach(doc=>{
+        const sh=S.sched[doc.id]&&S.sched[doc.id][ds];
+        if(sh&&state[doc.id]){
+          // Lightweight state update so the algorithm knows where each provider stands
+          const s=state[doc.id];
+          if(sh==='R'||sh==='S'){
+            if(s.block==='O'){s.block='W';s.dayInBlock=0;s.workInBlock=0;s.runLen=0;}
+            s.workInBlock++;s.dayInBlock++;
+            s.runLen=(s.lastShift===sh)?s.runLen+1:1;
+            s.lastShift=sh;
+          } else {
+            if(s.block==='W'){s.lastWorkSize=s.workInBlock;s.block='O';s.dayInBlock=0;s.workInBlock=0;s.runLen=0;s.lastShift=null;}
+            else{s.dayInBlock++;}
+          }
+        }
+      });
+      continue; // don't generate for this day
+    }
+
     nocturnists.forEach(doc=>{S.sched[doc.id][ds]='OFF';});
 
     let tahirR=0;
@@ -1941,7 +2139,9 @@ function _generateQuarter(){
     // Helper: sort key for S candidates (monthly fairness first, then quarterly)
     function sSortKey(docId){
       const s=state[docId];
-      return [s.monthCount[month], s.qS];
+      // Annual fairness: factor in remaining budget (higher = more priority)
+      const rem=ytdRemaining[docId]||0;
+      return [-rem, s.monthCount[month], s.qS]; // negative rem so higher remaining sorts first
     }
 
     // STEP 4a: Normal S — BELOW monthly target (strongest fairness tier)
@@ -1949,8 +2149,8 @@ function _generateQuarter(){
       const cands=rotation
         .filter(d=>!assigned.has(d.id)&&canBeS_normal(d.id)&&state[d.id].monthCount[month]<MONTHLY_S_TARGET)
         .sort((a,b)=>{
-          const [am,aq]=sSortKey(a.id), [bm,bq]=sSortKey(b.id);
-          return am!==bm?am-bm:aq!==bq?aq-bq:a.last.localeCompare(b.last);
+          const [ar,am,aq]=sSortKey(a.id), [br,bm,bq]=sSortKey(b.id);
+          return ar!==br?ar-br:am!==bm?am-bm:aq!==bq?aq-bq:a.last.localeCompare(b.last);
         });
       let i=0;
       while(needS>0&&i<cands.length){
@@ -1964,8 +2164,8 @@ function _generateQuarter(){
       const cands=rotation
         .filter(d=>!assigned.has(d.id)&&canBeS_normal(d.id))
         .sort((a,b)=>{
-          const [am,aq]=sSortKey(a.id), [bm,bq]=sSortKey(b.id);
-          return am!==bm?am-bm:aq!==bq?aq-bq:a.last.localeCompare(b.last);
+          const [ar,am,aq]=sSortKey(a.id), [br,bm,bq]=sSortKey(b.id);
+          return ar!==br?ar-br:am!==bm?am-bm:aq!==bq?aq-bq:a.last.localeCompare(b.last);
         });
       let i=0;
       while(needS>0&&i<cands.length){
@@ -1979,7 +2179,8 @@ function _generateQuarter(){
       const cands=rotation
         .filter(d=>!assigned.has(d.id)&&canBeS_emergency(d.id))
         .sort((a,b)=>{
-          const [am,aq]=sSortKey(a.id), [bm,bq]=sSortKey(b.id);
+          const [ar,am,aq]=sSortKey(a.id), [br,bm,bq]=sSortKey(b.id);
+          if(ar!==br) return ar-br;
           if(am!==bm) return am-bm;
           if(aq!==bq) return aq-bq;
           const aR=(state[a.id].block==='W'&&state[a.id].lastShift==='R')?state[a.id].runLen:0;
@@ -1998,9 +2199,9 @@ function _generateQuarter(){
       const cands=rotation
         .filter(d=>!assigned.has(d.id)&&canBeS_lastResort(d.id))
         .sort((a,b)=>{
-          const [am,aq]=sSortKey(a.id), [bm,bq]=sSortKey(b.id);
+          const [ar,am,aq]=sSortKey(a.id), [br,bm,bq]=sSortKey(b.id);
           const aRest=state[a.id].dayInBlock, bRest=state[b.id].dayInBlock;
-          return am!==bm?am-bm:aq!==bq?aq-bq:bRest-aRest||a.last.localeCompare(b.last);
+          return ar!==br?ar-br:am!==bm?am-bm:aq!==bq?aq-bq:bRest-aRest||a.last.localeCompare(b.last);
         });
       let i=0;
       while(needS>0&&i<cands.length){
@@ -2010,6 +2211,7 @@ function _generateQuarter(){
     }
 
     // STEP 5a: Normal R fill — candidates eligible by rest rules
+    // Sort priority: continuing R > most annual budget remaining > fewest monthly > fewest qR > most rested
     const rCandidates=rotation
       .filter(d=>!assigned.has(d.id)&&canBeR(d.id))
       .sort((a,b)=>{
@@ -2017,6 +2219,9 @@ function _generateQuarter(){
         const aCont=(sa.block==='W'&&sa.lastShift==='R')?0:1;
         const bCont=(sb.block==='W'&&sb.lastShift==='R')?0:1;
         if(aCont!==bCont) return aCont-bCont;
+        // Annual fairness: providers with more remaining budget get priority
+        const aRem=ytdRemaining[a.id]||0, bRem=ytdRemaining[b.id]||0;
+        if(Math.abs(aRem-bRem)>3) return bRem-aRem; // significant gap → pick the one further behind
         if(sa.monthCount[month]!==sb.monthCount[month]) return sa.monthCount[month]-sb.monthCount[month];
         if(sa.qR!==sb.qR) return sa.qR-sb.qR;
         const aRest=(sa.block==='O')?sa.dayInBlock:0;
@@ -2104,6 +2309,19 @@ function _generateQuarter(){
       if(h.xm&&S.sched[docId]&&S.sched[docId][hd.xm]) S.sched[docId][hd.xm]='H';
     });
   }
+
+  // Save a snapshot of the generated base schedule for this quarter.
+  // This is used later to detect bonus/extra shifts when re-importing from qGenda.
+  if(!S.baseSchedule) S.baseSchedule={};
+  S.baseSchedule[qKey]={};
+  allActive.forEach(doc=>{
+    S.baseSchedule[qKey][doc.id]={};
+    for(let di2=0;di2<totalDays;di2++){
+      const ds2=dstrD(addD(startD,di2));
+      const sh=S.sched[doc.id]&&S.sched[doc.id][ds2];
+      if(sh) S.baseSchedule[qKey][doc.id][ds2]=sh;
+    }
+  });
 
   S.cycleStarts[qKey]={generated:new Date().toISOString()};
   saveData();
@@ -2461,27 +2679,28 @@ function renderSchedule(){
 
   function buildRow(doc,isConsult){
     const{all:docReqs,req:docRequired}=getDocReqs(doc.id);
-    let qTotalR=0,qTotalS=0;
+    let qTotalR=0,qTotalS=0,qTotalN=0;
     const mc={};
-    monthCells.forEach(m=>{mc[m.month]={r:0,s:0};});
+    monthCells.forEach(m=>{mc[m.month]={r:0,s:0,n:0};});
     days.forEach(d=>{
       const sh=(S.sched[doc.id]&&S.sched[doc.id][dstrD(d)])||'OFF';
       if(sh==='R'){mc[d.getMonth()].r++;qTotalR++;}
       if(sh==='S'||sh==='H'){mc[d.getMonth()].s++;qTotalS++;}
+      if(sh==='N'){mc[d.getMonth()].n++;qTotalN++;}
     });
-    const qTotal=qTotalR+qTotalS;
+    const qTotal=qTotalR+qTotalS+qTotalN;
     const target=Math.round(doc.fte*S.cfg.annual/4);
     const qColor=qTotal>target+3?'#a01918':qTotal<target-3?'#a85800':'#0a7044';
-    const mTip=monthCells.map(m=>`${monAbbr(m.month)}:${mc[m.month].r}R${mc[m.month].s}S`).join(' | ');
+    const mTip=monthCells.map(m=>`${monAbbr(m.month)}:${mc[m.month].r}R${mc[m.month].s}S${mc[m.month].n?mc[m.month].n+'N':''}`).join(' | ');
     const isHighlighted=selRow===doc.id;
     const rowCls=isHighlighted?'row-hl':'';
 
     let row=`<tr class="${rowCls}" id="row-${doc.id}">`;
     // Single sticky name cell — Q∑ total embedded in bottom-right of the cell
-    row+=`<td class="name-col${isHighlighted?' name-col-hl':''}" onclick="toggleRowHighlight('${doc.id}')" ondblclick="navToDoc('${doc.id}')" title="Q${q} total: ${qTotalR}R+${qTotalS}S=${qTotal} (target ~${target})&#10;${mTip}&#10;Double-click to open detail">
+    row+=`<td class="name-col${isHighlighted?' name-col-hl':''}" onclick="toggleRowHighlight('${doc.id}')" ondblclick="navToDoc('${doc.id}')" title="Q${q} total: ${qTotalR}R+${qTotalS}S${qTotalN?'+'+qTotalN+'N':''}=${qTotal} (target ~${target})&#10;${mTip}&#10;Double-click to open detail">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:4px">
         <span>${isConsult?'<span class="consult-badge">CONSULT</span>':''}${dname(doc)}</span>
-        <span class="qtot-inline" style="color:${qColor}">${qTotal}<span style="font-size:8px;color:#999;display:block;line-height:1;text-align:right">${qTotalR}R ${qTotalS}S</span></span>
+        <span class="qtot-inline" style="color:${qColor}">${qTotal}<span style="font-size:8px;color:#999;display:block;line-height:1;text-align:right">${qTotalR}R ${qTotalS}S${qTotalN?' '+qTotalN+'N':''}</span></span>
       </div>
     </td>`;
     // Day cells
@@ -3075,16 +3294,17 @@ function renderMySchedule(){
   const sched=S.sched[docId]||{};
 
   // Year stats - total scheduled and completed YTD
-  let rCount=0,sCount=0,hCount=0;
-  let rDone=0,sDone=0,hDone=0;
+  let rCount=0,sCount=0,nCount=0,hCount=0;
+  let rDone=0,sDone=0,nDone=0,hDone=0;
   Object.entries(sched).forEach(([ds,sh])=>{
     if(!ds.startsWith(String(yr))) return;
     const d=parseD(ds);
     if(sh==='R'){rCount++; if(d<=today)rDone++;}
     else if(sh==='S'){sCount++; if(d<=today)sDone++;}
+    else if(sh==='N'){nCount++; if(d<=today)nDone++;}
     else if(sh==='H'){hCount++; if(d<=today)hDone++;}
   });
-  const total=rCount+sCount+hCount;
+  const total=rCount+sCount+nCount+hCount;
   const totalDone=rDone+sDone+hDone;
   const target=Math.round(doc.fte*S.cfg.annual);
   const pct=Math.min(Math.round(total/target*100),100);
@@ -3362,18 +3582,19 @@ function showDocDetail(docId){
   const sched=S.sched[docId]||{};
 
   // Year stats
-  let rCount=0,sCount=0,hCount=0;
+  let rCount=0,sCount=0,nCount=0,hCount=0;
   // Completed YTD vs total scheduled
-  let rDone=0,sDone=0,hDone=0;
+  let rDone=0,sDone=0,nDone=0,hDone=0;
   const today=new Date();today.setHours(0,0,0,0);
   Object.entries(sched).forEach(([ds,sh])=>{
     if(!ds.startsWith(String(year))) return;
     const d=parseD(ds);
     if(sh==='R'){rCount++; if(d<=today)rDone++;}
     else if(sh==='S'){sCount++; if(d<=today)sDone++;}
+    else if(sh==='N'){nCount++; if(d<=today)nDone++;}
     else if(sh==='H'){hCount++; if(d<=today)hDone++;}
   });
-  const total=rCount+sCount+hCount;
+  const total=rCount+sCount+nCount+hCount;
   const totalDone=rDone+sDone+hDone;
   const target=Math.round(doc.fte*S.cfg.annual);
   const pct=Math.min(Math.round(total/target*100),100);
