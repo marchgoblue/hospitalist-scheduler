@@ -5,23 +5,92 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Hospitalist Schedule</title>
 <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script>
 // ══════════════════════════════════════════════════════
-//  SUPABASE CONFIG — fill in your project URL and anon key
-//  Get these from: supabase.com → your project → Settings → API
+//  SUPABASE CONFIG — direct REST fetch (no client library, avoids DataCloneError)
 // ══════════════════════════════════════════════════════
 const SUPABASE_URL  = 'https://wyvrtaqpakncaotlusdd.supabase.co';
 const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind5dnJ0YXFwYWtuY2FvdGx1c2RkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxMjgwMzIsImV4cCI6MjA5NDcwNDAzMn0.GSSZ9cY_rtJtL76mb2uChSXHrPbs3K8s05F1uX2Jpy4';
 const DATA_ROW_ID = 'main';
 
-let _sb = null;
-function getSB(){
-  if(!_sb && SUPABASE_URL && !SUPABASE_URL.startsWith('YOUR')){
-    _sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+// Direct REST helpers — no Supabase client library needed
+async function _sbFetch(path, opts={}){
+  let res;
+  try{
+    res = await fetch(SUPABASE_URL + path, {
+      ...opts,
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': SUPABASE_ANON,
+        'Authorization': 'Bearer ' + SUPABASE_ANON,
+        ...(opts.headers||{})
+      }
+    });
+  } catch(e){
+    // Network-level failure — most likely the Supabase project is paused or offline
+    throw new Error('Cannot reach database (project may be paused at supabase.com): ' + e.message);
   }
-  return _sb;
+  if(!res.ok){
+    const txt = await res.text().catch(()=>'');
+    throw new Error(`Supabase ${opts.method||'GET'} ${path}: HTTP ${res.status} ${txt}`);
+  }
+  const txt = await res.text();
+  return txt ? JSON.parse(txt) : null;
+}
+
+async function _sbGet(table, eq){
+  // eq = {col: val}
+  const params = Object.entries(eq).map(([k,v])=>`${k}=eq.${encodeURIComponent(v)}`).join('&');
+  return _sbFetch(`/rest/v1/${table}?${params}&select=*`);
+}
+
+async function _sbUpsert(table, data){
+  return _sbFetch(`/rest/v1/${table}`, {
+    method: 'POST',
+    headers: {'Prefer': 'resolution=merge-duplicates,return=minimal'},
+    body: JSON.stringify(data)
+  });
+}
+
+async function _sbPatch(table, eq, data){
+  const params = Object.entries(eq).map(([k,v])=>`${k}=eq.${encodeURIComponent(v)}`).join('&');
+  return _sbFetch(`/rest/v1/${table}?${params}`, {
+    method: 'PATCH',
+    headers: {'Prefer': 'return=minimal'},
+    body: JSON.stringify(data)
+  });
+}
+
+// getSB() returns a compatibility shim so all existing call sites work unchanged
+function getSB(){
+  return {
+    from(table){
+      return {
+        select(){ return {
+          eq(col,val){ return {
+            async single(){
+              try {
+                const rows = await _sbGet(table, {[col]:val});
+                if(!rows||rows.length===0) return {data:null,error:{code:'PGRST116',message:'Not found'}};
+                return {data:rows[0], error:null};
+              } catch(e){ return {data:null, error:{message:e.message}}; }
+            }
+          }}
+        }},
+        async upsert(data){
+          try { await _sbUpsert(table, data); return {error:null}; }
+          catch(e){ return {error:{message:e.message}}; }
+        },
+        update(data){ return {
+          eq(col,val){ return (async()=>{
+            try { await _sbPatch(table,{[col]:val},data); return {error:null}; }
+            catch(e){ return {error:{message:e.message}}; }
+          })(); }
+        }}
+      };
+    }
+  };
 }
 // Safe error stringifier — handles Error objects, Supabase error objects, strings
 function errStr(e){
@@ -957,23 +1026,30 @@ function updateHeaderForUser(){
 
 async function saveData(){
   if(!currentUser){toast('Not logged in','error');return;}
-  // Both admin and physicians can save (physicians only save their own requests)
-  // Admin-only writes are blocked at the function level (cycleCell, generateQuarter, etc.)
-  const sb=getSB();
-  if(!sb){localStorage.setItem('hsq',JSON.stringify(S));if(isAdmin())toast('Saved locally','info');return;}
   if(isSaving){pendingSave=true;return;}
   isSaving=true;setSyncStatus('saving');
-  try{const{error}=await sb.from('schedule_data').upsert({id:DATA_ROW_ID,data:JSON.stringify(S),updated_at:new Date().toISOString()},{onConflict:'id'});if(error)throw error;setSyncStatus('saved');if(isAdmin())toast('Saved','success');}
-  catch(e){console.error('saveData error:',errStr(e),e);setSyncStatus('error');toast('Save failed: '+errStr(e),'error');}
+  try{
+    await _sbUpsert('schedule_data',{id:DATA_ROW_ID,data:JSON.stringify(S),updated_at:new Date().toISOString()});
+    setSyncStatus('saved');
+    if(isAdmin())toast('Saved','success');
+  }catch(e){console.error('saveData error:',errStr(e),e);setSyncStatus('error');toast('Save failed: '+errStr(e),'error');}
   finally{isSaving=false;if(pendingSave){pendingSave=false;saveData();}}
 }
 
 async function loadData(){
-  const sb=getSB();
-  if(!sb){const d=localStorage.getItem('hsq');if(d){try{S={...S,...JSON.parse(d)};}catch(e){}}applyMigrations();return;}
   setSyncStatus('loading');
-  try{const{data,error}=await sb.from('schedule_data').select('data').eq('id',DATA_ROW_ID).single();if(error&&error.code!=='PGRST116')throw error;if(data&&data.data)S={...S,...JSON.parse(data.data)};setSyncStatus('synced');}
-  catch(e){console.error('loadData error:',errStr(e),e);setSyncStatus('error');toast('Load failed: '+errStr(e),'error');}
+  try{
+    const rows = await _sbGet('schedule_data', {id: DATA_ROW_ID});
+    if(rows && rows.length > 0 && rows[0].data){
+      S = {...S, ...JSON.parse(rows[0].data)};
+    }
+    setSyncStatus('synced');
+  } catch(e){
+    console.error('loadData error:', errStr(e), e);
+    setSyncStatus('error');
+    // Non-fatal — proceed with default/empty state so app still loads
+    toast('Database load failed: ' + errStr(e), 'error');
+  }
   applyMigrations();
 }
 
@@ -993,18 +1069,14 @@ function setSyncStatus(state){
 
 let lastSyncTime=0;
 async function pollForChanges(){
-  const sb=getSB();if(!sb)return;
   try{
-    const{data}=await sb.from('schedule_data').select('updated_at').eq('id',DATA_ROW_ID).single();
-    if(data){
-      const t=new Date(data.updated_at).getTime();
+    const rows=await _sbGet('schedule_data',{id:DATA_ROW_ID});
+    if(rows&&rows.length>0){
+      const t=new Date(rows[0].updated_at).getTime();
       if(t>lastSyncTime&&lastSyncTime>0){
-        // Don't auto-refresh if physician is actively entering requests
         const onReqPage=document.getElementById('pg-myreq')?.classList.contains('on');
         if(onReqPage&&isPhysician()){lastSyncTime=t;return;}
-        await loadData();
-        renderSchedule();
-        // Only show toast if we're on the schedule page
+        await loadData();renderSchedule();
         if(document.getElementById('pg-sched')?.classList.contains('on'))
           toast('Schedule updated by admin','info');
       }
@@ -1014,16 +1086,20 @@ async function pollForChanges(){
 }
 setInterval(pollForChanges,30000);
 
-async function getUser(u){const sb=getSB();if(!sb)return null;const{data,error}=await sb.from('users').select('*').eq('username',u).single();return(error||!data)?null:data;}
-async function updatePasswordInDB(u,h){const sb=getSB();if(!sb)return false;const{error}=await sb.from('users').update({password_hash:h}).eq('username',u);return!error;}
+async function getUser(u){
+  try{const rows=await _sbGet('users',{username:u});return(rows&&rows.length>0)?rows[0]:null;}
+  catch(e){console.error('getUser:',errStr(e));return null;}
+}
+async function updatePasswordInDB(u,h){
+  try{await _sbPatch('users',{username:u},{password_hash:h});return true;}
+  catch(e){console.error('updatePwd:',errStr(e));return false;}
+}
 
 async function tryLogin(){
   const username=document.getElementById('un-input').value.trim().toLowerCase();
   const password=document.getElementById('pw-input').value;
   const errEl=document.getElementById('login-error');errEl.textContent='';
   if(!username||!password){errEl.textContent='Enter username and password.';return;}
-  const sb=getSB();
-  if(!sb){if(username==='admin'&&password==='admin'){currentUser={username:'admin',role:'admin',docId:null};completeLogin();}else errEl.textContent='No DB configured. Use admin/admin.';return;}
   const btn=document.querySelector('#login-overlay .btn-p');if(btn){btn.disabled=true;btn.textContent='Signing in…';}
   try{
     const hash=await sha256(password);
@@ -1072,9 +1148,9 @@ function showChangePasswordModal(){
 async function adminResetPassword(docId){
   if(!isAdmin()){toast('Admin only','error');return;}
   const doc=byId(docId);if(!doc)return;
-  const sb=getSB();if(!sb){toast('No database','error');return;}
-  const{data}=await sb.from('users').select('username').eq('doc_id',docId).single();
-  if(!data){toast('No account found','error');return;}
+  let rows; try{rows=await _sbGet('users',{doc_id:docId});}catch(e){toast('No database: '+errStr(e),'error');return;}
+  if(!rows||rows.length===0){toast('No account found','error');return;}
+  const data=rows[0];
   const uname=data.username;
   showModal(`🔑 Reset Password — ${dname(doc)}`,
     `<div class="tx-sm mb">Reset password for <strong>${uname}</strong>.</div>
@@ -1177,232 +1253,198 @@ function importQgenda(){
 function parseQgendaWorkbook(wb, filename){
   const sheetName=wb.SheetNames[0];
   const ws=wb.Sheets[sheetName];
-
-  // Parse without cellDates first — let us handle date conversion manually
-  // raw:true keeps numbers as numbers (Excel date serials), false formats them
+  // Parse as raw array-of-arrays; defval='' avoids undefined cells
   const rows=XLSX.utils.sheet_to_json(ws,{header:1,raw:false,defval:''});
-  if(!rows||rows.length<2){ toast('Excel file appears empty','error'); return; }
+  if(!rows||rows.length<5){ toast('Excel file appears empty','error'); return; }
 
-  // Auto-detect header row — scan first 10 rows for recognizable column names
-  let headerRow=0, dateCol=0, nameCol=1, shiftCol=2;
-  for(let r=0;r<Math.min(10,rows.length);r++){
-    const row=rows[r];
-    if(!Array.isArray(row)||row.length===0) continue;
-    // Safely convert each cell to lowercase string
-    const cells=row.map(c=>String(c==null?'':c).toLowerCase().trim());
-    const dIdx=cells.findIndex(c=>c==='date'||c.includes('date'));
-    const nIdx=cells.findIndex(c=>c.includes('provider')||c.includes('staff')||c==='name'||c.includes('physician'));
-    const sIdx=cells.findIndex(c=>c==='shift'||c.includes('shift')||c.includes('task')||c.includes('activity')||c.includes('role'));
-    if(dIdx>=0||nIdx>=0||sIdx>=0){
-      headerRow=r;
-      if(dIdx>=0) dateCol=dIdx;
-      if(nIdx>=0) nameCol=nIdx;
-      if(sIdx>=0) shiftCol=sIdx;
-      break;
+  // qGenda "Calendar By Task" format:
+  // Every week occupies ~25 rows starting with a row that has "Monday" in col 0.
+  // Row 1 of block: day-of-week headers (cols 0,2,4,6,8,10,12 = Mon-Sun)
+  // Row 2 of block: date strings (same columns)
+  // Rows 3+: paired cols (shift_name, provider_name) repeated for each day
+  //
+  // We parse this directly — no column-mapping UI needed.
+
+  // First pass: extract all (date, shiftType, providerName) records
+  const records=[]; // {date:Date, shift:'R'|'S'|'N', rawName:string, docId:string|null}
+  let totalParsed=0, totalIgnored=0;
+  const today=new Date(); today.setHours(0,0,0,0);
+
+  let i=0;
+  while(i<rows.length){
+    const row=rows[i];
+    // Detect week header: col 0 = "Monday"
+    if(String(row[0]||'').trim()==='Monday'){
+      // Next row = dates
+      const dateRow=rows[i+1]||[];
+      const dates=[]; // index 0=Mon ... 6=Sun
+      for(let d=0;d<7;d++){
+        const cell=String(dateRow[d*2]||'').trim();
+        if(cell){
+          // Format: "January 1, 2026"
+          const parsed=new Date(cell);
+          dates.push(!isNaN(parsed)?parsed:null);
+        } else {
+          dates.push(null);
+        }
+      }
+
+      // Read data rows until the next "Monday" row or "Athens" group header
+      let j=i+2;
+      while(j<rows.length){
+        const dRow=rows[j];
+        const first=String(dRow[0]||'').trim();
+        if(first==='Monday'||first==='Athens') break;
+
+        // Each day: cols [d*2] = shift name, [d*2+1] = provider name
+        for(let d=0;d<7;d++){
+          if(!dates[d]) continue;
+          const shiftRaw=String(dRow[d*2]||'').trim();
+          const nameRaw=String(dRow[d*2+1]||'').trim();
+          if(!shiftRaw||!nameRaw) continue;
+          totalParsed++;
+
+          // Skip non-providers
+          if(nameRaw==='OPEN, OPEN'||nameRaw==='') continue;
+          // Skip lines that look like time values not names
+          if(/^\d{1,2}[ap]$/i.test(nameRaw)) continue;
+          // Skip schedule tag lines
+          if(nameRaw.startsWith('aa Schedule')) continue;
+
+          const shiftCode=qgNormShift(shiftRaw);
+          if(!shiftCode){ totalIgnored++; continue; }
+          if(shiftCode==='IGNORE'){ totalIgnored++; continue; }
+
+          const doc=qgMatchName(nameRaw);
+          records.push({
+            date:new Date(dates[d]),
+            shift:shiftCode,
+            rawName:nameRaw,
+            docId:doc?doc.id:null
+          });
+        }
+        j++;
+      }
+      i=j;
+    } else {
+      i++;
     }
   }
 
-  // If no header found, try to detect by looking at data patterns in row 0
-  // (some qGenda exports have no header row)
-  const testRows=rows.slice(headerRow+1,headerRow+5);
-  const hasHeader=rows[headerRow].some(c=>{
-    const s=String(c||'').toLowerCase();
-    return s.includes('date')||s.includes('provider')||s.includes('shift')||s.includes('name');
-  });
-  if(!hasHeader){
-    // No recognizable header — use column 0=date, 1=name, 2=shift as defaults
-    // and start from row 0
-    headerRow=-1;
-  }
-
-  showQgendaMapModal(rows, headerRow, dateCol, nameCol, shiftCol, filename);
+  // Show preview + confirmation modal
+  showQgendaMapModal(records, filename, totalParsed, totalIgnored);
 }
 
-function showQgendaMapModal(rows, headerRow, dateCol, nameCol, shiftCol, filename){
-  // Extract unique provider names from data
-  const dataRows=rows.slice(headerRow+1).filter(r=>r&&r.length>0&&r[dateCol]);
-  const uniqueNames=[...new Set(dataRows.map(r=>String(r[nameCol]||'').trim()).filter(n=>n))].sort();
-
-  // Build name mapping (auto-matched where possible)
-  const nameMap={}; // rawName → docId or null
-  uniqueNames.forEach(n=>{ const doc=qgMatchName(n); nameMap[n]=doc?doc.id:null; });
-
-  // Stats preview
-  const totalRows=dataRows.length;
+function showQgendaMapModal(records, filename, totalParsed, totalIgnored){
   const today=new Date(); today.setHours(0,0,0,0);
-  const pastRows=dataRows.filter(r=>{
-    const s=String(r[dateCol]||'').trim();
-    if(!s) return false;
-    const d=new Date(s); return !isNaN(d)&&d<today;
-  }).length;
+  const pastRecords=records.filter(r=>r.date<today);
+  const futureRecords=records.filter(r=>r.date>=today);
 
-  // Raw data preview (first 3 data rows to help confirm column mapping)
-  const previewRows=dataRows.slice(0,3).map(r=>`
-    <tr style="font-size:11px">
-      <td style="padding:2px 6px;border:1px solid var(--line);font-family:monospace">${String(r[dateCol]||'').slice(0,12)}</td>
-      <td style="padding:2px 6px;border:1px solid var(--line)">${String(r[nameCol]||'').slice(0,30)}</td>
-      <td style="padding:2px 6px;border:1px solid var(--line)">${String(r[shiftCol]||'').slice(0,25)}</td>
-    </tr>`).join('');
-  const previewHtml=previewRows?`
-    <div style="font-weight:700;font-size:11px;color:var(--ink3);margin-bottom:4px">Preview (first 3 rows):</div>
-    <table style="border-collapse:collapse;margin-bottom:12px;width:100%">
-      <thead><tr>
-        <th style="padding:2px 6px;border:1px solid var(--line);font-size:11px;background:#f0f5fc">Date</th>
-        <th style="padding:2px 6px;border:1px solid var(--line);font-size:11px;background:#f0f5fc">Provider</th>
-        <th style="padding:2px 6px;border:1px solid var(--line);font-size:11px;background:#f0f5fc">Shift</th>
-      </tr></thead>
-      <tbody>${previewRows}</tbody>
-    </table>`:'';
+  // Build unique unmatched names for manual correction
+  const unmatchedNames=[...new Set(records.filter(r=>!r.docId).map(r=>r.rawName))].sort();
+  const matchedCount=records.filter(r=>r.docId&&r.date<today).length;
 
-  // Header columns for the column-picker selects
-  const headers=rows[headerRow]||[];
-  const colOpts=headers.map((h,i)=>`<option value="${i}" ${i===dateCol?'selected':''}>${i}: ${h}</option>`).join('');
-  const colOptsN=headers.map((h,i)=>`<option value="${i}" ${i===nameCol?'selected':''}>${i}: ${h}</option>`).join('');
-  const colOptsS=headers.map((h,i)=>`<option value="${i}" ${i===shiftCol?'selected':''}>${i}: ${h}</option>`).join('');
-
-  // Provider match rows
-  const matchRows=uniqueNames.map(rawName=>{
-    const matched=nameMap[rawName];
+  // Provider match rows (only unmatched names need attention)
+  const matchRows=unmatchedNames.slice(0,30).map(rawName=>{
     const opts=`<option value="">— skip —</option>`+
       S.docs.filter(d=>d.active).sort((a,b)=>a.last.localeCompare(b.last))
-        .map(d=>`<option value="${d.id}" ${matched===d.id?'selected':''}>${d.last}, ${d.first}</option>`).join('');
-    const cls=matched?'matched':'unmatched';
+        .map(d=>`<option value="${d.id}">${d.last}, ${d.first}</option>`).join('');
     return `<div class="qg-match-row">
       <span class="qg-name-raw">${rawName}</span>
       <span class="qg-arrow">→</span>
-      <select class="qg-match-sel ${cls}" data-raw="${rawName.replace(/"/g,'&quot;')}"
+      <select class="qg-match-sel unmatched" data-raw="${rawName.replace(/"/g,'&quot;')}"
         onchange="this.className='qg-match-sel '+(this.value?'matched':'unmatched')">${opts}</select>
     </div>`;
   }).join('');
 
+  // Summary breakdown by shift type
+  const rCount=pastRecords.filter(r=>r.shift==='R'&&r.docId).length;
+  const sCount=pastRecords.filter(r=>r.shift==='S'&&r.docId).length;
+  const nCount=pastRecords.filter(r=>r.shift==='N'&&r.docId).length;
+  const skipCount=pastRecords.filter(r=>!r.docId).length;
+
   showModal(`📊 Import qGenda — ${filename}`,
-    `<div style="font-size:12px;color:var(--ink3);margin-bottom:12px">
-      File: <strong>${filename}</strong> · ${totalRows} total rows · <strong>${pastRows} past shifts</strong> to import
-     </div>
-
-     ${previewHtml}
-
-     <div style="background:#f0f5fc;border-radius:4px;padding:10px 12px;margin-bottom:12px">
-       <div style="font-weight:700;font-size:12px;margin-bottom:8px">Column Mapping</div>
-       <div style="display:grid;grid-template-columns:auto 1fr;gap:6px 10px;align-items:center;font-size:12px">
-         <label>Date column:</label>
-         <select id="qg-col-date" style="padding:3px 6px;font-size:12px">${colOpts}</select>
-         <label>Provider name column:</label>
-         <select id="qg-col-name" style="padding:3px 6px;font-size:12px">${colOptsN}</select>
-         <label>Shift type column:</label>
-         <select id="qg-col-shift" style="padding:3px 6px;font-size:12px">${colOptsS}</select>
-       </div>
-     </div>
-
-     <div style="font-weight:700;font-size:12px;margin-bottom:6px">Provider Name Matching
-       <span style="font-weight:400;color:var(--ink3)"> — verify each match, set to "skip" to ignore</span>
-     </div>
-     <div style="max-height:260px;overflow-y:auto;border:1px solid var(--line);border-radius:4px;padding:6px 10px" id="qg-match-container">
-       ${matchRows}
-     </div>
-
-     <div style="margin-top:10px;font-size:11px;color:var(--ink3)">
-       ℹ️ Only past dates (before today) will be imported. Shift mapping: PAR Rounder/MD PAR Dir→R, PAR Swing→S, PAR Night MD→N. Backup/APP/Cross Cover ignored.
-     </div>
-     <div id="qg-import-progress" style="display:none">
-       <div class="qg-progress"><div class="qg-progress-bar" id="qg-bar" style="width:0%"></div></div>
-       <div id="qg-status" style="font-size:11px;color:var(--ink3);margin-top:4px">Importing…</div>
-     </div>`,
+    `<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;margin-bottom:14px">
+      <div style="background:#dff5e6;border-radius:4px;padding:8px;text-align:center">
+        <div style="font-size:20px;font-weight:700;color:#0a7044">${matchedCount}</div>
+        <div style="font-size:11px;color:#555">ready to import</div>
+      </div>
+      <div style="background:#eef5fb;border-radius:4px;padding:8px;text-align:center">
+        <div style="font-size:20px;font-weight:700;color:#1b4d8f">${futureRecords.length}</div>
+        <div style="font-size:11px;color:#555">future (skipped)</div>
+      </div>
+      <div style="background:#fff5dc;border-radius:4px;padding:8px;text-align:center">
+        <div style="font-size:20px;font-weight:700;color:#a85800">${skipCount}</div>
+        <div style="font-size:11px;color:#555">unmatched names</div>
+      </div>
+      <div style="background:#f5f5f5;border-radius:4px;padding:8px;text-align:center">
+        <div style="font-size:20px;font-weight:700;color:#666">${totalIgnored}</div>
+        <div style="font-size:11px;color:#555">APP/backup ignored</div>
+      </div>
+    </div>
+    <div style="font-size:11px;color:#555;margin-bottom:12px">
+      Breakdown of matched past shifts: <strong>${rCount} R</strong> · <strong>${sCount} S</strong> · <strong>${nCount} N</strong>
+    </div>
+    ${unmatchedNames.length>0?`
+    <div style="font-weight:700;font-size:12px;margin-bottom:6px">
+      Unmatched providers — assign or skip
+      <span style="font-weight:400;color:var(--ink3)">(${unmatchedNames.length} names)</span>
+    </div>
+    <div style="max-height:220px;overflow-y:auto;border:1px solid var(--line);border-radius:4px;padding:6px 10px" id="qg-match-container">
+      ${matchRows}
+    </div>`:'<div style="color:#0a7044;font-size:12px">✓ All providers matched automatically.</div>'}
+    <div style="margin-top:10px;font-size:11px;color:var(--ink3)">
+      Only past shifts are imported. Shift mapping: PAR Rounder 1-13 + MD PAR Dir → R, PAR Swing 1-3 → S, PAR Night MD → N.
+    </div>
+    <div id="qg-import-progress" style="display:none;margin-top:8px">
+      <div class="qg-progress"><div class="qg-progress-bar" id="qg-bar" style="width:0%"></div></div>
+      <div id="qg-status" style="font-size:11px;color:var(--ink3);margin-top:4px">Importing…</div>
+    </div>`,
     'Import Shifts',
-    ()=>runQgendaImport(rows, headerRow, uniqueNames)
+    ()=>runQgendaImport(records)
   );
 }
 
-async function runQgendaImport(rows, headerRow, uniqueNames){
-  // Read column indices from modal selects
-  const dateCol=parseInt(document.getElementById('qg-col-date')?.value||0);
-  const nameCol=parseInt(document.getElementById('qg-col-name')?.value||1);
-  const shiftCol=parseInt(document.getElementById('qg-col-shift')?.value||2);
-
-  // Build final name→docId map from the match selects
-  const nameMap={};
+async function runQgendaImport(records){
+  // Apply any manual name corrections from the modal
+  const corrections={};
   document.querySelectorAll('#qg-match-container .qg-match-sel').forEach(sel=>{
     const raw=sel.getAttribute('data-raw');
-    nameMap[raw]=sel.value||null;
+    if(sel.value) corrections[raw]=sel.value;
   });
 
-  // Show progress
+  // Apply corrections to records
+  records.forEach(r=>{ if(!r.docId&&corrections[r.rawName]) r.docId=corrections[r.rawName]; });
+
   const progDiv=document.getElementById('qg-import-progress');
   const bar=document.getElementById('qg-bar');
   const status=document.getElementById('qg-status');
   if(progDiv) progDiv.style.display='block';
 
   const today=new Date(); today.setHours(0,0,0,0);
-  const dataRows=rows.slice(headerRow+1).filter(r=>r&&r.length>0);
-  let imported=0, skipped=0, unmatched=0, future=0;
+  let imported=0, skipped=0, future=0, unmatched=0;
 
-  for(let i=0;i<dataRows.length;i++){
-    const row=dataRows[i];
-    const rawDate=row[dateCol];
-    const rawName=String(row[nameCol]||'').trim();
-    const rawShift=String(row[shiftCol]||'').trim();
+  const pastRecords=records.filter(r=>r.date<today);
 
-    // Update progress
-    if(bar) bar.style.width=Math.round((i/dataRows.length)*100)+'%';
+  for(let i=0;i<pastRecords.length;i++){
+    const rec=pastRecords[i];
+    if(bar) bar.style.width=Math.round((i/pastRecords.length)*100)+'%';
 
-    if(!rawDate||!rawName||!rawShift){ skipped++; continue; }
+    if(!rec.docId){ unmatched++; continue; }
 
-    // Parse date — handle multiple formats qGenda might export
-    let d=null;
-    try{
-      const s=String(rawDate||'').trim();
-      if(!s){ skipped++; continue; }
-      // Try direct parse first (handles ISO 8601: 2026-04-15)
-      let parsed=new Date(s);
-      if(!isNaN(parsed.getTime())){
-        d=parsed;
-      } else {
-        // Try M/D/YYYY or MM/DD/YYYY
-        const slash=s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
-        if(slash){
-          const yr=parseInt(slash[3]); const mo=parseInt(slash[1])-1; const dy=parseInt(slash[2]);
-          d=new Date(yr<100?yr+2000:yr, mo, dy);
-        }
-        // Try D-Mon-YYYY (e.g. 15-Apr-2026)
-        if(!d||isNaN(d.getTime())){
-          const dmy=s.match(/^(\d{1,2})-([A-Za-z]{3})-(\d{4})$/);
-          if(dmy){
-            d=new Date(`${dmy[2]} ${dmy[1]}, ${dmy[3]}`);
-          }
-        }
-      }
-      if(d&&!isNaN(d.getTime())){
-        d.setHours(0,0,0,0);
-      } else {
-        skipped++; continue;
-      }
-    } catch(e2){ skipped++; continue; }
-
-    // Only past dates
-    if(d>=today){ future++; continue; }
-
-    // Shift type
-    const shiftCode=qgNormShift(rawShift);
-    if(!shiftCode||shiftCode==='IGNORE'){ skipped++; continue; }
-
-    // Provider match
-    const docId=nameMap[rawName];
-    if(!docId){ unmatched++; continue; }
-
-    // Write to schedule
-    const ds=dstrD(d);
-    if(!S.sched[docId]) S.sched[docId]={};
-    S.sched[docId][ds]=shiftCode;
+    const ds=dstrD(rec.date);
+    if(!S.sched[rec.docId]) S.sched[rec.docId]={};
+    S.sched[rec.docId][ds]=rec.shift;
     imported++;
   }
 
   if(bar) bar.style.width='100%';
-  if(status) status.textContent=`Done: ${imported} shifts imported, ${future} future dates skipped, ${unmatched} unmatched providers, ${skipped} rows skipped`;
+  if(status) status.textContent=`Done: ${imported} shifts imported · ${unmatched} unmatched skipped · ${records.filter(r=>r.date>=today).length} future skipped`;
 
   await saveData();
   renderSchedule();
   toast(`Imported ${imported} historical shifts from qGenda`,'success');
-  setTimeout(()=>{ document.getElementById('modal').style.display='none'; }, 2000);
+  setTimeout(()=>{ document.getElementById('modal').style.display='none'; }, 2500);
 }
 
 function exportData(){const b=new Blob([JSON.stringify(S,null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=`hospitalist-schedule-${new Date().toISOString().slice(0,10)}.json`;a.click();toast('Exported','success')}
@@ -3989,17 +4031,19 @@ S.ui.adminReqQuarter=`${defReqY}-${defReqQ}`;
 
 // ── STARTUP ───────────────────────────────────────────────
 async function appInit(){
-  const sb=getSB();
   const statusEl=document.getElementById('supabase-status');
 
-  if(!sb){
-    if(statusEl)statusEl.textContent='⚠ No database — local mode (admin/admin)';
-    currentUser={username:'admin',role:'admin',docId:null};
-    document.getElementById('login-overlay').style.display='none';
-    await loadData();finishInit();return;
-  }
+  if(statusEl)statusEl.textContent='Connecting to database…';
 
-  if(statusEl)statusEl.textContent='✓ Connected — enter your credentials';
+  // Quick connectivity check before trying session restore
+  try{
+    await _sbGet('schedule_data',{id:DATA_ROW_ID});
+    if(statusEl)statusEl.textContent='✓ Connected — enter your credentials';
+  }catch(e){
+    if(statusEl)statusEl.innerHTML='⚠ Database unreachable — <a href="https://supabase.com/dashboard" target="_blank" style="color:#1b4d8f">check if project is paused</a>';
+    console.error('DB connectivity check failed:',errStr(e));
+    // Still show the login form — user can try anyway
+  }
 
   // Restore session — but VERIFY against database to prevent sessionStorage tampering
   const saved=sessionStorage.getItem('hs_user');
