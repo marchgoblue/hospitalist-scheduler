@@ -40,9 +40,11 @@ async function _sbFetch(path, opts={}){
 }
 
 async function _sbGet(table, eq){
-  // eq = {col: val}
-  const params = Object.entries(eq).map(([k,v])=>`${k}=eq.${encodeURIComponent(v)}`).join('&');
-  return _sbFetch(`/rest/v1/${table}?${params}&select=*`);
+  // eq = {col: val} — if empty, returns all rows
+  const params = Object.keys(eq).length
+    ? Object.entries(eq).map(([k,v])=>`${k}=eq.${encodeURIComponent(v)}`).join('&')+'&select=*'
+    : 'select=*';
+  return _sbFetch(`/rest/v1/${table}?${params}`);
 }
 
 async function _sbUpsert(table, data){
@@ -792,13 +794,20 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
     </div>
     <div class="card">
       <h3>Data Management</h3>
-      <div class="fl" style="flex-wrap:wrap;gap:6px">
+      <div class="fl" style="flex-wrap:wrap;gap:6px;margin-bottom:8px">
         <button class="btn btn-sm" onclick="exportData()">📤 Export JSON</button>
         <button class="btn btn-sm" onclick="importData()">📥 Import JSON</button>
         <button class="btn btn-p btn-sm" onclick="importQgenda()">📊 Import qGenda Excel</button>
-        <button class="btn btn-d btn-sm" onclick="if(confirm('Reset ALL data? This cannot be undone.')){localStorage.clear();location.reload()}">🗑️ Reset All</button>
       </div>
-      <div class="tx-xs tx-mu" style="margin-top:6px">qGenda import reads historical shifts from an exported daily-view xlsx and writes them into the schedule as R/S/N shifts. Only past dates are written; existing future shifts are not affected.</div>
+      <div class="fl" style="flex-wrap:wrap;gap:6px;margin-bottom:8px">
+        <button class="btn btn-sm" style="background:#eef5fb;border:1px solid #b8d4f0;color:#1b4d8f" onclick="saveVersion()">💾 Save Version</button>
+        <button class="btn btn-sm" style="background:#eef5fb;border:1px solid #b8d4f0;color:#1b4d8f" onclick="showVersions()">🕓 Restore Version</button>
+        <button class="btn btn-d btn-sm" onclick="confirmClearSchedule()">🗑️ Clear Schedule</button>
+        <button class="btn btn-d btn-sm" onclick="if(confirm('Reset ALL data including providers? This cannot be undone.')){localStorage.clear();location.reload()}">⚠️ Reset All</button>
+      </div>
+      <div class="tx-xs tx-mu">
+        <strong>Save Version</strong> creates a named snapshot you can restore later. <strong>Clear Schedule</strong> wipes all shifts and requests but keeps your roster and settings.
+      </div>
     </div>
   </div>
 </div>
@@ -1383,16 +1392,36 @@ function showQgendaMapModal(records, filename, totalParsed, totalIgnored){
   const matchRows=allNames.map(rawName=>{
     const rec=records.find(r=>r.rawName===rawName);
     const matched=rec?rec.docId:null;
-    const opts=`<option value="">— skip —</option>`+
-      S.docs.filter(d=>d.active).sort((a,b)=>a.last.localeCompare(b.last))
+    const isUnmatched=!matched;
+    const nameParts=rawName.match(/^([^,]+),\s*(.+)$/);
+    const defLast=nameParts?nameParts[1].trim():'';
+    const defFirst=nameParts?nameParts[2].trim():'';
+    const addOpt=isUnmatched?`<option value="__add__" style="color:#0a7044;font-weight:700">➕ Add as new physician</option>`:'';
+    const opts=addOpt+`<option value="">— skip —</option>`+
+      S.docs.filter(d=>d.active).sort((a,b)=>{const pa=a.type==='prn'?1:0,pb=b.type==='prn'?1:0;return pa!==pb?pa-pb:a.last.localeCompare(b.last)})
         .map(d=>`<option value="${d.id}" ${matched===d.id?'selected':''}>${d.last}, ${d.first}</option>`).join('');
     const cls=matched?'matched':'unmatched';
     const count=pastRecords.filter(r=>r.rawName===rawName).length;
-    return `<div class="qg-match-row">
+    const safeId=rawName.replace(/[^a-zA-Z0-9]/g,'_');
+    return `<div class="qg-match-row" style="flex-wrap:wrap;row-gap:4px">
       <span class="qg-name-raw">${rawName} <span style="color:#999;font-size:10px">(${count})</span></span>
       <span class="qg-arrow">→</span>
       <select class="qg-match-sel ${cls}" data-raw="${rawName.replace(/"/g,'&quot;')}"
-        onchange="this.className='qg-match-sel '+(this.value?'matched':'unmatched')">${opts}</select>
+        data-deflast="${defLast.replace(/"/g,'&quot;')}" data-deffirst="${defFirst.replace(/"/g,'&quot;')}"
+        onchange="this.className='qg-match-sel '+(this.value?'matched':'unmatched');var nr=document.getElementById('np_${safeId}');if(nr)nr.style.display=this.value==='__add__'?'flex':'none';"
+      >${opts}</select>
+      <div id="np_${safeId}" style="display:none;align-items:center;gap:6px;width:100%;padding:4px 8px;background:#f0faf4;border-radius:4px;font-size:11px">
+        <span style="color:#555">Type:</span>
+        <select class="qg-new-type" data-raw="${rawName.replace(/"/g,'&quot;')}" style="padding:2px 4px;font-size:11px">
+          <option value="prn" selected>PRN</option>
+          <option value="standard">Standard</option>
+          <option value="nocturnist">Nocturnist</option>
+          <option value="swing-only">Swing Only</option>
+        </select>
+        <span style="color:#555">FTE:</span>
+        <input type="number" class="qg-new-fte" data-raw="${rawName.replace(/"/g,'&quot;')}" value="0.0" min="0.0" max="1.0" step="0.1" style="width:50px;padding:2px 4px;font-size:11px">
+        <span style="color:#888">(${defFirst} ${defLast})</span>
+      </div>
     </div>`;
   }).join('');
 
@@ -1524,14 +1553,37 @@ function previewQgendaImport(){
 }
 
 async function runQgendaImport(records){
-  // Apply any manual name corrections from the modal
+  // Read match selections — handle corrections, new providers, and skips
   const corrections={};
+  const newProviders={};
+
   document.querySelectorAll('#qg-match-container .qg-match-sel').forEach(sel=>{
     const raw=sel.getAttribute('data-raw');
-    if(sel.value) corrections[raw]=sel.value;
+    const val=sel.value;
+    if(val==='__add__'){
+      const safeId=raw.replace(/[^a-zA-Z0-9]/g,'_');
+      const typeEl=document.querySelector('#np_'+safeId+' .qg-new-type');
+      const fteEl=document.querySelector('#np_'+safeId+' .qg-new-fte');
+      newProviders[raw]={
+        last:sel.getAttribute('data-deflast')||'',
+        first:sel.getAttribute('data-deffirst')||'',
+        type:typeEl?typeEl.value:'prn',
+        fte:fteEl?parseFloat(fteEl.value)||1.0:1.0
+      };
+    } else if(val){
+      corrections[raw]=val;
+    }
   });
 
-  // Apply corrections to records
+  // Create new providers first so their IDs are available
+  for(const [rawName, np] of Object.entries(newProviders)){
+    const baseId=(np.last+np.first).toLowerCase().replace(/[^a-z]/g,'');
+    let uid=baseId; let n=2;
+    while(S.docs.find(d=>d.id===uid)) uid=baseId+n++;
+    S.docs.push({id:uid,last:np.last,first:np.first,role:'MD',fte:np.fte,type:np.type,active:true,startDate:null,title:''});
+    corrections[rawName]=uid;
+  }
+
   records.forEach(r=>{ if(!r.docId&&corrections[r.rawName]) r.docId=corrections[r.rawName]; });
 
   const progDiv=document.getElementById('qg-import-progress');
@@ -1540,48 +1592,159 @@ async function runQgendaImport(records){
   if(progDiv) progDiv.style.display='block';
 
   const today=new Date(); today.setHours(0,0,0,0);
-  let imported=0, skipped=0, future=0, unmatched=0;
-
+  let imported=0, unmatched=0;
   const pastRecords=records.filter(r=>r.date<today);
 
   for(let i=0;i<pastRecords.length;i++){
     const rec=pastRecords[i];
     if(bar) bar.style.width=Math.round((i/pastRecords.length)*100)+'%';
-
     if(!rec.docId){ unmatched++; continue; }
-
     const ds=dstrD(rec.date);
     if(!S.sched[rec.docId]) S.sched[rec.docId]={};
-
-    // Detect bonus shifts by comparing against the base schedule
     const qKey2=`${rec.date.getFullYear()}-${Math.floor(rec.date.getMonth()/3)+1}`;
     const baseSh=S.baseSchedule&&S.baseSchedule[qKey2]&&S.baseSchedule[qKey2][rec.docId]&&S.baseSchedule[qKey2][rec.docId][ds];
-    if(baseSh){
-      // This date existed in the base schedule
-      if(baseSh!==rec.shift){
-        // Shift type changed (e.g. was OFF in base, now R = bonus shift)
-        if(!S.bonusShifts) S.bonusShifts={};
-        if(!S.bonusShifts[rec.docId]) S.bonusShifts[rec.docId]={};
-        S.bonusShifts[rec.docId][ds]=rec.shift;
-      }
-    } else if(!baseSh || baseSh==='OFF'){
-      // No base schedule entry or was OFF → this is a bonus shift
+    if(!baseSh||baseSh==='OFF'){
+      if(!S.bonusShifts) S.bonusShifts={};
+      if(!S.bonusShifts[rec.docId]) S.bonusShifts[rec.docId]={};
+      S.bonusShifts[rec.docId][ds]=rec.shift;
+    } else if(baseSh!==rec.shift){
       if(!S.bonusShifts) S.bonusShifts={};
       if(!S.bonusShifts[rec.docId]) S.bonusShifts[rec.docId]={};
       S.bonusShifts[rec.docId][ds]=rec.shift;
     }
-
     S.sched[rec.docId][ds]=rec.shift;
     imported++;
   }
 
   if(bar) bar.style.width='100%';
-  if(status) status.textContent=`Done: ${imported} shifts imported · ${unmatched} unmatched skipped · ${records.filter(r=>r.date>=today).length} future skipped`;
+  const newCount=Object.keys(newProviders).length;
+  if(status) status.textContent=`Done: ${imported} shifts imported${newCount?' · '+newCount+' new physicians added':''} · ${unmatched} unmatched skipped`;
 
   await saveData();
-  renderSchedule();
-  toast(`Imported ${imported} historical shifts from qGenda`,'success');
+  renderSchedule(); renderRoster(); renderDocList(); populatePhysPicker();
+  toast(`Imported ${imported} shifts${newCount?' + '+newCount+' new providers':''}`,'success');
   setTimeout(()=>{ document.getElementById('modal').style.display='none'; }, 2500);
+}
+
+// ════════════════════════════════════════════════════════
+//  VERSIONING — named snapshots stored in Supabase
+// ════════════════════════════════════════════════════════
+
+async function saveVersion(){
+  if(!isAdmin()){ toast('Admin only','error'); return; }
+  const defaultName=`v${new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'2-digit'})} – ${S.cycleStarts&&Object.keys(S.cycleStarts).length?Object.keys(S.cycleStarts).sort().pop():'manual'}`;
+  showModal('💾 Save Version',
+    `<div style="margin-bottom:12px;font-size:13px">Save a named snapshot of the current schedule and settings. You can restore it later from "Restore Version".</div>
+     <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Snapshot name:</label>
+     <input id="version-name-input" type="text" value="${defaultName}" style="width:100%;padding:6px 8px;border:1px solid var(--line);border-radius:4px;font-size:13px">`,
+    'Save Snapshot',
+    async ()=>{
+      const name=document.getElementById('version-name-input')?.value?.trim()||defaultName;
+      try{
+        await _sbUpsert('versions',{
+          name,
+          data: JSON.stringify(S),
+          saved_at: new Date().toISOString(),
+          saved_by: currentUser.username
+        });
+        toast(`Snapshot "${name}" saved`,'success');
+      }catch(e){
+        // Fallback: save to localStorage
+        const versions=JSON.parse(localStorage.getItem('hs_versions')||'[]');
+        versions.unshift({name, data:JSON.stringify(S), saved_at:new Date().toISOString()});
+        localStorage.setItem('hs_versions', JSON.stringify(versions.slice(0,20)));
+        toast(`Snapshot "${name}" saved locally`,'success');
+        console.warn('Version saved to localStorage (Supabase unavailable):', errStr(e));
+      }
+    }
+  );
+}
+
+async function showVersions(){
+  if(!isAdmin()){ toast('Admin only','error'); return; }
+  let versions=[];
+  try{
+    const rows=await _sbGet('versions',{});
+    versions=(rows||[]).sort((a,b)=>new Date(b.saved_at)-new Date(a.saved_at));
+  }catch(e){
+    // Fallback: load from localStorage
+    versions=JSON.parse(localStorage.getItem('hs_versions')||'[]');
+    console.warn('Versions from localStorage (Supabase unavailable):', errStr(e));
+  }
+
+  if(!versions.length){
+    toast('No saved versions found','info'); return;
+  }
+
+  const rows=versions.map((v,i)=>{
+    const d=new Date(v.saved_at);
+    const dateStr=d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric',hour:'2-digit',minute:'2-digit'});
+    return `<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid var(--line);font-size:12px">
+      <div style="flex:1">
+        <div style="font-weight:600">${v.name}</div>
+        <div style="color:var(--ink3);font-size:11px">${dateStr}${v.saved_by?' · by '+v.saved_by:''}</div>
+      </div>
+      <button class="btn btn-sm" style="font-size:11px;padding:3px 8px" onclick="confirmRestoreVersion(${i})">Restore</button>
+    </div>`;
+  }).join('');
+
+  window._versionsList=versions;
+  showModal('🕓 Restore Version',
+    `<div style="font-size:12px;color:var(--ink3);margin-bottom:10px">Restoring a version replaces ALL current data. Save the current state first if needed.</div>
+     <div style="max-height:320px;overflow-y:auto;border:1px solid var(--line);border-radius:4px">${rows}</div>`,
+    null, null
+  );
+}
+
+function confirmRestoreVersion(idx){
+  const v=window._versionsList&&window._versionsList[idx];
+  if(!v){ toast('Version not found','error'); return; }
+  if(!confirm(`Restore snapshot "${v.name}"?\n\nThis will replace ALL current data. This cannot be undone.`)) return;
+  try{
+    S={...S,...JSON.parse(v.data)};
+    saveData();
+    renderSchedule(); renderRoster(); renderDocList(); populatePhysPicker(); updateQuarterInfo();
+    document.getElementById('modal').style.display='none';
+    toast(`Restored "${v.name}"`,'success');
+  }catch(e){
+    toast('Restore failed: '+errStr(e),'error');
+  }
+}
+
+function confirmClearSchedule(){
+  if(!isAdmin()){ toast('Admin only','error'); return; }
+  showModal('🗑️ Clear Schedule',
+    `<div style="font-size:13px;margin-bottom:12px">This will permanently delete:</div>
+     <ul style="font-size:12px;margin:0 0 12px 16px;line-height:1.8">
+       <li>All generated shift schedules</li>
+       <li>All time-off requests</li>
+       <li>All base schedule snapshots</li>
+       <li>All bonus shift records</li>
+       <li>All holiday assignments</li>
+       <li>All cycle start markers</li>
+     </ul>
+     <div style="font-size:12px;background:#fff5dc;border-radius:4px;padding:8px 10px;border:1px solid #f0d080">
+       ✅ <strong>Kept:</strong> Physician roster, scheduling parameters, announcements, saved versions
+     </div>
+     <div style="margin-top:10px;font-size:12px;color:#a01918;font-weight:600">Type CLEAR to confirm:</div>
+     <input id="clear-confirm-input" type="text" placeholder="CLEAR" style="width:100%;padding:6px 8px;border:1px solid #a01918;border-radius:4px;font-size:13px;margin-top:4px">`,
+    'Clear Schedule',
+    ()=>{
+      const val=document.getElementById('clear-confirm-input')?.value?.trim();
+      if(val!=='CLEAR'){ toast('Type CLEAR to confirm','error'); return; }
+      // Wipe schedule data but keep roster and settings
+      S.sched={};
+      S.requests={};
+      S.bonusShifts={};
+      S.baseSchedule={};
+      S.cycleStarts={};
+      S.hols={};
+      S.teams={};
+      saveData();
+      renderSchedule(); updateQuarterInfo(); updateGenButton();
+      toast('Schedule cleared — roster and settings preserved','success');
+    }
+  );
 }
 
 function exportData(){const b=new Blob([JSON.stringify(S,null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=`hospitalist-schedule-${new Date().toISOString().slice(0,10)}.json`;a.click();toast('Exported','success')}
@@ -1699,9 +1862,13 @@ function holName(key){
 function isStrictStyle(doc){const s=doc&&doc.preferences&&doc.preferences.scheduleStyle;return s==='strict'||s==='strict-swing-block';}
 function isSwingBlock(doc){return doc&&doc.preferences&&doc.preferences.scheduleStyle==='strict-swing-block';}
 function getPreferredR(doc){
+  // All providers prefer the same run length regardless of FTE —
+  // part-time providers simply get fewer blocks, not shorter ones.
   return (doc.preferences && doc.preferences.preferredR) || 5;
 }
 function getMaxWork(doc){
+  // All providers use full 7-day work blocks — part-time providers
+  // get fewer blocks per quarter, not shorter blocks.
   return (doc.preferences && doc.preferences.maxWork) || 7;
 }
 
@@ -1733,9 +1900,10 @@ function _generateQuarter(){
   const strictSwing=allActive.filter(d=>d.type==='standard'&&d.preferences&&d.preferences.scheduleStyle==='strict-swing-block');
   const strictAll=[...strictMixed,...strictSwing];
 
-  // Variable providers: everyone else (full-time and part-time)
+  // Variable providers: standard type only — PRN are NOT scheduled in generation
   const rotation=allActive.filter(d=>d.type==='standard'&&d.fte===1.0&&!isStrictStyle(d));
   const partTime=allActive.filter(d=>d.type==='standard'&&d.fte<1.0&&!isStrictStyle(d));
+  // PRN providers are never scheduled by the algorithm (0 FTE / on-call only)
 
   rotation.sort((a,b)=>a.last.localeCompare(b.last)||a.first.localeCompare(b.first));
 
@@ -1881,10 +2049,19 @@ function _generateQuarter(){
   function getMaxS(docId){
     return MAX_S_BLOCK;
   }
+  function qSTarget(docId){
+    // Pro-rated quarterly S target based on FTE
+    const doc=byId(docId);
+    const fte=doc?doc.fte:1.0;
+    const baseQTarget=Math.round(S.cfg.S * totalDays / (rotation.length + partTime.length + strictAll.length || 1));
+    return Math.max(1, Math.round(baseQTarget * fte));
+  }
   function canBeS_normal(docId){
     const s=state[docId];
     if(!s||s.block!=='W') return false;
     if(s.workInBlock>=s.maxWork) return false;
+    // Cap: don't exceed this provider's pro-rated quarterly S target
+    if(s.qS >= qSTarget(docId)) return false;
     if(s.lastShift==='S') return s.runLen<MAX_S_BLOCK;
     if(s.lastShift==='R' && s.runLen>=s.preferredR)
       return s.workInBlock+1<=s.maxWork;
@@ -1894,6 +2071,7 @@ function _generateQuarter(){
     const s=state[docId];
     if(!s||s.block!=='W') return false;
     if(s.workInBlock>=s.maxWork) return false;
+    if(s.qS >= qSTarget(docId)) return false;  // respect FTE-adjusted cap
     if(s.lastShift==='S') return s.runLen<MAX_S_BLOCK;
     if(s.lastShift==='R' && s.runLen>=MIN_R_HARD)
       return s.workInBlock+1<=s.maxWork;
@@ -1902,6 +2080,7 @@ function _generateQuarter(){
   function canBeS_lastResort(docId){
     const s=state[docId];
     if(!s||s.block!=='O') return false;
+    if(s.qS >= qSTarget(docId)) return false;  // respect FTE-adjusted cap
     return s.dayInBlock>=1;
   }
   function mustContinueR(docId){
@@ -1969,7 +2148,7 @@ function _generateQuarter(){
   const qStartDay=Math.floor((startD-new Date(year,0,1))/(86400000)); // day of year
 
   // Target ~8 S per quarter total for strict providers (same as variable)
-  const strictSTarget = Math.round(S.cfg.S * totalDays / (rotation.length + strictAll.length || 1));
+  const strictSTarget = Math.round(S.cfg.S * totalDays / (rotation.length + partTime.length + strictAll.length || 1));
 
   // ── STRICT-MIXED: 7on/7off, append 0-2 S days to each work week ──────────
   // Work week = days 0-6 of 14-day cycle, rest = days 7-13.
@@ -2027,6 +2206,8 @@ function _generateQuarter(){
   });
 
     // ──────── DAILY LOOP ────────
+  // Reset per-quarter S counters for part-time providers
+  partTime.forEach(doc=>{ doc._ptQS=0; });
   for(let di=0;di<totalDays;di++){
     const date=addD(startD,di);
     const ds=dstrD(date);
@@ -2076,13 +2257,29 @@ function _generateQuarter(){
 
 
     let marchR=0,marchS=0;
+    // Part-time providers: 7on/7off cycle with FTE-adjusted S quota
+    // Compute their quarterly S target same as qSTarget() but inline since we're pre-loop
+    const ptSTarget=Math.max(1, Math.round(
+      Math.round(S.cfg.S * totalDays / (rotation.length + partTime.length + strictAll.length || 1))
+    ));
     partTime.forEach(doc=>{
       if(doc.startDate&&doc.startDate>ds){S.sched[doc.id][ds]='OFF';return;}
+      // Count S already assigned this quarter for this provider
+      if(!doc._ptQS) doc._ptQS=0; // reset at start of quarter (handled below)
+      const myTarget=Math.max(1, Math.round(ptSTarget * (doc.fte||1.0)));
       const superPos=((di)%28+28)%28;
       let m='OFF';
-      if(superPos<14){if(superPos<5)m='R';else if(superPos<7)m='S';}
+      if(superPos<14){
+        if(superPos<5){
+          m='R';
+        } else if(superPos<7){
+          // Only assign S if below FTE-adjusted quota
+          m = (doc._ptQS < myTarget) ? 'S' : 'R';
+        }
+      }
       S.sched[doc.id][ds]=m;
-      if(m==='R')marchR++;if(m==='S')marchS++;
+      if(m==='R') marchR++;
+      if(m==='S'){ marchS++; doc._ptQS=(doc._ptQS||0)+1; }
     });
 
     let needR=S.cfg.R-tahirR-marchR;
@@ -2139,9 +2336,11 @@ function _generateQuarter(){
     // Helper: sort key for S candidates (monthly fairness first, then quarterly)
     function sSortKey(docId){
       const s=state[docId];
-      // Annual fairness: factor in remaining budget (higher = more priority)
       const rem=ytdRemaining[docId]||0;
-      return [-rem, s.monthCount[month], s.qS]; // negative rem so higher remaining sorts first
+      const target=qSTarget(docId)||1;
+      // Normalize qS by FTE target so part-time providers aren't over-scheduled for S
+      const normalizedQS = s.qS / target;
+      return [-rem, s.monthCount[month], normalizedQS];
     }
 
     // STEP 4a: Normal S — BELOW monthly target (strongest fairness tier)
@@ -3904,7 +4103,7 @@ function renderHolidayTable(){
 //  SETTINGS / ROSTER
 // ════════════════════════════════════════════════════════
 function renderRoster(){
-  const docs=[...S.docs].sort((a,b)=>a.last.localeCompare(b.last));
+  const docs=[...S.docs].sort((a,b)=>{const pa=a.type==='prn'?1:0,pb=b.type==='prn'?1:0;return pa!==pb?pa-pb:a.last.localeCompare(b.last)});
   document.getElementById('roster-count').textContent=docs.filter(d=>d.active).length;
   let html='<table class="htbl"><thead><tr><th>Name</th><th>Role</th><th>FTE</th><th>Type</th><th>Schedule</th><th>Pref R</th><th>Title</th><th>Start</th><th>Actions</th></tr></thead><tbody>';
   docs.forEach(d=>{
@@ -3962,6 +4161,7 @@ function openEditDoc(id){
       <div class="fg"><label>Type</label>
         <select id="ed-type" style="width:140px">
           <option value="standard" ${doc.type==='standard'?'selected':''}>Standard</option>
+          <option value="prn" ${doc.type==='prn'?'selected':''}>PRN</option>
           <option value="swing-only" ${doc.type==='swing-only'?'selected':''}>Swing Only</option>
           <option value="weekday-only" ${doc.type==='weekday-only'?'selected':''}>Weekday Only (Mon–Fri)</option>
           <option value="nocturnist" ${doc.type==='nocturnist'?'selected':''}>Nocturnist</option>
@@ -4109,7 +4309,7 @@ function switchRole(role){
   }
 }
 function populatePhysPicker(){
-  const docs=[...S.docs].filter(d=>d.active).sort((a,b)=>a.last.localeCompare(b.last));
+  const docs=[...S.docs].filter(d=>d.active).sort((a,b)=>{const pa=a.type==='prn'?1:0,pb=b.type==='prn'?1:0;return pa!==pb?pa-pb:a.last.localeCompare(b.last)});
   const opts=docs.map(d=>`<option value="${d.id}"${d.id===S.ui.currentPhysId?' selected':''}>${dname(d)}</option>`).join('');
   // Populate both page-header pickers
   const reqPick=document.getElementById('phys-pick-req');
