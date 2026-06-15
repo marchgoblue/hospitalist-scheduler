@@ -1841,41 +1841,24 @@ function holName(key){
 }
 
 // ════════════════════════════════════════════════════════
-//  SCHEDULE GENERATION (v11) — Part-time sandwich + cross-quarter continuity fix
+//  SCHEDULE GENERATION (v11) — block-aware multi-candidate optimization
 //
-//  Key fixes over v10:
-//    - Part-time work-week S count is decided ONCE at start of each work week
-//      (v10 bug: per-day quota check at positions 5 and 6 could flip 5=S, 6=R
-//       when quota hit between them → `R R R R R S R` sandwich for March etc.)
-//    - Part-time cycle is anchored to a global epoch (PT_EPOCH) so the 28-day
-//      7-on/21-off phase continues smoothly across quarter boundaries
-//      (v10 bug: cycle restarted at di=0 each quarter, so a doc finishing
-//       a work week in late Q2 could immediately start another in early Q3)
-//    - Strict-mixed work-week S count is also decided once per work week
-//      (same sandwich bug as part-time)
-//    - When a quarter starts mid-work-week, prior days' S shifts are
-//      detected so the S window aligns with what's already placed
-//
-//  Previous fixes (v10):
+//  Key fixes over v9:
 //    - MAX_S_BLOCK = 2: strictly limits consecutive S days to 2
+//      (v9 bug: S continuation had no cap → Raza/Rizvi 7-day S blocks)
 //    - Monthly S fairness: tiered selection (providers below monthly target first)
+//      Each provider targets ~quarterTargetS/3 S shifts per month
 //    - mustContinueS_couplet also checks runLen < MAX_S_BLOCK (belt-and-suspenders)
 //
-//  Three-layer S fill (guarantees 3 S/day):
+//  Swing fill layers (shortages remain visible when no clean tail is available):
 //    Layer 1 - Normal: preferredR met AND below monthly quota
 //    Layer 2 - Normal above-quota: preferredR met, but over monthly target (still fair)
-//    Layer 3 - Emergency: 3+ R (early transition when S supply thin)
-//    Layer 4 - Last resort: pull rested OFF doc into S
+//    Layer 3 - Emergency: 5+ R (early transition when S supply is thin)
 //
 //  Team numbers:
 //    Each R-shift doc gets team 1-13; persists through their block;
 //    new blocks avoid last 3 team numbers where possible
 // ════════════════════════════════════════════════════════
-
-// Global epoch for part-time and strict cycle anchoring (Monday, Jan 1, 2024).
-// Choice is arbitrary — what matters is that it's stable across all quarter
-// generations so cycle position is continuous through quarter boundaries.
-const PT_EPOCH = new Date(2024, 0, 1);
 function isStrictStyle(doc){const s=doc&&doc.preferences&&doc.preferences.scheduleStyle;return s==='strict'||s==='strict-swing-block';}
 function isSwingBlock(doc){return doc&&doc.preferences&&doc.preferences.scheduleStyle==='strict-swing-block';}
 function getPreferredR(doc){
@@ -1889,15 +1872,122 @@ function getMaxWork(doc){
   return (doc.preferences && doc.preferences.maxWork) || 7;
 }
 
+function _candidateUnit(seed,key){
+  let h=(seed+1)*2654435761;
+  for(let i=0;i<key.length;i++) h=Math.imul(h^key.charCodeAt(i),16777619);
+  return ((h>>>0)%1000000)/1000000;
+}
+function _candidateTie(seed,ds,docId){
+  return _candidateUnit(seed,ds+'|'+docId);
+}
+function _scoreScheduleCandidate(year,q){
+  const days=quarterDays(year,q);
+  const qKey=`${year}-${q}`;
+  const reqs=S.requests[qKey]||{};
+  const docs=activeDocs(year).filter(d=>d.type==='standard'&&!isStrictStyle(d));
+  let requiredMisses=0,optionalMisses=0,structural=0,shortages=0,overages=0;
+  let longDays=0,restMismatch=0;
+  const affectedRequired=new Set();
+
+  docs.forEach(doc=>{
+    const entry=reqs[doc.id]||{};
+    const required=Array.isArray(entry)?[]:(entry.required||[]);
+    const optional=Array.isArray(entry)?entry:(entry.optional||[]);
+    required.forEach(ds=>{
+      const sh=S.sched[doc.id]&&S.sched[doc.id][ds];
+      if(sh==='R'||sh==='S'||sh==='H'){requiredMisses++;affectedRequired.add(doc.id);}
+    });
+    const priorFairness=getHonoringRate(doc.id,year-1);
+    optional.forEach(ds=>{
+      const sh=S.sched[doc.id]&&S.sched[doc.id][ds];
+      if(sh==='R'||sh==='S'||sh==='H') optionalMisses+=1+(1-priorFairness);
+    });
+
+    let block=[],blockStart=-1,priorBlockLen=0,offRun=0;
+    const finishBlock=(endIdx)=>{
+      if(!block.length) return;
+      let rCount=0,sCount=0,sawS=false,badOrder=false;
+      block.forEach(sh=>{
+        if(sh==='S'){sawS=true;sCount++;}
+        else if(sh==='R'||sh==='H'){if(sawS) badOrder=true;rCount++;}
+      });
+      const touchesQuarterBoundary=blockStart===0||endIdx===days.length-1;
+      if(!touchesQuarterBoundary){
+        if(rCount<5) structural+=(5-rCount)*25;
+        if(sCount>2) structural+=(sCount-2)*25;
+        if(sCount&&rCount===0) structural+=100;
+        if(badOrder) structural+=100;
+      }
+      if(block.length>10) structural+=(block.length-10)*100;
+      if(block.length>7) longDays+=block.length-7;
+      priorBlockLen=block.length;
+      block=[];
+      blockStart=-1;
+    };
+    days.forEach((date,idx)=>{
+      const sh=(S.sched[doc.id]&&S.sched[doc.id][dstrD(date)])||'OFF';
+      if(sh==='R'||sh==='S'||sh==='H'){
+        if(offRun&&priorBlockLen) restMismatch+=Math.max(0,priorBlockLen-offRun);
+        offRun=0;
+        if(!block.length) blockStart=idx;
+        block.push(sh);
+      }else{
+        finishBlock(idx-1);
+        offRun++;
+      }
+      if(idx===days.length-1) finishBlock(idx);
+    });
+  });
+
+  days.forEach(date=>{
+    const ds=dstrD(date);
+    let r=0,s=0;
+    activeDocs(year,date.getMonth()).forEach(doc=>{
+      const sh=S.sched[doc.id]&&S.sched[doc.id][ds];
+      if(sh==='R'||sh==='H') r++;
+      else if(sh==='S') s++;
+    });
+    shortages+=Math.max(0,S.cfg.R-r)+Math.max(0,S.cfg.S-s);
+    overages+=Math.max(0,r-S.cfg.R)+Math.max(0,s-S.cfg.S);
+  });
+
+  return requiredMisses*1000000000
+    +structural*1000000
+    +affectedRequired.size*100000
+    +shortages*10000
+    +optionalMisses*100
+    +overages*20
+    +longDays*5
+    +restMismatch;
+}
 function generateQuarter(){
   try {
-    _generateQuarter();
+    const year=parseInt(document.getElementById('yr-sel').value);
+    const q=parseInt(document.getElementById('q-sel').value);
+    let best=null;
+    const CANDIDATE_COUNT=48;
+    for(let seed=0;seed<CANDIDATE_COUNT;seed++){
+      _generateQuarter(seed,false);
+      const score=_scoreScheduleCandidate(year,q);
+      if(!best||score<best.score){
+        best={
+          score,
+          seed,
+          sched:JSON.parse(JSON.stringify(S.sched)),
+          teams:JSON.parse(JSON.stringify(S.teams))
+        };
+      }
+    }
+    if(!best) throw new Error('No schedule candidate was produced.');
+    S.sched=best.sched;
+    S.teams=best.teams;
+    _finalizeGeneratedQuarter(year,q,best);
   } catch(e) {
     console.error('generateQuarter error:', errStr(e), e);
     toast('Schedule generation error: ' + errStr(e), 'error');
   }
 }
-function _generateQuarter(){
+function _generateQuarter(candidateSeed=0,finalize=true){
   const year=parseInt(document.getElementById('yr-sel').value);
   const q=parseInt(document.getElementById('q-sel').value);
   S.ui.year=year; S.ui.quarter=q;
@@ -1944,8 +2034,9 @@ function _generateQuarter(){
     }
   });
 
-  const MIN_R_HARD=3;
+  const MIN_R_HARD=5;
   const MAX_S_BLOCK=2;   // ← critical cap: no more than 2 consecutive S days
+  const MAX_VARIABLE_WORK=10;
   // Monthly S target per provider (~quarterTargetS / 3 months)
   // Target ~8 S per quarter → ~2.67 per month → we use 3 as soft cap
   const MONTHLY_S_TARGET=Math.round(8/3);  // 3
@@ -2013,7 +2104,7 @@ function _generateQuarter(){
         seededState={
           block,lastWorkSize,dayInBlock,workInBlock,lastShift,runLen,
           qR:0,qS:0,monthCount:[0,0,0,0,0,0,0,0,0,0,0,0],
-          preferredR:getPreferredR(doc),maxWork:getMaxWork(doc),
+          preferredR:Math.max(5,getPreferredR(doc)),maxWork:MAX_VARIABLE_WORK,
           teamHistory:[]
         };
       }
@@ -2033,7 +2124,7 @@ function _generateQuarter(){
         block:'W', lastWorkSize:0, dayInBlock:workDay,
         workInBlock:workDay, lastShift, runLen,
         qR:0, qS:0, monthCount:[0,0,0,0,0,0,0,0,0,0,0,0],
-        preferredR:getPreferredR(doc), maxWork:getMaxWork(doc),
+        preferredR:Math.max(5,getPreferredR(doc)), maxWork:MAX_VARIABLE_WORK,
         teamHistory:[]
       };
     } else {
@@ -2042,19 +2133,25 @@ function _generateQuarter(){
         block:'O', lastWorkSize:7, dayInBlock:restDay,
         workInBlock:0, lastShift:null, runLen:restDay,
         qR:0, qS:0, monthCount:[0,0,0,0,0,0,0,0,0,0,0,0],
-        preferredR:getPreferredR(doc), maxWork:getMaxWork(doc),
+        preferredR:Math.max(5,getPreferredR(doc)), maxWork:MAX_VARIABLE_WORK,
         teamHistory:[]
       };
     }
   }); // end rotation.forEach state init
 
-  function canBeR(docId){
+  function hasRequiredInNextRBlock(docId,di){
+    for(let offset=0;offset<MIN_R_HARD&&di+offset<totalDays;offset++){
+      if(hasRequiredRequest(docId,dstrD(addD(startD,di+offset)))) return true;
+    }
+    return false;
+  }
+  function canBeR(docId,di){
     const s=state[docId];
     if(!s) return false;
     if(s.lastShift==='S') return false;          // mid-S-block: no R
     if(s.lastBlockEndedOnS) return false;        // just came off S: must rest ≥1 day first
     if(s.block==='W') return s.workInBlock<s.maxWork;
-    return s.dayInBlock>=s.lastWorkSize;
+    return s.dayInBlock>=s.lastWorkSize&&!hasRequiredInNextRBlock(docId,di);
   }
   function canBeS_base(docId){
     // Base S eligibility (shared between normal and emergency)
@@ -2081,7 +2178,7 @@ function _generateQuarter(){
     // Cap: don't exceed this provider's pro-rated quarterly S target
     if(s.qS >= qSTarget(docId)) return false;
     if(s.lastShift==='S') return s.runLen<MAX_S_BLOCK;
-    if(s.lastShift==='R' && s.runLen>=s.preferredR)
+    if(s.lastShift==='R' && s.runLen>=MIN_R_HARD)
       return s.workInBlock+1<=s.maxWork;
     return false;
   }
@@ -2094,12 +2191,6 @@ function _generateQuarter(){
     if(s.lastShift==='R' && s.runLen>=MIN_R_HARD)
       return s.workInBlock+1<=s.maxWork;
     return false;
-  }
-  function canBeS_lastResort(docId){
-    const s=state[docId];
-    if(!s||s.block!=='O') return false;
-    if(s.qS >= qSTarget(docId)) return false;  // respect FTE-adjusted cap
-    return s.dayInBlock>=1;
   }
   function mustContinueR(docId){
     const s=state[docId];
@@ -2178,24 +2269,17 @@ function _generateQuarter(){
   // Stagger phases so work weeks are spread across the group.
   strictMixed.forEach((doc,idx)=>{
     const phase=Math.round(idx*14/Math.max(strictMixed.length,1))%14;
-    let qS=0;            // running quarterly S count for this provider
-    let weekNumS=0;      // S days planned for the current work week
-    let lastCycleIdx=-1; // which 14-day cycle the current weekNumS belongs to
+    let qS=0; // running quarterly S count for this provider
     for(let di=0;di<totalDays;di++){
       const ds=dstrD(addD(startD,di));
       if(doc.startDate&&doc.startDate>ds){S.sched[doc.id][ds]='OFF';continue;}
       const pos=((di+phase)%14+14)%14;
-      const cycleIdx=Math.floor((di+phase)/14);
-      // Entering a new 14-day cycle → decide this work week's S count ONCE.
-      // This prevents the v10 sandwich bug where positions 5 and 6 each
-      // re-checked the quota and could produce `R R R R R S R`.
-      if(cycleIdx!==lastCycleIdx){
-        lastCycleIdx=cycleIdx;
-        weekNumS = (qS<strictSTarget) ? Math.min(2, strictSTarget-qS) : 0;
-      }
-      if(pos<7){
-        const sStart = 7 - weekNumS;
-        if(pos>=sStart){
+      if(pos<5){
+        S.sched[doc.id][ds]='R';
+      } else if(pos<7){
+        const remainingS=Math.max(0,strictSTarget-qS);
+        const tailDays=Math.min(2,remainingS);
+        if(pos>=7-tailDays){
           S.sched[doc.id][ds]='S'; qS++;
         } else {
           S.sched[doc.id][ds]='R';
@@ -2236,15 +2320,8 @@ function _generateQuarter(){
   });
 
     // ──────── DAILY LOOP ────────
-  // Reset per-quarter generator state for part-time providers.
-  // _ptQS counts S shifts placed this quarter (used to stay under FTE-adjusted target).
-  // _ptLastWeekIdx / _ptWeekNumS track the once-per-work-week S-count decision
-  // so positions 5 and 6 of the same work week always agree (no S-sandwich).
-  partTime.forEach(doc=>{
-    doc._ptQS=0;
-    doc._ptLastWeekIdx=undefined;
-    doc._ptWeekNumS=0;
-  });
+  // Reset per-quarter S counters for part-time providers
+  partTime.forEach(doc=>{ doc._ptQS=0; });
   for(let di=0;di<totalDays;di++){
     const date=addD(startD,di);
     const ds=dstrD(date);
@@ -2294,65 +2371,23 @@ function _generateQuarter(){
 
 
     let marchR=0,marchS=0;
-    // Part-time providers: 7-on / 21-off cycle with FTE-adjusted S quota.
-    //
-    // Two fixes vs v10:
-    // 1. Cycle position is anchored to a global epoch (PT_EPOCH) instead of
-    //    di (days since quarter start). This makes the 28-day cycle continue
-    //    smoothly across quarter boundaries, so a part-time doc finishing a
-    //    work week late in one quarter doesn't immediately start another
-    //    at the top of the next quarter.
-    // 2. The S-count for each work week is decided ONCE at the start of the
-    //    week, not re-evaluated at positions 5 and 6 independently. The old
-    //    per-day check could produce `R R R R R S R` when the quota tipped
-    //    between positions 5 and 6.
-    //
-    // Per-cycle pattern (positions 0..27 of 28-day cycle):
-    //   0..(7-numS-1): R         ← work R days
-    //   (7-numS)..6:   S         ← end-of-week swing (numS ∈ {0,1,2})
-    //   7..27:         OFF       ← 21-day rest period
+    // Part-time providers: 7on/7off cycle with FTE-adjusted S quota
+    // Compute their quarterly S target same as qSTarget() but inline since we're pre-loop
     const ptSTarget=Math.max(1, Math.round(
       Math.round(S.cfg.S * totalDays / (rotation.length + partTime.length + strictAll.length || 1))
     ));
     partTime.forEach(doc=>{
       if(doc.startDate&&doc.startDate>ds){S.sched[doc.id][ds]='OFF';return;}
-      if(!doc._ptQS) doc._ptQS=0;
+      // Count S already assigned this quarter for this provider
+      if(!doc._ptQS) doc._ptQS=0; // reset at start of quarter (handled below)
       const myTarget=Math.max(1, Math.round(ptSTarget * (doc.fte||1.0)));
-
-      // Epoch-anchored cycle position (independent of which quarter we're in)
-      const epochDays=Math.floor((date - PT_EPOCH)/86400000);
-      const superPos=((epochDays%28)+28)%28;
-      const weekIdx=Math.floor(epochDays/14);
-
-      // Entering a new work week → decide numS for this whole week now.
-      // Decision is sticky for positions 5 and 6, so they always agree.
-      if(superPos<7 && doc._ptLastWeekIdx!==weekIdx){
-        doc._ptLastWeekIdx=weekIdx;
-        // If a prior quarter already placed S days earlier in this same
-        // 14-day cycle, count them so we don't drop S mid-week (which would
-        // create a cross-quarter sandwich like `... R S | R OFF ...`).
-        let priorS=0;
-        for(let k=1;k<=superPos;k++){
-          const pd=dstrD(addD(date,-k));
-          const sh=S.sched[doc.id]&&S.sched[doc.id][pd];
-          if(sh==='S') priorS++;
-        }
-        // Fresh budget-based decision, capped at 2 consecutive S days
-        let numS = (doc._ptQS < myTarget) ? Math.min(2, myTarget - doc._ptQS) : 0;
-        // Honor any S days already placed earlier in this work week
-        numS = Math.max(numS, priorS);
-        numS = Math.min(numS, 2);
-        doc._ptWeekNumS=numS;
-      }
-
+      const superPos=((di)%28+28)%28;
       let m='OFF';
       if(superPos<7){
-        const numS=doc._ptWeekNumS||0;
-        const sStart=7-numS;
-        m = (superPos>=sStart) ? 'S' : 'R';
+        const remainingS=Math.max(0,myTarget-doc._ptQS);
+        const tailDays=Math.min(2,remainingS);
+        m=superPos>=7-tailDays?'S':'R';
       }
-      // superPos 7..27 → m stays 'OFF' (21-day rest period)
-
       S.sched[doc.id][ds]=m;
       if(m==='R') marchR++;
       if(m==='S'){ marchS++; doc._ptQS=(doc._ptQS||0)+1; }
@@ -2377,17 +2412,19 @@ function _generateQuarter(){
       }
     });
 
-    // STEP 1b: Optional OFF — honor requests, prioritizing docs with lowest honoring rate
-    // Docs who've had fewer requests honored get priority (fairness across the group)
+    // STEP 1b: Optional OFF. Candidate variants partially approve optional dates;
+    // complete-quarter scoring chooses the best balance of quality and fairness.
     const optionalRequestDocs = rotation.filter(doc=>{
       if(assigned.has(doc.id)) return false;
-      return hasOptionalRequest(doc.id,ds) && canBeOff(doc.id);
+      if(!hasOptionalRequest(doc.id,ds)||!canBeOff(doc.id)) return false;
+      const honorBias=0.55+(candidateSeed%10)*0.045;
+      return _candidateUnit(candidateSeed,doc.id+'|'+ds+'|optional')<=honorBias;
     });
     // Sort: lowest honoring rate gets honored first
     optionalRequestDocs.sort((a,b)=>{
       const rA=getHonoringRate(a.id,year);
       const rB=getHonoringRate(b.id,year);
-      return rA-rB;  // ascending: lowest rate goes first
+      return rA-rB||_candidateTie(candidateSeed,ds,a.id)-_candidateTie(candidateSeed,ds,b.id);
     });
     optionalRequestDocs.forEach(doc=>{
       S.sched[doc.id][ds]='OFF';assign(doc.id,'OFF',month);assigned.add(doc.id);
@@ -2425,7 +2462,7 @@ function _generateQuarter(){
         .filter(d=>!assigned.has(d.id)&&canBeS_normal(d.id)&&state[d.id].monthCount[month]<MONTHLY_S_TARGET)
         .sort((a,b)=>{
           const [ar,am,aq]=sSortKey(a.id), [br,bm,bq]=sSortKey(b.id);
-          return ar!==br?ar-br:am!==bm?am-bm:aq!==bq?aq-bq:a.last.localeCompare(b.last);
+          return ar!==br?ar-br:am!==bm?am-bm:aq!==bq?aq-bq:_candidateTie(candidateSeed,ds,a.id)-_candidateTie(candidateSeed,ds,b.id);
         });
       let i=0;
       while(needS>0&&i<cands.length){
@@ -2440,7 +2477,7 @@ function _generateQuarter(){
         .filter(d=>!assigned.has(d.id)&&canBeS_normal(d.id))
         .sort((a,b)=>{
           const [ar,am,aq]=sSortKey(a.id), [br,bm,bq]=sSortKey(b.id);
-          return ar!==br?ar-br:am!==bm?am-bm:aq!==bq?aq-bq:a.last.localeCompare(b.last);
+          return ar!==br?ar-br:am!==bm?am-bm:aq!==bq?aq-bq:_candidateTie(candidateSeed,ds,a.id)-_candidateTie(candidateSeed,ds,b.id);
         });
       let i=0;
       while(needS>0&&i<cands.length){
@@ -2460,7 +2497,7 @@ function _generateQuarter(){
           if(aq!==bq) return aq-bq;
           const aR=(state[a.id].block==='W'&&state[a.id].lastShift==='R')?state[a.id].runLen:0;
           const bR=(state[b.id].block==='W'&&state[b.id].lastShift==='R')?state[b.id].runLen:0;
-          return bR-aR||a.last.localeCompare(b.last);
+          return bR-aR||_candidateTie(candidateSeed,ds,a.id)-_candidateTie(candidateSeed,ds,b.id);
         });
       let i=0;
       while(needS>0&&i<cands.length){
@@ -2469,30 +2506,19 @@ function _generateQuarter(){
       }
     }
 
-    // STEP 4d: Last resort — pull rested OFF doc
-    if(needS>0){
-      const cands=rotation
-        .filter(d=>!assigned.has(d.id)&&canBeS_lastResort(d.id))
-        .sort((a,b)=>{
-          const [ar,am,aq]=sSortKey(a.id), [br,bm,bq]=sSortKey(b.id);
-          const aRest=state[a.id].dayInBlock, bRest=state[b.id].dayInBlock;
-          return ar!==br?ar-br:am!==bm?am-bm:aq!==bq?aq-bq:bRest-aRest||a.last.localeCompare(b.last);
-        });
-      let i=0;
-      while(needS>0&&i<cands.length){
-        const doc=cands[i];
-        S.sched[doc.id][ds]='S';assign(doc.id,'S',month);assigned.add(doc.id);needS--;i++;
-      }
-    }
+    // Never start S from OFF. A visible coverage shortage is preferable to an
+    // isolated swing block that must be dismantled manually.
 
     // STEP 5a: Normal R fill — candidates eligible by rest rules
     // Sort priority: continuing R > most annual budget remaining > fewest monthly > fewest qR > most rested
     const rCandidates=rotation
-      .filter(d=>!assigned.has(d.id)&&canBeR(d.id))
+      .filter(d=>!assigned.has(d.id)&&canBeR(d.id,di))
       .sort((a,b)=>{
         const sa=state[a.id],sb=state[b.id];
-        const aCont=(sa.block==='W'&&sa.lastShift==='R')?0:1;
-        const bCont=(sb.block==='W'&&sb.lastShift==='R')?0:1;
+        // Continue through day 7, then prefer a clean new block. Days 8-10
+        // remain available when coverage cannot be met otherwise.
+        const aCont=(sa.block==='W'&&sa.lastShift==='R')?(sa.workInBlock<7?0:2):1;
+        const bCont=(sb.block==='W'&&sb.lastShift==='R')?(sb.workInBlock<7?0:2):1;
         if(aCont!==bCont) return aCont-bCont;
         // Annual fairness: providers with more remaining budget get priority
         const aRem=ytdRemaining[a.id]||0, bRem=ytdRemaining[b.id]||0;
@@ -2501,7 +2527,7 @@ function _generateQuarter(){
         if(sa.qR!==sb.qR) return sa.qR-sb.qR;
         const aRest=(sa.block==='O')?sa.dayInBlock:0;
         const bRest=(sb.block==='O')?sb.dayInBlock:0;
-        return bRest-aRest||a.last.localeCompare(b.last);
+        return bRest-aRest||_candidateTie(candidateSeed,ds,a.id)-_candidateTie(candidateSeed,ds,b.id);
       });
     let ri=0;
     while(needR>0&&ri<rCandidates.length){
@@ -2518,7 +2544,7 @@ function _generateQuarter(){
           if(!s||s.lastShift==='S'||s.lastBlockEndedOnS) return false;
           if(s.block==='W') return s.workInBlock<s.maxWork; // already eligible, just not picked
           // OFF block: relax rest from lastWorkSize to MIN_R_HARD
-          return s.dayInBlock>=MIN_R_HARD;
+          return s.dayInBlock>=MIN_R_HARD&&!hasRequiredInNextRBlock(d.id,di);
         })
         .sort((a,b)=>{
           const sa=state[a.id],sb=state[b.id];
@@ -2545,7 +2571,7 @@ function _generateQuarter(){
           if(!s) return false;
           if(s.lastShift==='S'||s.lastBlockEndedOnS) return false;  // no S→R transition
           if(s.block==='W') return false;            // mid-block already handled above
-          return s.dayInBlock>=1;                    // at least 1 day off
+          return s.dayInBlock>=1&&!hasRequiredInNextRBlock(d.id,di);
         })
         .sort((a,b)=>{
           const sa=state[a.id],sb=state[b.id];
@@ -2585,6 +2611,16 @@ function _generateQuarter(){
     });
   }
 
+  if(finalize) _finalizeGeneratedQuarter(year,q,{score:_scoreScheduleCandidate(year,q),seed:candidateSeed});
+}
+
+function _finalizeGeneratedQuarter(year,q,best){
+  const qKey=`${year}-${q}`;
+  const range=quarterRange(year,q);
+  const startD=range.start;
+  const totalDays=Math.floor((range.end-startD)/86400000)+1;
+  const allActive=activeDocs(year,range.months[0]);
+
   // Save a snapshot of the generated base schedule for this quarter.
   // This is used later to detect bonus/extra shifts when re-importing from qGenda.
   if(!S.baseSchedule) S.baseSchedule={};
@@ -2603,7 +2639,7 @@ function _generateQuarter(){
   renderSchedule();
   updateQuarterInfo();
   updateGenButton();
-  toast(`Generated Q${q} ${year}`,'success');
+  toast(`Generated Q${q} ${year} from 48 candidates (best variant ${best.seed+1})`,'success');
   setTimeout(recheckFairness, 100);  // auto-check fairness after generation
 }
 
