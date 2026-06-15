@@ -232,10 +232,19 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
 .prn-hdr{background:#f5f0ff!important;color:#6b21a8;border-top:2px solid #9333ea;font-style:italic}
 
 /* Row / column highlights */
-.row-hl td{background:#fff9e6!important}
-.row-hl td.name-col{background:#fff0b3!important;font-weight:700}
-.name-col-hl{background:#fff0b3!important;font-weight:700}
-.col-hl{background:#e8f0fb!important;outline:1px solid #b8d4f0;outline-offset:-1px}
+.sheet tbody tr.row-hl>td{
+  border-top:2px solid #1b4d8f!important;
+  border-bottom:2px solid #1b4d8f!important;
+}
+.sheet tbody tr.row-hl>td:first-child{border-left:2px solid #1b4d8f!important}
+.sheet tbody tr.row-hl>td:last-child{border-right:2px solid #1b4d8f!important}
+.name-col-hl{font-weight:700!important}
+.sheet .col-hl{
+  border-left:2px solid #1b4d8f!important;
+  border-right:2px solid #1b4d8f!important;
+}
+.sheet thead tr:last-child th.col-hl{border-top:2px solid #1b4d8f!important}
+.sheet tfoot tr:last-child td.col-hl{border-bottom:2px solid #1b4d8f!important}
 .col-hdr{cursor:pointer}
 .col-hdr:hover{background:#c8d8ee!important}
 /* N (nocturnist shift) */
@@ -1065,7 +1074,8 @@ async function loadData(){
 
 function applyMigrations(){
   if(!S.teams)S.teams={};if(!S.announcement)S.announcement='';
-  S.ui.selectedRow=null;S.ui.selectedCols=new Set();
+  if(!S.ui)S.ui={};
+  S.ui.selectedRow=null;S.ui.selectedCols=new Set();S.ui.fillMode=null;
   const u={odeyinka:{first:'Oladipo'},chapagain:{first:'Sudeep'},walls:{type:'nocturnist',title:'Nocturnist'},ahmadani:{type:'nocturnist',title:'Nocturnist'},tahir:{type:'weekday-only'}};
   Object.entries(u).forEach(([id,p])=>{const d=S.docs.find(d=>d.id===id);if(d)Object.assign(d,p);});
 }
@@ -2961,6 +2971,9 @@ function renderSchedule(){
     else{monthCells[monthCells.length-1].span++;monthCells[monthCells.length-1].end=i;}
   });
   const nCols=days.length;
+  const selRow=S.ui.selectedRow||null;
+  if(!(S.ui.selectedCols instanceof Set))S.ui.selectedCols=S.ui.selectedCols?new Set(Object.keys(S.ui.selectedCols)):new Set();
+  const selCols=S.ui.selectedCols;
 
   // ── HEADER: single name-col th with Q∑ label embedded ──
   let html='<table class="sheet"><thead><tr>';
@@ -2975,6 +2988,7 @@ function renderSchedule(){
     const cls=[];
     if(isWeekend(d))cls.push('weekend');if(ds===today)cls.push('today');
     if(isHol(ds,year))cls.push('holiday');if(i>0&&d.getDate()===1)cls.push('month-sep');
+    if(selCols.has(ds))cls.push('col-hl');
     html+=`<th class="${cls.join(' ')} col-hdr" data-date="${ds}" onclick="toggleColHighlight('${ds}')" title="${d.toDateString()}">${d.getDate()}<br><span style="font-weight:400;font-size:9px;color:var(--ink3)">${['S','M','T','W','T','F','S'][d.getDay()]}</span></th>`;
   });
   html+='</tr></thead><tbody>';
@@ -2987,10 +3001,6 @@ function renderSchedule(){
     if(Array.isArray(r))return{all:new Set(r),req:new Set()};
     return{all:new Set([...(r.required||[]),...(r.optional||[])]),req:new Set(r.required||[])};
   }
-  const selRow=S.ui.selectedRow||null;
-  if(!(S.ui.selectedCols instanceof Set))S.ui.selectedCols=S.ui.selectedCols?new Set(Object.keys(S.ui.selectedCols)):new Set();
-  const selCols=S.ui.selectedCols;
-
   function buildRow(doc,isConsult){
     const{all:docReqs,req:docRequired}=getDocReqs(doc.id);
     let qTotalR=0,qTotalS=0,qTotalN=0;
