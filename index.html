@@ -795,6 +795,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
         <div class="fg"><label>Max Required Requests</label><input type="number" id="c-max-required" value="5" style="width:90px"></div>
         <div class="fg"><label>Max Weekend Requests</label><input type="number" id="c-max-wk" value="6" style="width:90px"></div>
       </div>
+      <div id="flex-guidance" style="margin:10px 0;padding:10px;border:1px solid var(--line);border-radius:4px;background:#f8fafc;font-size:12px"></div>
       <button class="btn btn-p btn-sm" onclick="saveCfg()">Save</button>
     </div>
     <div class="card">
@@ -1289,6 +1290,7 @@ function qgShouldSkipProviderName(raw){
   if(!s||s==='OPEN, OPEN') return true;
   if(qgLooksLikeTimeOrDate(s)) return true;
   if(s.startsWith('aa Schedule')) return true;
+  if(/^[A-Za-z][A-Za-z.' -]+,\s*[A-Za-z]/.test(s)) return false;
   if(qgLooksLikeTaskLabel(s)) return true;
   return false;
 }
@@ -1297,6 +1299,7 @@ function qgIsAppTask(raw){
 }
 function qgIsNocturnistTask(raw){return /\b(nocturn|night)\b/i.test(String(raw||''));}
 function qgIsAdmitTask(raw){return /\b(admit|swing|evening|afternoon)\b/i.test(String(raw||''));}
+function qgIsMedicalDirectorTask(raw){return /\b(medical\s+director|director|dir\.?)\b/i.test(String(raw||''))&&!qgIsAppTask(raw);}
 function updateShiftCfgFromQgendaTaskMap(map){
   ensureShiftCfg();
   const labels={rounderLabels:[],swingLabels:[],nocturnistLabels:[],appRounderLabels:[],appAdmitterLabels:[]};
@@ -1341,7 +1344,7 @@ function qgGuessShift(raw){
   if(/\b(afternoon|evening)\b/.test(s) && /\badmit/.test(s)) return 'S';
   if(/\bam\b/.test(s) && /\badmit/.test(s)) return 'R';
   if(/\bround(er|ing)?\b/.test(s)) return 'R';
-  if(/\bdir(ector)?\b/.test(s) && /\b(md|physician|doc|doctor)\b/.test(s)) return 'R';
+  if(qgIsMedicalDirectorTask(s)) return 'R';
   if(/\bcoverage\b/.test(s) && /\b(md|physician|doc|doctor)\b/.test(s)) return 'R';
   if(/\(7a-5p\)/.test(s) && /\b(md|physician|doc|doctor)\b/.test(s)) return 'R';
   return null; // unknown
@@ -1351,7 +1354,7 @@ function qgGuessShift(raw){
 function qgNameKey(raw){
   const s=String(raw||'').trim();
   // Remove suffixes like MD, DO, PA, APRN, NP, etc.
-  const clean=s.replace(/,?\s*(MD|DO|PA-C|PA|APRN|NP|FNP|RN|DIR\.?|DIRECTOR)\b\.?/gi,'').trim();
+  const clean=s.replace(/,?\s*(MD|DO|PA-C|PA|APRN|NP|FNP|RN|DIR\.?|DIRECTOR|MEDICAL DIRECTOR)\b\.?/gi,'').trim();
   // "Last, First" → "first last"
   const m=clean.match(/^([^,]+),\s*(.+)$/);
   if(m) return (m[2]+' '+m[1]).toLowerCase().replace(/\s+/g,' ').trim();
@@ -1371,7 +1374,7 @@ function qgFuzzyScore(a,b){
 // Match a qGenda name to the closest roster doc
 // Priority: exact last name match → exact last+first → fuzzy fallback
 function qgMatchName(rawName){
-  const raw=String(rawName||'').trim();
+  const raw=qgNameKey(rawName).replace(/^([^ ]+)\s+(.+)$/,(m,first,last)=>`${last}, ${first}`);
   if(!raw) return null;
   // Parse "Last, First" format
   const parts=raw.match(/^([^,]+),\s*(.+)$/);
@@ -1637,6 +1640,8 @@ function showQgendaMapModal(records, filename, totalParsed, totalIgnored, unknow
     const defLast=nameParts?nameParts[1].trim():'';
     const defFirst=nameParts?nameParts[2].trim():'';
     const defaultRole=records.some(r=>r.rawName===rawName&&qgIsAppTask(r.task))?'APP':'MD';
+    const defaultType=records.some(r=>r.rawName===rawName&&qgIsMedicalDirectorTask(r.task))?'weekday-only':(onboardingEmptyRoster?'standard':'prn');
+    const defaultFte=defaultType==='prn'?'0.0':'1.0';
     const addOpt=(isUnmatched||onboardingEmptyRoster)?`<option value="__add__" ${onboardingEmptyRoster?'selected':''} style="color:#0a7044;font-weight:700">+ Add as new provider</option>`:'';
     const opts=addOpt+`<option value="">— skip —</option>`+
       S.docs.filter(d=>d.active).sort((a,b)=>providerGridRank(a)-providerGridRank(b)||providerSort(a,b))
@@ -1661,14 +1666,14 @@ function showQgendaMapModal(records, filename, totalParsed, totalIgnored, unknow
         <span style="color:#555">Type:</span>
         <select class="qg-new-type" data-raw="${rawName.replace(/"/g,'&quot;')}" style="padding:2px 4px;font-size:11px"
           onchange="var f=this.parentElement.querySelector('.qg-new-fte');if(f&&this.value==='prn')f.value='0.0';else if(f&&parseFloat(f.value)===0)f.value='1.0';">
-          <option value="standard" ${onboardingEmptyRoster?'selected':''}>Standard</option>
-          <option value="prn" ${onboardingEmptyRoster?'':'selected'}>PRN / Track Only</option>
-          <option value="weekday-only">Medical Director</option>
-          <option value="nocturnist">Nocturnist</option>
-          <option value="swing-only">Swing Only</option>
+          <option value="standard" ${defaultType==='standard'?'selected':''}>Standard</option>
+          <option value="prn" ${defaultType==='prn'?'selected':''}>PRN / Track Only</option>
+          <option value="weekday-only" ${defaultType==='weekday-only'?'selected':''}>Medical Director</option>
+          <option value="nocturnist" ${defaultType==='nocturnist'?'selected':''}>Nocturnist</option>
+          <option value="swing-only" ${defaultType==='swing-only'?'selected':''}>Swing Only</option>
         </select>
         <span style="color:#555">FTE:</span>
-        <input type="number" class="qg-new-fte" data-raw="${rawName.replace(/"/g,'&quot;')}" value="${onboardingEmptyRoster?'1.0':'0.0'}" min="0.0" max="1.0" step="0.1" style="width:50px;padding:2px 4px;font-size:11px">
+        <input type="number" class="qg-new-fte" data-raw="${rawName.replace(/"/g,'&quot;')}" value="${defaultFte}" min="0.0" max="1.0" step="0.1" style="width:50px;padding:2px 4px;font-size:11px">
         <span style="color:#888">(${defFirst} ${defLast})</span>
       </div>
     </div>`;
@@ -1861,6 +1866,19 @@ async function runQgendaImport(records){
   const bar=document.getElementById('qg-bar');
   const status=document.getElementById('qg-status');
   if(progDiv) progDiv.style.display='block';
+
+  const directorNames=new Set(records.filter(r=>qgIsMedicalDirectorTask(r.task)).map(r=>r.rawName));
+  directorNames.forEach(rawName=>{
+    const rec=records.find(r=>r.rawName===rawName&&r.docId);
+    const doc=rec&&byId(rec.docId);
+    if(doc){
+      doc.type='weekday-only';
+      doc.title=doc.title||'Medical Director';
+      doc.teamColor='';
+      if(!doc.preferences) doc.preferences=defaultPreferencesForType(doc.type);
+      doc.preferences.scheduleStyle='variable';
+    }
+  });
 
   const today=new Date(); today.setHours(0,0,0,0);
   let imported=0, unmatched=0;
@@ -2213,6 +2231,54 @@ function renderShiftParamFields(){
   });
   html+='</div>';
   el.innerHTML=html;
+}
+function flexibleRequestRecommendation(){
+  const active=S.docs.filter(d=>d.active&&d.type==='standard'&&!isMedicalDirectorDoc(d)&&d.type!=='prn'&&d.type!=='nocturnist');
+  const variable=active.filter(d=>!isStrictStyle(d));
+  const strict=active.length-variable.length;
+  const flexFte=variable.reduce((sum,d)=>sum+(parseFloat(d.fte)||1),0);
+  const totalFte=active.reduce((sum,d)=>sum+(parseFloat(d.fte)||1),0);
+  const share=totalFte?flexFte/totalFte:0;
+  let maxReq=Math.round(6+flexFte*1.4);
+  let maxRequired=Math.round(1+flexFte*0.22);
+  let maxWeekend=Math.round(1+flexFte*0.28);
+  if(share<0.15){maxReq=Math.min(maxReq,10);maxRequired=Math.min(maxRequired,2);maxWeekend=Math.min(maxWeekend,2);}
+  else if(share<0.3){maxReq=Math.min(maxReq,14);maxRequired=Math.min(maxRequired,3);maxWeekend=Math.min(maxWeekend,4);}
+  return {
+    active:active.length,
+    variable:variable.length,
+    strict,
+    flexFte,
+    share,
+    maxReq:Math.max(4,Math.min(24,maxReq)),
+    maxRequired:Math.max(1,Math.min(8,maxRequired)),
+    maxWeekend:Math.max(1,Math.min(8,maxWeekend))
+  };
+}
+function renderFlexibleGuidance(){
+  const el=document.getElementById('flex-guidance');
+  if(!el)return;
+  const r=flexibleRequestRecommendation();
+  const pct=Math.round(r.share*100);
+  const tone=r.variable===0?'#a01918':r.share<0.15?'#a85800':'#0a7044';
+  el.innerHTML=`
+    <div style="font-weight:700;color:var(--ink2);margin-bottom:5px">Flexible Model Guidance</div>
+    <div style="color:var(--ink3);line-height:1.5">
+      Variable providers: <strong style="color:${tone}">${r.variable}</strong> of ${r.active} standard providers (${pct}% FTE).
+      Strict providers: ${r.strict}. Based on that mix, suggested request limits are
+      <strong>${r.maxReq}</strong> total, <strong>${r.maxRequired}</strong> required, and <strong>${r.maxWeekend}</strong> weekend dates per quarter.
+    </div>
+    <button class="btn btn-sm" style="margin-top:7px;background:#eef5fb;color:#1b4d8f;border:1px solid #b8d4f0" onclick="applyFlexibleRecommendation()">Apply Suggested Limits</button>`;
+}
+function applyFlexibleRecommendation(){
+  const r=flexibleRequestRecommendation();
+  const maxReq=document.getElementById('c-max-req');
+  const maxRequired=document.getElementById('c-max-required');
+  const maxWeekend=document.getElementById('c-max-wk');
+  if(maxReq)maxReq.value=r.maxReq;
+  if(maxRequired)maxRequired.value=r.maxRequired;
+  if(maxWeekend)maxWeekend.value=r.maxWeekend;
+  toast('Suggested request limits applied. Click Save to keep them.','info',3500);
 }
 function isWeekend(date){return date.getDay()===0||date.getDay()===6}
 function quarterRange(year,q){
@@ -3541,27 +3607,26 @@ function renderSchedule(){
   // Coverage footer
   html+='<tfoot>';
   const targetR=physicianRounderTarget()+consultDocs.length;
-  html+='<tr class="cov"><td class="name-col">ROUNDERS</td>';
-  days.forEach((d,i)=>{
-    const ds=dstrD(d);
-    const v=allDocs.filter(doc=>S.sched[doc.id]&&S.sched[doc.id][ds]==='R').length;
-    let cls='cell';
-    if(v===targetR)cls+=' cov-ok';else if(v<targetR-1)cls+=' cov-bad';else cls+=' cov-low';
-    if(i>0&&d.getDate()===1)cls+=' month-sep';
-    if(selCols.has(ds))cls+=' col-hl';
-    html+=`<td class="${cls}">${v}</td>`;
-  });
-  html+='</tr><tr class="cov"><td class="name-col">SWING</td>';
-  days.forEach((d,i)=>{
-    const ds=dstrD(d);
-    const v=allDocs.filter(doc=>S.sched[doc.id]&&(S.sched[doc.id][ds]==='S'||S.sched[doc.id][ds]==='H')).length;
-    let cls='cell';
-    if(v===admitterTarget())cls+=' cov-ok';else if(v<admitterTarget()-1)cls+=' cov-bad';else cls+=' cov-low';
-    if(i>0&&d.getDate()===1)cls+=' month-sep';
-    if(selCols.has(ds))cls+=' col-hl';
-    html+=`<td class="${cls}">${v}</td>`;
-  });
-  html+='</tr></tfoot></table>';
+  function coverageRow(label,target,countFn){
+    html+=`<tr class="cov"><td class="name-col">${label}</td>`;
+    days.forEach((d,i)=>{
+      const ds=dstrD(d);
+      const v=countFn(ds);
+      let cls='cell';
+      if(v===target)cls+=' cov-ok';else if(v<Math.max(0,target-1))cls+=' cov-bad';else cls+=' cov-low';
+      if(i>0&&d.getDate()===1)cls+=' month-sep';
+      if(selCols.has(ds))cls+=' col-hl';
+      html+=`<td class="${cls}">${v}</td>`;
+    });
+    html+='</tr>';
+  }
+  coverageRow('ROUNDERS',targetR,ds=>allDocs.filter(doc=>S.sched[doc.id]&&S.sched[doc.id][ds]==='R').length);
+  coverageRow('SWING',admitterTarget(),ds=>allDocs.filter(doc=>S.sched[doc.id]&&(S.sched[doc.id][ds]==='S'||S.sched[doc.id][ds]==='H')).length);
+  coverageRow('NOCTURNISTS',S.cfg.nocturnists||0,ds=>allDocs.filter(doc=>S.sched[doc.id]&&S.sched[doc.id][ds]==='N'&&!isAppProvider(doc)).length);
+  coverageRow('APP ROUND',S.cfg.appRounders||0,ds=>allDocs.filter(doc=>S.sched[doc.id]&&S.sched[doc.id][ds]==='R'&&isAppProvider(doc)).length);
+  coverageRow('APP SWING',S.cfg.appAdmitters||0,ds=>allDocs.filter(doc=>S.sched[doc.id]&&(S.sched[doc.id][ds]==='S'||S.sched[doc.id][ds]==='H')&&isAppProvider(doc)).length);
+  coverageRow('APP NIGHT',0,ds=>allDocs.filter(doc=>S.sched[doc.id]&&S.sched[doc.id][ds]==='N'&&isAppProvider(doc)).length);
+  html+='</tfoot></table>';
 
   document.getElementById('sheet-outer').innerHTML='<div class="sheet-wrap" id="sheet-wrap">'+html+'</div>';
 }
@@ -4774,6 +4839,7 @@ function setProviderTeam(id,color){
   d.teamColor=(color==='green'||color==='white')?color:'';
   saveData();
   renderRoster();
+  renderFlexibleGuidance();
   toast(`${dname(d)} set to ${teamLabel(d.teamColor)} team`,'success');
 }
 
@@ -4829,28 +4895,28 @@ function openEditDoc(id){
       <div style="margin-bottom:10px">
         <div class="tx-xs tx-mu" style="margin-bottom:6px;font-weight:700">Scheduling Style</div>
         <label style="display:flex;align-items:flex-start;gap:8px;padding:8px 10px;border:1.5px solid var(--line);border-radius:4px;margin-bottom:6px;cursor:pointer">
-          <input type="radio" name="ed-style" value="strict" id="ed-style-strict" ${(doc.preferences&&doc.preferences.scheduleStyle==='strict')?'checked':''} style="margin-top:2px">
+          <input type="radio" name="ed-style" value="strict" id="ed-style-strict" ${(doc.preferences&&doc.preferences.scheduleStyle==='strict')?'checked':''} onchange="toggleEditVariablePrefs()" style="margin-top:2px">
           <div>
             <div style="font-weight:700;font-size:12px;color:#1b4d8f">Strict 7-on / 7-off (mixed shifts)</div>
             <div class="tx-xs tx-mu">Repeating 5R+2S pattern every two weeks. Swing shifts are 2-day couplets at the end of rounding blocks. Time-off requests disabled.</div>
           </div>
         </label>
         <label style="display:flex;align-items:flex-start;gap:8px;padding:8px 10px;border:1.5px solid var(--line);border-radius:4px;margin-bottom:6px;cursor:pointer">
-          <input type="radio" name="ed-style" value="strict-swing-block" id="ed-style-swing-block" ${(doc.preferences&&doc.preferences.scheduleStyle==='strict-swing-block')?'checked':''} style="margin-top:2px">
+          <input type="radio" name="ed-style" value="strict-swing-block" id="ed-style-swing-block" ${(doc.preferences&&doc.preferences.scheduleStyle==='strict-swing-block')?'checked':''} onchange="toggleEditVariablePrefs()" style="margin-top:2px">
           <div>
             <div style="font-weight:700;font-size:12px;color:#1b4d8f">Strict 7-on / 7-off (swing block)</div>
             <div class="tx-xs tx-mu">Alternating pure weeks: 7R one week on, then 7S the next working week. Full swing blocks rather than couplets. Staggered with other swing-block providers. Time-off requests disabled.</div>
           </div>
         </label>
         <label style="display:flex;align-items:flex-start;gap:8px;padding:8px 10px;border:1.5px solid var(--line);border-radius:4px;cursor:pointer">
-          <input type="radio" name="ed-style" value="variable" id="ed-style-variable" ${(!doc.preferences||doc.preferences.scheduleStyle==='variable'||!doc.preferences.scheduleStyle)?'checked':''} style="margin-top:2px">
+          <input type="radio" name="ed-style" value="variable" id="ed-style-variable" ${(!doc.preferences||doc.preferences.scheduleStyle==='variable'||!doc.preferences.scheduleStyle)?'checked':''} onchange="toggleEditVariablePrefs()" style="margin-top:2px">
           <div>
             <div style="font-weight:700;font-size:12px;color:#1b4d8f">Variable</div>
             <div class="tx-xs tx-mu">Meets all shift and swing quotas. Day-on / day-off pattern varies week to week. Most flexible, with time-off requests enabled.</div>
           </div>
         </label>
       </div>
-      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+      <div id="ed-variable-prefs" style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
         <div class="fg">
           <label>Preferred R-Block Length</label>
           <input type="number" id="ed-prefR" value="${prefR}" min="3" max="14" style="width:90px">
@@ -4866,6 +4932,7 @@ function openEditDoc(id){
       </div>
     </div>`;
   showModal(`Edit ${dname(doc)}`, body, 'Save Changes', ()=>saveEditDoc(id));
+  toggleEditVariablePrefs();
   // Add Reset Password button to modal footer (admin only)
   if(isAdmin()){
     setTimeout(()=>{
@@ -4880,6 +4947,13 @@ function openEditDoc(id){
       }
     },10);
   }
+}
+
+function toggleEditVariablePrefs(){
+  const box=document.getElementById('ed-variable-prefs');
+  if(!box)return;
+  const styleEl=document.querySelector('input[name="ed-style"]:checked');
+  box.style.display=styleEl&&styleEl.value==='variable'?'flex':'none';
 }
 
 function saveEditDoc(id){
@@ -4897,11 +4971,11 @@ function saveEditDoc(id){
   if(doc.type==='weekday-only'&&!doc.title) doc.title='Medical Director';
   if(isStrictTeamEligible(doc)&&!doc.teamColor) doc.teamColor=nextTeamColor();
   // Preferences
-  const prefR=parseInt(document.getElementById('ed-prefR').value)||5;
-  const maxW=parseInt(document.getElementById('ed-maxW').value)||7;
-  const safeMaxW=Math.max(maxW, prefR+2);
   const styleEl=document.querySelector('input[name="ed-style"]:checked');
   const scheduleStyle=styleEl?styleEl.value:'variable';
+  const prefR=scheduleStyle==='variable'?(parseInt(document.getElementById('ed-prefR').value)||5):7;
+  const maxW=scheduleStyle==='variable'?(parseInt(document.getElementById('ed-maxW').value)||7):7;
+  const safeMaxW=scheduleStyle==='variable'?Math.max(maxW, prefR+2):7;
   if(!doc.preferences) doc.preferences={};
   doc.preferences.preferredR=prefR;
   doc.preferences.maxWork=safeMaxW;
@@ -4911,6 +4985,7 @@ function saveEditDoc(id){
   renderRoster();
   renderDocList();
   populatePhysPicker();
+  renderFlexibleGuidance();
   toast(`Updated ${dname(doc)}`,'success');
 }
 function addPhysician(){
@@ -4934,7 +5009,7 @@ function addPhysician(){
   normalizeProviderDefaults(S.docs[S.docs.length-1]);
   if(!S.ui.currentPhysId)S.ui.currentPhysId=id;
   saveData();
-  renderRoster();renderDocList();populatePhysPicker();renderSchedule();
+  renderRoster();renderDocList();populatePhysPicker();renderSchedule();renderFlexibleGuidance();
   ['n-last','n-first','n-title'].forEach(i=>document.getElementById(i).value='');
   toast(`Added ${last}`,'success');
 }
@@ -5088,7 +5163,7 @@ function nav(p){
   if(p==='requests') renderRequestsAdmin();
   if(p==='docs'){backToDocList();renderDocList()}
   if(p==='hol') renderHolidayTable();
-  if(p==='cfg'){ renderShiftParamFields(); renderRoster(); }
+  if(p==='cfg'){ renderShiftParamFields(); renderRoster(); renderFlexibleGuidance(); }
   if(p==='myreq'){ populatePhysPicker(); renderMyRequestCal(); }
   if(p==='myschd'){ populatePhysPicker(); renderMySchedule(); }
 }
@@ -5200,6 +5275,7 @@ async function finishInit(){
   renderSchedule();
   updateGenButton();
   renderShiftParamFields();
+  renderFlexibleGuidance();
   renderRoster();
   renderDocList();
   renderHolidayTable();
