@@ -346,6 +346,15 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
 .wd-section-tit.s{color:var(--S-tx)}
 .wd-name{font-size:11px;color:var(--ink);padding:1px 0}
 .team-num{display:inline-block;background:#1b4d8f;color:#fff;font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:700;padding:1px 5px;border-radius:2px;min-width:18px;text-align:center;margin-right:3px}
+.team-num.green{background:#0a7044}
+.team-num.white{background:#fff;color:#1b4d8f;border:1px solid #b8d4f0}
+.team-select{font-size:11px;padding:2px 5px;border:1px solid var(--line);border-radius:3px;background:#fff}
+.team-chip{display:inline-block;font-size:10px;font-weight:700;padding:1px 7px;border-radius:2px;border:1px solid var(--line)}
+.team-chip.green{background:#dff5e6;color:#0a7044;border-color:#a8d8b8}
+.team-chip.white{background:#fff;color:#1b4d8f;border-color:#b8d4f0}
+.shift-param-grid{display:grid;grid-template-columns:150px 80px 1fr;gap:6px 8px;align-items:center;margin-top:10px}
+.shift-param-grid label{font-size:11px;font-weight:700;color:var(--ink2);text-transform:uppercase}
+.shift-param-grid input{font-size:12px}
 
 /* REQUEST PORTAL */
 .req-cal{display:grid;grid-template-columns:repeat(7,1fr);gap:2px;background:var(--line);padding:1px;border-radius:4px;margin-top:10px}
@@ -772,9 +781,15 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
       <h3>Schedule Parameters</h3>
       <div class="row">
         <div class="fg"><label>Annual Shifts (FT)</label><input type="number" id="c-annual" value="182" style="width:90px"></div>
-        <div class="fg"><label>Rounders/Day</label><input type="number" id="c-r" value="13" style="width:80px"></div>
-        <div class="fg"><label>Swing/Day</label><input type="number" id="c-s" value="3" style="width:80px"></div>
+        <div class="fg"><label>Rounders/Day</label><input type="number" id="c-r" value="13" min="0" style="width:80px" onchange="renderShiftParamFields()"></div>
+        <div class="fg"><label>Swing/Day</label><input type="number" id="c-s" value="3" min="0" style="width:80px" onchange="renderShiftParamFields()"></div>
       </div>
+      <div class="row">
+        <div class="fg"><label>Nocturnists/Day</label><input type="number" id="c-n" value="1" min="0" style="width:90px" onchange="renderShiftParamFields()"></div>
+        <div class="fg"><label>APP Rounders/Day</label><input type="number" id="c-app-r" value="0" min="0" style="width:100px" onchange="renderShiftParamFields()"></div>
+        <div class="fg"><label>APP Admitters/Day</label><input type="number" id="c-app-s" value="0" min="0" style="width:100px" onchange="renderShiftParamFields()"></div>
+      </div>
+      <div id="shift-param-fields"></div>
       <div class="row">
         <div class="fg"><label>Max Requests/Quarter</label><input type="number" id="c-max-req" value="15" style="width:90px"></div>
         <div class="fg"><label>Max Required Requests</label><input type="number" id="c-max-required" value="5" style="width:90px"></div>
@@ -1060,11 +1075,13 @@ function applyMigrations(){
   if(!Array.isArray(S.docs))S.docs=[];
   if(!S.teams)S.teams={};if(!S.announcement)S.announcement='';
   if(!S.qgendaShiftMap)S.qgendaShiftMap={};
+  ensureShiftCfg();
   if(!S.ui)S.ui={};
   if(S.ui.currentPhysId&&!S.docs.find(d=>d.id===S.ui.currentPhysId))S.ui.currentPhysId=null;
   S.ui.selectedRow=null;S.ui.selectedCols=new Set();S.ui.fillMode=null;
   const u={odeyinka:{first:'Oladipo'},chapagain:{first:'Sudeep'},walls:{type:'nocturnist',title:'Nocturnist'},ahmadani:{type:'nocturnist',title:'Nocturnist'},tahir:{type:'weekday-only'}};
   Object.entries(u).forEach(([id,p])=>{const d=S.docs.find(d=>d.id===id);if(d)Object.assign(d,p);});
+  S.docs.forEach(normalizeProviderDefaults);
 }
 
 function setSyncStatus(state){
@@ -1277,6 +1294,34 @@ function qgShouldSkipProviderName(raw){
 }
 function qgIsAppTask(raw){
   return /\bapp\b/i.test(String(raw||''));
+}
+function qgIsNocturnistTask(raw){return /\b(nocturn|night)\b/i.test(String(raw||''));}
+function qgIsAdmitTask(raw){return /\b(admit|swing|evening|afternoon)\b/i.test(String(raw||''));}
+function updateShiftCfgFromQgendaTaskMap(map){
+  ensureShiftCfg();
+  const labels={rounderLabels:[],swingLabels:[],nocturnistLabels:[],appRounderLabels:[],appAdmitterLabels:[]};
+  Object.entries(map||{}).forEach(([task,code])=>{
+    if(!code||code==='IGNORE')return;
+    const clean=qgCleanTask(task);
+    const isApp=qgIsAppTask(clean);
+    if(code==='N'||qgIsNocturnistTask(clean)) labels.nocturnistLabels.push(clean);
+    else if(code==='S'){
+      if(isApp) labels.appAdmitterLabels.push(clean);
+      else labels.swingLabels.push(clean);
+    } else if(code==='R'){
+      if(isApp) labels.appRounderLabels.push(clean);
+      else labels.rounderLabels.push(clean);
+    }
+  });
+  Object.keys(labels).forEach(k=>{
+    labels[k]=[...new Set(labels[k])];
+    if(labels[k].length) S.cfg[k]=labels[k];
+  });
+  if(labels.rounderLabels.length) S.cfg.R=labels.rounderLabels.length;
+  if(labels.swingLabels.length) S.cfg.S=labels.swingLabels.length;
+  if(labels.nocturnistLabels.length) S.cfg.nocturnists=labels.nocturnistLabels.length;
+  if(labels.appRounderLabels.length) S.cfg.appRounders=labels.appRounderLabels.length;
+  if(labels.appAdmitterLabels.length) S.cfg.appAdmitters=labels.appAdmitterLabels.length;
 }
 
 // Suggest a shift code for a qGenda task. Admin can override in the import modal.
@@ -1544,6 +1589,8 @@ function applyQgendaTaskMap(filename,totalParsed,totalIgnored){
     return;
   }
   S.qgendaShiftMap={...(S.qgendaShiftMap||{}),...map};
+  updateShiftCfgFromQgendaTaskMap(S.qgendaShiftMap);
+  renderShiftParamFields();
   const ignoredTasks=new Set();
   const records=[];
   rawRecords.forEach(r=>{
@@ -1789,7 +1836,9 @@ async function runQgendaImport(records){
         role:roleEl?roleEl.value:'MD',
         type,
         fte:type==='prn'?0:(fteEl?parseFloat(fteEl.value)||1.0:1.0),
-        title:type==='weekday-only'?'Medical Director':''
+        title:type==='weekday-only'?'Medical Director':'',
+        preferences:defaultPreferencesForType(type),
+        teamColor:''
       };
     } else if(val){
       corrections[raw]=val;
@@ -1801,7 +1850,7 @@ async function runQgendaImport(records){
     const baseId=(np.last+np.first).toLowerCase().replace(/[^a-z]/g,'')||'provider';
     let uid=baseId; let n=2;
     while(S.docs.find(d=>d.id===uid)) uid=baseId+n++;
-    S.docs.push({id:uid,last:np.last,first:np.first,role:(np.role||'MD'),fte:np.fte,type:(np.type||'prn'),active:true,startDate:null,title:np.title||''});
+    S.docs.push(normalizeProviderDefaults({id:uid,last:np.last,first:np.first,role:(np.role||'MD'),fte:np.fte,type:(np.type||'prn'),active:true,startDate:null,title:np.title||'',preferences:np.preferences,teamColor:np.teamColor||''}));
     if(!S.ui.currentPhysId)S.ui.currentPhysId=uid;
     corrections[rawName]=uid;
   }
@@ -1998,7 +2047,7 @@ function freshGroupState(){
     hols: {},
     announcement: '',
     qgendaShiftMap: {},
-    cfg: {annual:182, R:13, S:3, maxReq:15, maxWeekendReq:6, maxRequired:5},
+    cfg: {...{annual:182, R:13, S:3, maxReq:15, maxWeekendReq:6, maxRequired:5}, ...shiftCfgDefaults()},
     ui: {
       role:'admin',
       currentPhysId:null,
@@ -2060,7 +2109,7 @@ function dname(d){return d.last+(d.first?', '+d.first:'')}
 function byId(id){return S.docs.find(d=>d.id===id)}
 function providerSort(a,b){return a.last.localeCompare(b.last)||a.first.localeCompare(b.first)}
 function isMedicalDirectorDoc(d){return !!d&&(d.type==='weekday-only'||/medical director/i.test(d.title||''))}
-function providerGridRank(d){return isMedicalDirectorDoc(d)?0:d.type==='prn'?2:1}
+function providerGridRank(d){return isMedicalDirectorDoc(d)?0:d.type==='prn'?3:d.type==='nocturnist'?2:1}
 function providerTypeLabel(d){
   if(isMedicalDirectorDoc(d))return 'Medical Director';
   if(d.type==='prn')return 'PRN / Track Only';
@@ -2069,6 +2118,102 @@ function providerTypeLabel(d){
   return 'Standard';
 }
 function providerExtraTitle(d){return d&&d.title&&d.title.toLowerCase()!=='medical director'?d.title:''}
+function isStrictTeamEligible(d){return d&&d.type==='standard'&&!isMedicalDirectorDoc(d)&&d.type!=='nocturnist'&&d.type!=='prn'}
+function isAppProvider(d){return d&&(d.role==='APP'||d.role==='NP')}
+function physicianRounderTarget(){return (S.cfg.R||0)+(S.cfg.appRounders||0)}
+function admitterTarget(){return (S.cfg.S||0)+(S.cfg.appAdmitters||0)}
+function defaultPreferencesForType(type){
+  return type==='standard'?{preferredR:7,maxWork:7,scheduleStyle:'strict-swing-block'}:{preferredR:5,maxWork:7,scheduleStyle:'variable'};
+}
+function nextTeamColor(){
+  const counts={green:0,white:0};
+  S.docs.forEach(d=>{if(isStrictTeamEligible(d)&&d.teamColor)counts[d.teamColor]=(counts[d.teamColor]||0)+1;});
+  return counts.green<=counts.white?'green':'white';
+}
+function teamLabel(color){return color==='green'?'Green':color==='white'?'White':''}
+function teamSortValue(doc){return doc.teamColor==='green'?0:doc.teamColor==='white'?1:2}
+function strictTeamPhase(doc,idx,total){
+  if(doc.teamColor==='green') return 0;
+  if(doc.teamColor==='white') return 7;
+  return Math.round(idx*14/Math.max(total,1))%14;
+}
+function normalizeProviderDefaults(doc){
+  if(!doc.preferences) doc.preferences=defaultPreferencesForType(doc.type);
+  if(isStrictTeamEligible(doc)){
+    if(!doc.preferences.scheduleStyle) doc.preferences=defaultPreferencesForType(doc.type);
+    if(!doc.teamColor) doc.teamColor=nextTeamColor();
+  }
+  return doc;
+}
+function shiftCfgDefaults(){
+  return {
+    nocturnists:1,
+    appRounders:0,
+    appAdmitters:0,
+    rounderLabels:[],
+    swingLabels:[],
+    nocturnistLabels:[],
+    appRounderLabels:[],
+    appAdmitterLabels:[]
+  };
+}
+function ensureShiftCfg(){
+  S.cfg={...{annual:182,R:13,S:3,maxReq:15,maxWeekendReq:6,maxRequired:5},...(S.cfg||{})};
+  const d=shiftCfgDefaults();
+  Object.keys(d).forEach(k=>{if(S.cfg[k]===undefined)S.cfg[k]=Array.isArray(d[k])?[...d[k]]:d[k];});
+}
+function getShiftLabels(key,count,prefix){
+  const arr=Array.isArray(S.cfg[key])?[...S.cfg[key]]:[];
+  while(arr.length<count) arr.push(`${prefix} ${arr.length+1}`);
+  return arr.slice(0,count);
+}
+function shiftLabelFor(key,index,prefix){return getShiftLabels(key,index+1,prefix)[index]||`${prefix} ${index+1}`}
+function syncCfgInputs(){
+  ensureShiftCfg();
+  const pairs=[
+    ['c-annual',S.cfg.annual],
+    ['c-r',S.cfg.R],
+    ['c-s',S.cfg.S],
+    ['c-n',S.cfg.nocturnists||0],
+    ['c-app-r',S.cfg.appRounders||0],
+    ['c-app-s',S.cfg.appAdmitters||0],
+    ['c-max-req',S.cfg.maxReq],
+    ['c-max-required',S.cfg.maxRequired||5],
+    ['c-max-wk',S.cfg.maxWeekendReq]
+  ];
+  pairs.forEach(([id,val])=>{const el=document.getElementById(id);if(el)el.value=val;});
+}
+function renderShiftParamFields(){
+  ensureShiftCfg();
+  const el=document.getElementById('shift-param-fields');
+  if(!el)return;
+  const counts={
+    rounderLabels:parseInt(document.getElementById('c-r')?.value)||S.cfg.R||0,
+    swingLabels:parseInt(document.getElementById('c-s')?.value)||S.cfg.S||0,
+    nocturnistLabels:parseInt(document.getElementById('c-n')?.value)||S.cfg.nocturnists||0,
+    appRounderLabels:parseInt(document.getElementById('c-app-r')?.value)||S.cfg.appRounders||0,
+    appAdmitterLabels:parseInt(document.getElementById('c-app-s')?.value)||S.cfg.appAdmitters||0
+  };
+  const meta={
+    rounderLabels:['Rounder Names','Rounder'],
+    swingLabels:['Admitter / Swing Names','Admitter'],
+    nocturnistLabels:['Nocturnist Names','Nocturnist'],
+    appRounderLabels:['APP Rounder Names','APP Rounder'],
+    appAdmitterLabels:['APP Admitter Names','APP Admitter']
+  };
+  let html='<div class="shift-param-grid">';
+  Object.entries(counts).forEach(([key,count])=>{
+    const [label,prefix]=meta[key];
+    const labels=getShiftLabels(key,count,prefix);
+    html+=`<label>${label}</label><div class="tx-xs tx-mu">${count} slots</div><div class="fl" style="flex-wrap:wrap;gap:5px">`;
+    labels.forEach((name,idx)=>{
+      html+=`<input class="shift-label-input" data-key="${key}" data-idx="${idx}" value="${qgEsc(name)}" style="width:135px;padding:4px 6px;border:1px solid var(--line);border-radius:3px">`;
+    });
+    html+='</div>';
+  });
+  html+='</div>';
+  el.innerHTML=html;
+}
 function isWeekend(date){return date.getDay()===0||date.getDay()===6}
 function quarterRange(year,q){
   // q is 1-indexed, returns {start, end, months:[m0,m1,m2]}
@@ -2189,7 +2334,7 @@ function _scoreScheduleCandidate(year,q){
   const days=quarterDays(year,q);
   const qKey=`${year}-${q}`;
   const reqs=S.requests[qKey]||{};
-  const docs=activeDocs(year).filter(d=>d.type==='standard'&&!isStrictStyle(d));
+  const docs=activeDocs(year).filter(d=>d.type==='standard'&&!isMedicalDirectorDoc(d)&&!isStrictStyle(d));
   let requiredMisses=0,optionalMisses=0,structural=0,shortages=0,overages=0;
   let longDays=0,restMismatch=0;
   const affectedRequired=new Set();
@@ -2252,8 +2397,8 @@ function _scoreScheduleCandidate(year,q){
       if(sh==='R'||sh==='H') r++;
       else if(sh==='S') s++;
     });
-    shortages+=Math.max(0,S.cfg.R-r)+Math.max(0,S.cfg.S-s);
-    overages+=Math.max(0,r-S.cfg.R)+Math.max(0,s-S.cfg.S);
+    shortages+=Math.max(0,physicianRounderTarget()-r)+Math.max(0,admitterTarget()-s);
+    overages+=Math.max(0,r-physicianRounderTarget())+Math.max(0,s-admitterTarget());
   });
 
   return requiredMisses*1000000000
@@ -2577,7 +2722,7 @@ function _generateQuarter(candidateSeed=0,finalize=true){
   // the provider is below their quarterly S target.
   // Stagger phases so work weeks are spread across the group.
   strictMixed.forEach((doc,idx)=>{
-    const phase=Math.round(idx*14/Math.max(strictMixed.length,1))%14;
+    const phase=strictTeamPhase(doc,idx,strictMixed.length);
     let qS=0; // running quarterly S count for this provider
     for(let di=0;di<totalDays;di++){
       const ds=dstrD(addD(startD,di));
@@ -2606,7 +2751,7 @@ function _generateQuarter(candidateSeed=0,finalize=true){
   // Pattern per quarter: 7R+7off, 7R+7off, 7R+7off, 7S+7off, 7R+7off, 7R+7off...
   // The swing week index (which 14-day cycle gets the S week) is fixed per provider.
   strictSwing.forEach((doc,idx)=>{
-    const phase=Math.round(idx*14/Math.max(strictSwing.length,1))%14;
+    const phase=strictTeamPhase(doc,idx,strictSwing.length);
     // Swing week placement: roughly week 4 of the quarter, staggered by provider.
     // Each provider's swing week is 14 days apart from the next.
     // With ~6.5 cycles per quarter, placing at cycle 3,4,5... gives mid-quarter swing weeks.
@@ -2702,8 +2847,8 @@ function _generateQuarter(candidateSeed=0,finalize=true){
       if(m==='S'){ marchS++; doc._ptQS=(doc._ptQS||0)+1; }
     });
 
-    let needR=S.cfg.R-tahirR-marchR;
-    let needS=S.cfg.S-slavinaS-marchS;
+    let needR=physicianRounderTarget()-tahirR-marchR;
+    let needS=admitterTarget()-slavinaS-marchS;
 
     // Deduct strict pre-assigned shifts
     strictAll.forEach(doc=>{
@@ -2952,15 +3097,24 @@ function _finalizeGeneratedQuarter(year,q,best){
   setTimeout(recheckFairness, 100);  // auto-check fairness after generation
 }
 
-// Assign team numbers 1-13 to R-shift docs for a given day
+// Assign team labels to R-shift docs for a given day.
+// Strict 7-on/7-off providers keep their roster Green/White team;
+// variable providers retain the legacy numeric team fallback.
 function assignTeamNumbers(allActive,ds,state,di){
   if(!S.teams) S.teams={};
   const rDocs=allActive.filter(d=>S.sched[d.id]&&S.sched[d.id][ds]==='R');
   if(rDocs.length===0) return;
+  rDocs.forEach(doc=>{
+    if(isStrictStyle(doc)&&doc.teamColor){
+      if(!S.teams[doc.id]) S.teams[doc.id]={};
+      S.teams[doc.id][ds]=doc.teamColor;
+    }
+  });
   const prevDS=di>0?dstrD(addD(parseD(ds),-1)):null;
   const takenTeams=new Set();
   // First pass: continue existing R blocks (keep same team)
   rDocs.forEach(doc=>{
+    if(isStrictStyle(doc)&&doc.teamColor) return;
     if(prevDS){
       const yest=S.sched[doc.id][prevDS];
       const yestTeam=S.teams[doc.id]&&S.teams[doc.id][prevDS];
@@ -2973,6 +3127,7 @@ function assignTeamNumbers(allActive,ds,state,di){
   });
   // Second pass: new block starts — avoid recent teams
   rDocs.forEach(doc=>{
+    if(isStrictStyle(doc)&&doc.teamColor) return;
     if(S.teams[doc.id]&&S.teams[doc.id][ds]) return;
     const recent=new Set((state[doc.id]&&state[doc.id].teamHistory||[]).slice(-3));
     let chosen=null;
@@ -3270,7 +3425,7 @@ function renderSchedule(){
   const nocturnistDocs=allDocs.filter(d=>d.type==='nocturnist').sort(providerSort);
   const prnDocs=allDocs.filter(d=>d.type==='prn').sort(providerSort);
   const rotationDocs=allDocs.filter(d=>!isMedicalDirectorDoc(d)&&d.type!=='nocturnist'&&d.type!=='prn')
-    .sort(providerSort);
+    .sort((a,b)=>teamSortValue(a)-teamSortValue(b)||providerSort(a,b));
   const fConsult=filterText?consultDocs.filter(d=>dname(d).toLowerCase().includes(filterText)):consultDocs;
   const fRotation=filterText?rotationDocs.filter(d=>dname(d).toLowerCase().includes(filterText)):rotationDocs;
   const fNocturnist=filterText?nocturnistDocs.filter(d=>dname(d).toLowerCase().includes(filterText)):nocturnistDocs;
@@ -3371,7 +3526,7 @@ function renderSchedule(){
     fConsult.forEach(d=>html+=buildRow(d,true));
   }
   if(fRotation.length){
-    if(fConsult.length)html+=`<tr><td class="section-hdr rounds-hdr" colspan="${allCols}">▶ Rounding Physicians (${S.cfg.R})</td></tr>`;
+    if(fConsult.length)html+=`<tr><td class="section-hdr rounds-hdr" colspan="${allCols}">▶ Rounding Providers (${physicianRounderTarget()})</td></tr>`;
     fRotation.forEach(d=>html+=buildRow(d,false));
   }
   if(fNocturnist.length){
@@ -3385,7 +3540,7 @@ function renderSchedule(){
 
   // Coverage footer
   html+='<tfoot>';
-  const targetR=S.cfg.R+consultDocs.length;
+  const targetR=physicianRounderTarget()+consultDocs.length;
   html+='<tr class="cov"><td class="name-col">ROUNDERS</td>';
   days.forEach((d,i)=>{
     const ds=dstrD(d);
@@ -3401,7 +3556,7 @@ function renderSchedule(){
     const ds=dstrD(d);
     const v=allDocs.filter(doc=>S.sched[doc.id]&&(S.sched[doc.id][ds]==='S'||S.sched[doc.id][ds]==='H')).length;
     let cls='cell';
-    if(v===S.cfg.S)cls+=' cov-ok';else if(v<S.cfg.S-1)cls+=' cov-bad';else cls+=' cov-low';
+    if(v===admitterTarget())cls+=' cov-ok';else if(v<admitterTarget()-1)cls+=' cov-bad';else cls+=' cov-low';
     if(i>0&&d.getDate()===1)cls+=' month-sep';
     if(selCols.has(ds))cls+=' col-hl';
     html+=`<td class="${cls}">${v}</td>`;
@@ -3493,20 +3648,35 @@ function renderWeek(){
     const ds=dstrD(d);
     const isT=ds===today;
     const isH=isHol(ds,d.getFullYear());
-    // Rounders with their team number
-    const rs=docs.filter(doc=>S.sched[doc.id]&&S.sched[doc.id][ds]==='R')
-      .map(doc=>({doc, team:(S.teams && S.teams[doc.id] && S.teams[doc.id][ds]) || 99}))
-      .sort((a,b)=>a.team-b.team || a.doc.last.localeCompare(b.doc.last));
-    const ss=docs.filter(doc=>S.sched[doc.id]&&(S.sched[doc.id][ds]==='S'||S.sched[doc.id][ds]==='H'))
-      .sort((a,b)=>a.last.localeCompare(b.last));
+    const rs=docs.filter(doc=>S.sched[doc.id]&&S.sched[doc.id][ds]==='R'&&doc.role!=='APP'&&doc.role!=='NP')
+      .map(doc=>({doc, team:(S.teams && S.teams[doc.id] && S.teams[doc.id][ds]) || ''}))
+      .sort((a,b)=>teamSortValue(a.doc)-teamSortValue(b.doc)||providerSort(a.doc,b.doc));
+    const appRs=docs.filter(doc=>S.sched[doc.id]&&S.sched[doc.id][ds]==='R'&&(doc.role==='APP'||doc.role==='NP'))
+      .map(doc=>({doc, team:(S.teams && S.teams[doc.id] && S.teams[doc.id][ds]) || ''}))
+      .sort((a,b)=>teamSortValue(a.doc)-teamSortValue(b.doc)||providerSort(a.doc,b.doc));
+    const ss=docs.filter(doc=>S.sched[doc.id]&&(S.sched[doc.id][ds]==='S'||S.sched[doc.id][ds]==='H')&&doc.role!=='APP'&&doc.role!=='NP')
+      .sort(providerSort);
+    const appSs=docs.filter(doc=>S.sched[doc.id]&&(S.sched[doc.id][ds]==='S'||S.sched[doc.id][ds]==='H')&&(doc.role==='APP'||doc.role==='NP'))
+      .sort(providerSort);
+    const ns=docs.filter(doc=>S.sched[doc.id]&&S.sched[doc.id][ds]==='N')
+      .sort(providerSort);
+    const renderTeam=team=>team==='green'||team==='white'
+      ?`<span class="team-num ${team}">${teamLabel(team)}</span>`
+      :`<span class="team-num">${team||'—'}</span>`;
     html+=`<div class="week-day"${isH?' style="background:#f8f3fe"':''}>
       <div class="wd-hdr">${dayN(d)}</div>
       <div class="wd-date${isT?' today':''}">${d.getDate()}</div>
       ${isH?'<div style="font-size:10px;color:var(--H-tx);font-weight:600;margin-bottom:4px">🎄 Holiday</div>':''}
-      <div class="wd-section-tit r">Rounds 7a–5p (${rs.length})</div>
-      ${rs.map(({doc,team})=>`<div class="wd-name"><span class="team-num">${team<99?team:'—'}</span> ${dname(doc)}</div>`).join('')||'<div class="wd-name tx-mu">—</div>'}
-      <div class="wd-section-tit s">Swing 3p–1a (${ss.length})</div>
-      ${ss.map(d=>`<div class="wd-name">${dname(d)}</div>`).join('')||'<div class="wd-name tx-mu">—</div>'}
+      <div class="wd-section-tit r">Physician Rounders (${rs.length}/${S.cfg.R})</div>
+      ${rs.map(({doc,team},idx)=>`<div class="wd-name">${renderTeam(team)} <strong>${shiftLabelFor('rounderLabels',idx,'Rounder')}</strong> · ${dname(doc)}</div>`).join('')||'<div class="wd-name tx-mu">—</div>'}
+      <div class="wd-section-tit r">APP Rounders (${appRs.length}/${S.cfg.appRounders||0})</div>
+      ${appRs.map(({doc,team},idx)=>`<div class="wd-name">${renderTeam(team)} <strong>${shiftLabelFor('appRounderLabels',idx,'APP Rounder')}</strong> · ${dname(doc)}</div>`).join('')||'<div class="wd-name tx-mu">—</div>'}
+      <div class="wd-section-tit s">Admitters / Swing (${ss.length}/${S.cfg.S})</div>
+      ${ss.map((doc,idx)=>`<div class="wd-name"><strong>${shiftLabelFor('swingLabels',idx,'Admitter')}</strong> · ${dname(doc)}</div>`).join('')||'<div class="wd-name tx-mu">—</div>'}
+      <div class="wd-section-tit s">APP Admitters (${appSs.length}/${S.cfg.appAdmitters||0})</div>
+      ${appSs.map((doc,idx)=>`<div class="wd-name"><strong>${shiftLabelFor('appAdmitterLabels',idx,'APP Admitter')}</strong> · ${dname(doc)}</div>`).join('')||'<div class="wd-name tx-mu">—</div>'}
+      <div class="wd-section-tit" style="color:#3a3a6e;margin-top:8px">Nocturnists (${ns.length}/${S.cfg.nocturnists||0})</div>
+      ${ns.map((doc,idx)=>`<div class="wd-name"><strong>${shiftLabelFor('nocturnistLabels',idx,'Nocturnist')}</strong> · ${dname(doc)}</div>`).join('')||'<div class="wd-name tx-mu">—</div>'}
     </div>`;
   }
   html+='</div>';
@@ -4093,6 +4263,7 @@ function renderMySchedule(){
         <div class="doc-name">${dname(doc)}</div>
         <div class="fl" style="flex-wrap:wrap;gap:5px;margin-top:6px">
           <span class="tag tag-r">${doc.role}</span>
+          ${doc.teamColor?`<span class="team-chip ${doc.teamColor}">${teamLabel(doc.teamColor)}</span>`:''}
           ${doc.fte<1?`<span class="tag tag-f">${doc.fte} FTE</span>`:''}
           ${doc.type==='swing-only'?'<span class="tag tag-s">Swing Only</span>':''}
           ${isMedicalDirectorDoc(doc)?'<span class="tag tag-w">Medical Director</span>':''}
@@ -4170,7 +4341,7 @@ function renderMySchedule(){
 function renderDocList(){
   const q=(document.getElementById('doc-search')?.value||'').toLowerCase();
   const year=S.ui.year;
-  const allDocs=activeDocs(year).filter(d=>!q||dname(d).toLowerCase().includes(q)).sort((a,b)=>providerGridRank(a)-providerGridRank(b)||providerSort(a,b));
+  const allDocs=activeDocs(year).filter(d=>!q||dname(d).toLowerCase().includes(q)).sort((a,b)=>providerGridRank(a)-providerGridRank(b)||teamSortValue(a)-teamSortValue(b)||providerSort(a,b));
 
   // Split nocturnists from rotation
   const rotDocs=allDocs.filter(d=>d.type!=='nocturnist');
@@ -4209,7 +4380,7 @@ function renderDocList(){
     }
     return `<div class="dc${doc.type==='nocturnist'?' dc-noct':''}" onclick="showDocDetail('${doc.id}')">
       <div class="dcn">${dname(doc)}</div>
-      <div class="dcm">${doc.role}${doc.fte<1?` · ${doc.fte} FTE`:''}${doc.type==='swing-only'?' · Swing Only':''}${isMedicalDirectorDoc(doc)?' · Medical Director':''}${doc.type==='nocturnist'?' · Nocturnist':''}${providerExtraTitle(doc)?' · '+providerExtraTitle(doc):''}</div>
+      <div class="dcm">${doc.role}${doc.teamColor?' · '+teamLabel(doc.teamColor):''}${doc.fte<1?` · ${doc.fte} FTE`:''}${doc.type==='swing-only'?' · Swing Only':''}${isMedicalDirectorDoc(doc)?' · Medical Director':''}${doc.type==='nocturnist'?' · Nocturnist':''}${providerExtraTitle(doc)?' · '+providerExtraTitle(doc):''}</div>
       <div class="dcs">${doc.type==='nocturnist'?'Self-scheduled (not in rotation)':totalScheduled+' / '+target+' shifts scheduled'}</div>
       ${doc.type!=='nocturnist'?`<div class="pb" style="margin-top:5px"><div class="pbf ${pct>100?'pf-over':pct>=90?'pf-ok':'pf-warn'}" style="width:${pct}%"></div></div>`:''}
       ${paceLabel?`<div class="dc-pace ${paceClass}">${paceLabel}</div>`:''}
@@ -4327,6 +4498,7 @@ function showDocDetail(docId){
         <div class="doc-name">${dname(doc)}</div>
         <div class="fl" style="flex-wrap:wrap;gap:5px;margin-top:6px">
           <span class="tag tag-r">${doc.role}</span>
+          ${doc.teamColor?`<span class="team-chip ${doc.teamColor}">${teamLabel(doc.teamColor)}</span>`:''}
           ${doc.fte<1?`<span class="tag tag-f">${doc.fte} FTE</span>`:''}
           ${doc.type==='swing-only'?'<span class="tag tag-s">Swing Only</span>':''}
           ${isMedicalDirectorDoc(doc)?'<span class="tag tag-w">Medical Director</span>':''}
@@ -4425,7 +4597,7 @@ function renderDocCalendarsForView(docId, mode, viewYear){
       if(isPast) cls += ' past';
       cls += ' shift-' + sh;
       const team = (sh==='R'&&S.teams&&S.teams[docId]&&S.teams[docId][ds])||null;
-      const label = sh==='OFF' ? '' : (sh==='R'&&team ? `R${team}` : sh);
+      const label = sh==='OFF' ? '' : (sh==='R'&&team ? (team==='green'?'R-G':team==='white'?'R-W':`R${team}`) : sh);
       html += `<div class="${cls}" title="${ds} · ${sh}${team?' · Team '+team:''}">
         <span class="doc-cal-dnum">${d}</span>
         ${label ? `<span class="doc-cal-shift">${label}</span>` : ''}
@@ -4557,13 +4729,13 @@ function renderHolidayTable(){
 //  SETTINGS / ROSTER
 // ════════════════════════════════════════════════════════
 function renderRoster(){
-  const docs=[...S.docs].sort((a,b)=>providerGridRank(a)-providerGridRank(b)||providerSort(a,b));
+  const docs=[...S.docs].sort((a,b)=>providerGridRank(a)-providerGridRank(b)||teamSortValue(a)-teamSortValue(b)||providerSort(a,b));
   document.getElementById('roster-count').textContent=docs.filter(d=>d.active).length;
   if(!docs.length){
     document.getElementById('roster-list').innerHTML='<div style="padding:28px;text-align:center;color:var(--ink3)"><div style="font-weight:700;color:var(--ink);margin-bottom:6px">Start with a blank roster.</div><div>Import a qGenda Excel file to create providers from provider names, or add them manually here.</div></div>';
     return;
   }
-  let html='<table class="htbl"><thead><tr><th>Name</th><th>Role</th><th>FTE</th><th>Type</th><th>Schedule</th><th>Pref R</th><th>Title</th><th>Start</th><th>Actions</th></tr></thead><tbody>';
+  let html='<table class="htbl"><thead><tr><th>Name</th><th>Role</th><th>FTE</th><th>Type</th><th>Team</th><th>Schedule</th><th>Pref R</th><th>Title</th><th>Start</th><th>Actions</th></tr></thead><tbody>';
   docs.forEach(d=>{
     const prefR=(d.preferences&&d.preferences.preferredR);
     const prefDisplay = prefR && prefR !== 5
@@ -4575,8 +4747,12 @@ function renderRoster(){
       :style==='strict-swing-block'
         ?'<span style="background:#e8f5e9;color:#0a7044;font-size:10px;font-weight:700;padding:1px 6px;border-radius:2px;border:1px solid #a8d8b8">7on/7off swing</span>'
         :'<span class="tx-mu" style="font-size:11px">Variable</span>';
+    const teamCell=isStrictTeamEligible(d)
+      ?`<select class="team-select" onchange="setProviderTeam('${d.id}',this.value)"><option value="green" ${d.teamColor==='green'?'selected':''}>Green</option><option value="white" ${d.teamColor==='white'?'selected':''}>White</option></select>`
+      :'<span class="tx-mu">—</span>';
     html+=`<tr style="opacity:${d.active?1:.5}">
       <td>${dname(d)}</td><td>${d.role}</td><td>${d.fte}</td><td>${providerTypeLabel(d)}</td>
+      <td>${teamCell}</td>
       <td>${styleBadge}</td>
       <td>${prefDisplay}</td>
       <td class="tx-mu">${d.title||''}</td>
@@ -4591,6 +4767,15 @@ function renderRoster(){
   document.getElementById('roster-list').innerHTML=html;
 }
 function toggleDoc(id){if(!isAdmin()){toast('Admin only','error');return;}const d=byId(id);if(d){d.active=!d.active;saveData();renderRoster();renderDocList();populatePhysPicker()}}
+function setProviderTeam(id,color){
+  if(!isAdmin()){toast('Admin only','error');return;}
+  const d=byId(id);
+  if(!d)return;
+  d.teamColor=(color==='green'||color==='white')?color:'';
+  saveData();
+  renderRoster();
+  toast(`${dname(d)} set to ${teamLabel(d.teamColor)} team`,'success');
+}
 
 function openEditDoc(id){
   const doc=byId(id);
@@ -4625,6 +4810,13 @@ function openEditDoc(id){
           <option value="weekday-only" ${doc.type==='weekday-only'?'selected':''}>Medical Director</option>
           <option value="swing-only" ${doc.type==='swing-only'?'selected':''}>Swing Only</option>
           <option value="nocturnist" ${doc.type==='nocturnist'?'selected':''}>Nocturnist</option>
+        </select>
+      </div>
+      <div class="fg"><label>Team</label>
+        <select id="ed-team" style="width:90px">
+          <option value="">—</option>
+          <option value="green" ${doc.teamColor==='green'?'selected':''}>Green</option>
+          <option value="white" ${doc.teamColor==='white'?'selected':''}>White</option>
         </select>
       </div>
     </div>
@@ -4699,9 +4891,11 @@ function saveEditDoc(id){
   doc.role=document.getElementById('ed-role').value;
   doc.type=document.getElementById('ed-type').value;
   doc.fte=doc.type==='prn'?0:parseFloat(document.getElementById('ed-fte').value);
+  doc.teamColor=document.getElementById('ed-team')?.value||'';
   doc.startDate=document.getElementById('ed-start').value||null;
   doc.title=document.getElementById('ed-title').value.trim();
   if(doc.type==='weekday-only'&&!doc.title) doc.title='Medical Director';
+  if(isStrictTeamEligible(doc)&&!doc.teamColor) doc.teamColor=nextTeamColor();
   // Preferences
   const prefR=parseInt(document.getElementById('ed-prefR').value)||5;
   const maxW=parseInt(document.getElementById('ed-maxW').value)||7;
@@ -4733,8 +4927,11 @@ function addPhysician(){
     type,
     active:true,
     startDate:document.getElementById('n-start').value||null,
-    title
+    title,
+    preferences:defaultPreferencesForType(type),
+    teamColor:''
   });
+  normalizeProviderDefaults(S.docs[S.docs.length-1]);
   if(!S.ui.currentPhysId)S.ui.currentPhysId=id;
   saveData();
   renderRoster();renderDocList();populatePhysPicker();renderSchedule();
@@ -4743,9 +4940,24 @@ function addPhysician(){
 }
 function saveCfg(){
   if(!isAdmin()){ toast('Admin only','error'); return; }
+  ensureShiftCfg();
   S.cfg.annual=parseInt(document.getElementById('c-annual').value);
   S.cfg.R=parseInt(document.getElementById('c-r').value);
   S.cfg.S=parseInt(document.getElementById('c-s').value);
+  S.cfg.nocturnists=parseInt(document.getElementById('c-n')?.value)||0;
+  S.cfg.appRounders=parseInt(document.getElementById('c-app-r')?.value)||0;
+  S.cfg.appAdmitters=parseInt(document.getElementById('c-app-s')?.value)||0;
+  const labels={rounderLabels:[],swingLabels:[],nocturnistLabels:[],appRounderLabels:[],appAdmitterLabels:[]};
+  document.querySelectorAll('.shift-label-input').forEach(inp=>{
+    const key=inp.getAttribute('data-key');
+    const idx=parseInt(inp.getAttribute('data-idx'));
+    if(!labels[key])return;
+    labels[key][idx]=(inp.value||'').trim();
+  });
+  const prefixes={rounderLabels:'Rounder',swingLabels:'Admitter',nocturnistLabels:'Nocturnist',appRounderLabels:'APP Rounder',appAdmitterLabels:'APP Admitter'};
+  Object.keys(labels).forEach(key=>{
+    S.cfg[key]=labels[key].map((v,i)=>v||`${prefixes[key]} ${i+1}`).filter(Boolean);
+  });
   S.cfg.maxReq=parseInt(document.getElementById('c-max-req').value);
   S.cfg.maxRequired=parseInt(document.getElementById('c-max-required')?.value)||5;
   S.cfg.maxWeekendReq=parseInt(document.getElementById('c-max-wk').value);
@@ -4876,7 +5088,7 @@ function nav(p){
   if(p==='requests') renderRequestsAdmin();
   if(p==='docs'){backToDocList();renderDocList()}
   if(p==='hol') renderHolidayTable();
-  if(p==='cfg') renderRoster();
+  if(p==='cfg'){ renderShiftParamFields(); renderRoster(); }
   if(p==='myreq'){ populatePhysPicker(); renderMyRequestCal(); }
   if(p==='myschd'){ populatePhysPicker(); renderMySchedule(); }
 }
@@ -4909,13 +5121,8 @@ document.getElementById('q-sel').value=curQ;
 S.ui.year=curYear; S.ui.quarter=curQ;
 
 // Set defaults
-document.getElementById('c-annual').value=S.cfg.annual;
-document.getElementById('c-r').value=S.cfg.R;
-document.getElementById('c-s').value=S.cfg.S;
-document.getElementById('c-max-req').value=S.cfg.maxReq;
-if(document.getElementById('c-max-required'))
-  document.getElementById('c-max-required').value=S.cfg.maxRequired||5;
-document.getElementById('c-max-wk').value=S.cfg.maxWeekendReq;
+syncCfgInputs();
+renderShiftParamFields();
 
 // Default request quarter to next quarter
 let defReqQ=curQ+1; let defReqY=curYear;
@@ -4987,10 +5194,12 @@ async function finishInit(){
   }
   updateHeaderForUser();
   setReadOnly(!isAdmin());
+  syncCfgInputs();
   populatePhysPicker();
   updateQuarterInfo();
   renderSchedule();
   updateGenButton();
+  renderShiftParamFields();
   renderRoster();
   renderDocList();
   renderHolidayTable();
