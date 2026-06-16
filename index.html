@@ -814,10 +814,11 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
         <button class="btn btn-sm" style="background:#eef5fb;border:1px solid #b8d4f0;color:#1b4d8f" onclick="saveVersion()">💾 Save Version</button>
         <button class="btn btn-sm" style="background:#eef5fb;border:1px solid #b8d4f0;color:#1b4d8f" onclick="showVersions()">🕓 Restore Version</button>
         <button class="btn btn-d btn-sm" onclick="confirmClearSchedule()">🗑️ Clear Schedule</button>
+        <button class="btn btn-d btn-sm" onclick="confirmResetGroup()">🧼 Reset Group</button>
         <button class="btn btn-d btn-sm" onclick="if(confirm('FACTORY RESET: Delete ALL data including physician roster, schedule, settings, and saved versions? This cannot be undone and cannot be recovered. Type OK to confirm.')){localStorage.clear();location.reload()}">⚠️ Factory Reset</button>
       </div>
       <div class="tx-xs tx-mu">
-        <strong>Save Version</strong> creates a named snapshot you can restore later. <strong>Clear Schedule</strong> wipes all shifts and requests but keeps your roster and settings.
+        <strong>Save Version</strong> creates a named snapshot you can restore later. <strong>Clear Schedule</strong> keeps your roster. <strong>Reset Group</strong> returns this group to a blank roster and schedule.
       </div>
     </div>
     <div class="card">
@@ -1330,6 +1331,7 @@ function qgMatchName(rawName){
 // Main import entry point
 function importQgenda(){
   if(!isAdmin()){ toast('Admin only','error'); return; }
+  if(typeof XLSX==='undefined'){ toast('Excel parser did not load. Refresh and try again.','error',5000); return; }
   const inp=document.createElement('input');
   inp.type='file'; inp.accept='.xlsx,.xls';
   inp.onchange=e=>{
@@ -1432,6 +1434,10 @@ function parseQgendaWorkbook(wb, filename){
   }
 
   // Show preview + confirmation modal
+  if(!records.length){
+    toast('No recognized qGenda provider shifts found in that Excel file.','error',5000);
+    return;
+  }
   showQgendaMapModal(records, filename, totalParsed, totalIgnored);
 }
 
@@ -1446,9 +1452,10 @@ function showQgendaMapModal(records, filename, totalParsed, totalIgnored){
   // Unique provider names — show ALL (matched and unmatched) for verification
   const allNames=[...new Set(records.map(r=>r.rawName))].sort();
   const onboardingEmptyRoster=S.docs.filter(d=>d.active).length===0;
+  const displayRecords=onboardingEmptyRoster?records:pastRecords;
   const unmatchedNames=onboardingEmptyRoster?[]:allNames.filter(n=>!records.find(r=>r.rawName===n&&r.docId));
   const matchedNames=onboardingEmptyRoster?allNames:allNames.filter(n=>records.find(r=>r.rawName===n&&r.docId));
-  const matchedCount=onboardingEmptyRoster?pastRecords.length:pastRecords.filter(r=>r.docId).length;
+  const readyCount=onboardingEmptyRoster?allNames.length:pastRecords.filter(r=>r.docId).length;
 
   // Build match rows for ALL names — matched names pre-selected, unmatched need correction
   const matchRows=allNames.map(rawName=>{
@@ -1463,7 +1470,7 @@ function showQgendaMapModal(records, filename, totalParsed, totalIgnored){
       S.docs.filter(d=>d.active).sort((a,b)=>{const pa=a.type==='prn'?1:0,pb=b.type==='prn'?1:0;return pa!==pb?pa-pb:a.last.localeCompare(b.last)})
         .map(d=>`<option value="${d.id}" ${matched===d.id?'selected':''}>${d.last}, ${d.first}</option>`).join('');
     const cls=(matched||onboardingEmptyRoster)?'matched':'unmatched';
-    const count=pastRecords.filter(r=>r.rawName===rawName).length;
+    const count=displayRecords.filter(r=>r.rawName===rawName).length;
     const safeId=rawName.replace(/[^a-zA-Z0-9]/g,'_');
     return `<div class="qg-match-row" style="flex-wrap:wrap;row-gap:4px">
       <span class="qg-name-raw">${rawName} <span style="color:#999;font-size:10px">(${count})</span></span>
@@ -1488,16 +1495,16 @@ function showQgendaMapModal(records, filename, totalParsed, totalIgnored){
   }).join('');
 
   // Summary breakdown by shift type
-  const rCount=pastRecords.filter(r=>r.shift==='R'&&(r.docId||onboardingEmptyRoster)).length;
-  const sCount=pastRecords.filter(r=>r.shift==='S'&&(r.docId||onboardingEmptyRoster)).length;
-  const nCount=pastRecords.filter(r=>r.shift==='N'&&(r.docId||onboardingEmptyRoster)).length;
+  const rCount=displayRecords.filter(r=>r.shift==='R'&&(r.docId||onboardingEmptyRoster)).length;
+  const sCount=displayRecords.filter(r=>r.shift==='S'&&(r.docId||onboardingEmptyRoster)).length;
+  const nCount=displayRecords.filter(r=>r.shift==='N'&&(r.docId||onboardingEmptyRoster)).length;
   const skipCount=onboardingEmptyRoster?0:pastRecords.filter(r=>!r.docId).length;
 
   showModal(`📊 Import qGenda — ${filename}`,
     `<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;margin-bottom:14px">
       <div style="background:#dff5e6;border-radius:4px;padding:8px;text-align:center">
-        <div style="font-size:20px;font-weight:700;color:#0a7044">${matchedCount}</div>
-        <div style="font-size:11px;color:#555">ready to import</div>
+        <div style="font-size:20px;font-weight:700;color:#0a7044">${readyCount}</div>
+        <div style="font-size:11px;color:#555">${onboardingEmptyRoster?'providers ready':'ready to import'}</div>
       </div>
       <div style="background:#eef5fb;border-radius:4px;padding:8px;text-align:center">
         <div style="font-size:20px;font-weight:700;color:#1b4d8f">${futureRecords.length}</div>
@@ -1513,7 +1520,7 @@ function showQgendaMapModal(records, filename, totalParsed, totalIgnored){
       </div>
     </div>
     <div style="font-size:11px;color:#555;margin-bottom:12px">
-      Breakdown: <strong>${rCount} R</strong> · <strong>${sCount} S</strong> · <strong>${nCount} N</strong> matched past shifts
+      Breakdown: <strong>${rCount} R</strong> · <strong>${sCount} S</strong> · <strong>${nCount} N</strong> ${onboardingEmptyRoster?'recognized shifts in file':'matched past shifts'}
     </div>
     <div style="font-weight:700;font-size:12px;margin-bottom:6px">
       All provider name matches — <span style="color:#0a7044">${matchedNames.length} matched</span>,
@@ -1528,14 +1535,14 @@ function showQgendaMapModal(records, filename, totalParsed, totalIgnored){
       <button class="btn btn-sm" onclick="previewQgendaImport()" style="background:#eef5fb;color:#1b4d8f;border:1px solid #b8d4f0">
         👁️ Preview Changes
       </button>
-      <span style="font-size:11px;color:var(--ink3)">Preview what shifts will be written before importing</span>
+      <span style="font-size:11px;color:var(--ink3)">${onboardingEmptyRoster?'Preview past shifts that will be written; roster additions happen even if all shifts are future-dated':'Preview what shifts will be written before importing'}</span>
     </div>
     <div id="qg-preview-area" style="display:none;margin-top:10px;max-height:200px;overflow-y:auto;border:1px solid var(--line);border-radius:4px;font-size:11px"></div>
     <div id="qg-import-progress" style="display:none;margin-top:8px">
       <div class="qg-progress"><div class="qg-progress-bar" id="qg-bar" style="width:0%"></div></div>
       <div id="qg-status" style="font-size:11px;color:var(--ink3);margin-top:4px">Importing…</div>
     </div>`,
-    'Import Shifts',
+    onboardingEmptyRoster?'Import Roster':'Import Shifts',
     ()=>runQgendaImport(window._qgRecords)
   );
 }
@@ -1818,9 +1825,9 @@ function confirmClearSchedule(){
        ✅ <strong>Kept:</strong> Physician roster, scheduling parameters, announcements, saved versions
      </div>
      <div style="margin-top:10px;font-size:12px;color:#a01918;font-weight:600">Type CLEAR to confirm:</div>
-     <input id="clear-confirm-input" type="text" placeholder="CLEAR" style="width:100%;padding:6px 8px;border:1px solid #a01918;border-radius:4px;font-size:13px;margin-top:4px">`,
+    <input id="clear-confirm-input" type="text" placeholder="CLEAR" style="width:100%;padding:6px 8px;border:1px solid #a01918;border-radius:4px;font-size:13px;margin-top:4px">`,
     'Clear Schedule',
-    ()=>{
+    async ()=>{
       const val=document.getElementById('clear-confirm-input')?.value?.trim();
       if(val!=='CLEAR'){ toast('Type CLEAR to confirm','error'); return; }
       // Wipe schedule data but keep roster and settings
@@ -1831,9 +1838,64 @@ function confirmClearSchedule(){
       S.cycleStarts={};
       S.hols={};
       S.teams={};
-      saveData();
-      renderSchedule(); updateQuarterInfo(); updateGenButton();
+      await saveData();
+      renderSchedule(); renderRoster(); renderDocList(); populatePhysPicker(); updateQuarterInfo(); updateGenButton();
+      document.getElementById('modal').style.display='none';
       toast('Schedule cleared — roster and settings preserved','success');
+    }
+  );
+}
+
+function freshGroupState(){
+  const now=new Date();
+  return {
+    docs: [],
+    sched: {},
+    teams: {},
+    requests: {},
+    cycleStarts: {},
+    hols: {},
+    announcement: '',
+    cfg: {annual:182, R:13, S:3, maxReq:15, maxWeekendReq:6, maxRequired:5},
+    ui: {
+      role:'admin',
+      currentPhysId:null,
+      year:S.ui?.year||now.getFullYear(),
+      quarter:S.ui?.quarter||Math.floor(now.getMonth()/3)+1,
+      wkStart:null,
+      fillMode:null,
+      calMode:'next3',
+      calYear:now.getFullYear(),
+      selectedRow:null,
+      selectedCols:new Set(),
+      requestQuarter:S.ui?.requestQuarter||'',
+      adminReqQuarter:S.ui?.adminReqQuarter||'',
+      holYear:S.ui?.holYear||now.getFullYear(),
+    }
+  };
+}
+
+function confirmResetGroup(){
+  if(!isAdmin()){ toast('Admin only','error'); return; }
+  showModal('🧼 Reset Current Group',
+    `<div style="font-size:13px;margin-bottom:12px">This resets <strong>${currentGroupName()}</strong> to a blank slate in Supabase.</div>
+     <ul style="font-size:12px;margin:0 0 12px 16px;line-height:1.8">
+       <li>Deletes the physician roster for this group</li>
+       <li>Deletes all schedules, requests, holidays, and settings for this group</li>
+       <li>Keeps the group admin login</li>
+     </ul>
+     <div style="margin-top:10px;font-size:12px;color:#a01918;font-weight:600">Type RESET to confirm:</div>
+     <input id="reset-confirm-input" type="text" placeholder="RESET" style="width:100%;padding:6px 8px;border:1px solid #a01918;border-radius:4px;font-size:13px;margin-top:4px">`,
+    'Reset Group',
+    async ()=>{
+      const val=document.getElementById('reset-confirm-input')?.value?.trim();
+      if(val!=='RESET'){ toast('Type RESET to confirm','error'); return; }
+      S=freshGroupState();
+      applyMigrations();
+      await saveData();
+      renderSchedule(); renderRoster(); renderDocList(); populatePhysPicker(); updateQuarterInfo(); updateGenButton();
+      document.getElementById('modal').style.display='none';
+      toast('Group reset to blank slate','success');
     }
   );
 }
