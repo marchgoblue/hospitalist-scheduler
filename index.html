@@ -986,6 +986,7 @@ let S = {
   cycleStarts: {},         // {quarterKey: {docId: dateStr}}  -- their cycle start day for that quarter
   hols: {},                // {year: {docId: {tg:bool, xm:bool}}}
   announcement: '',        // admin message displayed in physician portal
+  qgendaShiftMap: {},      // {qGenda task label: 'R'|'S'|'N'|'IGNORE'}
   cfg: {annual:182, R:13, S:3, maxReq:15, maxWeekendReq:6, maxRequired:5},
   ui: {
     role:'admin',          // 'admin' or 'phys'
@@ -1058,6 +1059,7 @@ async function loadData(){
 function applyMigrations(){
   if(!Array.isArray(S.docs))S.docs=[];
   if(!S.teams)S.teams={};if(!S.announcement)S.announcement='';
+  if(!S.qgendaShiftMap)S.qgendaShiftMap={};
   if(!S.ui)S.ui={};
   if(S.ui.currentPhysId&&!S.docs.find(d=>d.id===S.ui.currentPhysId))S.ui.currentPhysId=null;
   S.ui.selectedRow=null;S.ui.selectedCols=new Set();S.ui.fillMode=null;
@@ -1247,19 +1249,51 @@ async function adminResetPassword(docId){
 
 const QGENDA_IGNORE = ['backup','app','cross cover','cross-cover'];
 
-// Normalise a qGenda shift name to a key
-function qgNormShift(raw){
-  if(!raw) return null;
-  const s=String(raw).trim().toLowerCase();
-  if(QGENDA_IGNORE.some(x=>s.includes(x))) return 'IGNORE';
+function qgEsc(s){
+  return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function qgCleanTask(raw){
+  return String(raw||'').trim().replace(/\s+/g,' ');
+}
+function qgLooksLikeTimeOrDate(raw){
+  const s=String(raw||'').trim();
+  return /^\d{1,2}[ap]$/i.test(s) || /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(s);
+}
+function qgLooksLikePersonName(raw){
+  const s=String(raw||'').trim();
+  return /^[A-Za-z][A-Za-z.' -]+,\s*[A-Za-z]/.test(s) && !/\b(md|app|pah|par|round|admit|night|swing|coverage|director)\b/i.test(s);
+}
+function qgLooksLikeTaskLabel(raw){
+  const s=String(raw||'').toLowerCase();
+  return /\b(md|app|pah|par|round|admit|night|swing|coverage|director|backup|week color)\b/.test(s);
+}
+function qgShouldSkipProviderName(raw){
+  const s=String(raw||'').trim();
+  if(!s||s==='OPEN, OPEN') return true;
+  if(qgLooksLikeTimeOrDate(s)) return true;
+  if(s.startsWith('aa Schedule')) return true;
+  if(qgLooksLikeTaskLabel(s)) return true;
+  return false;
+}
 
-  // qGenda task names often include site prefixes such as PAR or PAH.
-  // Match the clinical role, not the site code, so each hospital can import.
+// Suggest a shift code for a qGenda task. Admin can override in the import modal.
+function qgGuessShift(raw){
+  if(!raw) return null;
+  const s=qgCleanTask(raw).toLowerCase();
+  if(QGENDA_IGNORE.some(x=>s.includes(x))) return 'IGNORE';
+  if(/\bweek color\b/.test(s)) return 'IGNORE';
+  if(/^(date|staff abbreviation|start time|end time)$/.test(s)) return 'IGNORE';
+  if(qgLooksLikePersonName(s)||qgLooksLikeTimeOrDate(s)) return 'IGNORE';
+
+  if(/\bnocturn/.test(s)) return 'N';
   if(/\bnight\b/.test(s) && /\b(md|physician|doc|doctor)\b/.test(s)) return 'N';
   if(/\bswing\b/.test(s)) return 'S';
+  if(/\b(afternoon|evening)\b/.test(s) && /\badmit/.test(s)) return 'S';
+  if(/\bam\b/.test(s) && /\badmit/.test(s)) return 'R';
   if(/\bround(er|ing)?\b/.test(s)) return 'R';
   if(/\bdir(ector)?\b/.test(s) && /\b(md|physician|doc|doctor)\b/.test(s)) return 'R';
-  if(/\badmit(ter)?\b/.test(s)) return 'S';
+  if(/\bcoverage\b/.test(s) && /\b(md|physician|doc|doctor)\b/.test(s)) return 'R';
+  if(/\(7a-5p\)/.test(s) && /\b(md|physician|doc|doctor)\b/.test(s)) return 'R';
   return null; // unknown
 }
 
@@ -1365,10 +1399,11 @@ function parseQgendaWorkbook(wb, filename){
   //
   // We parse this directly — no column-mapping UI needed.
 
-  // First pass: extract all (date, shiftType, providerName) records
-  const records=[]; // {date:Date, shift:'R'|'S'|'N', rawName:string, docId:string|null}
+  // First pass: extract all raw (date, task label, provider name) records.
+  // The admin maps task labels to R/S/N/Ignore in the next modal.
+  const rawRecords=[]; // {date:Date, task:string, rawName:string}
   let totalParsed=0, totalIgnored=0;
-  const unknownShifts=new Set();
+  const skippedTasks=new Set();
   const today=new Date(); today.setHours(0,0,0,0);
 
   let i=0;
@@ -1405,23 +1440,20 @@ function parseQgendaWorkbook(wb, filename){
           if(!shiftRaw||!nameRaw) continue;
           totalParsed++;
 
-          // Skip non-providers
-          if(nameRaw==='OPEN, OPEN'||nameRaw==='') continue;
-          // Skip lines that look like time values not names
-          if(/^\d{1,2}[ap]$/i.test(nameRaw)) continue;
-          // Skip schedule tag lines
-          if(nameRaw.startsWith('aa Schedule')) continue;
+          if(qgShouldSkipProviderName(nameRaw)){
+            totalIgnored++;
+            continue;
+          }
+          if(qgLooksLikePersonName(shiftRaw)||qgLooksLikeTimeOrDate(shiftRaw)){
+            totalIgnored++;
+            skippedTasks.add(shiftRaw);
+            continue;
+          }
 
-          const shiftCode=qgNormShift(shiftRaw);
-          if(!shiftCode){ totalIgnored++; unknownShifts.add(shiftRaw); continue; }
-          if(shiftCode==='IGNORE'){ totalIgnored++; continue; }
-
-          const doc=qgMatchName(nameRaw);
-          records.push({
+          rawRecords.push({
             date:new Date(dates[d]),
-            shift:shiftCode,
-            rawName:nameRaw,
-            docId:doc?doc.id:null
+            task:qgCleanTask(shiftRaw),
+            rawName:nameRaw
           });
         }
         j++;
@@ -1432,13 +1464,99 @@ function parseQgendaWorkbook(wb, filename){
     }
   }
 
-  // Show preview + confirmation modal
-  if(!records.length){
-    const examples=[...unknownShifts].slice(0,5).join(', ');
-    toast('No recognized qGenda provider shifts found.'+(examples?' Saw: '+examples:''),'error',8000);
+  if(!rawRecords.length){
+    const examples=[...skippedTasks].slice(0,5).join(', ');
+    toast('No qGenda provider/task rows found.'+(examples?' Skipped: '+examples:''),'error',8000);
     return;
   }
-  showQgendaMapModal(records, filename, totalParsed, totalIgnored, [...unknownShifts]);
+  showQgendaTaskMapModal(rawRecords, filename, totalParsed, totalIgnored);
+}
+
+function showQgendaTaskMapModal(rawRecords, filename, totalParsed, totalIgnored){
+  window._qgRawRecords=rawRecords;
+  if(!S.qgendaShiftMap) S.qgendaShiftMap={};
+
+  const taskStats={};
+  rawRecords.forEach(r=>{
+    if(!taskStats[r.task])taskStats[r.task]={count:0,samples:new Set()};
+    taskStats[r.task].count++;
+    if(taskStats[r.task].samples.size<3)taskStats[r.task].samples.add(r.rawName);
+  });
+  const tasks=Object.entries(taskStats)
+    .sort((a,b)=>b[1].count-a[1].count||a[0].localeCompare(b[0]));
+
+  const rows=tasks.map(([task,info],idx)=>{
+    const saved=S.qgendaShiftMap[task];
+    const guess=saved||qgGuessShift(task)||'';
+    const sample=[...info.samples].join('; ');
+    const opts=[
+      ['','Review'],
+      ['R','Rounding / Day'],
+      ['S','Swing / Admit'],
+      ['N','Nocturnist'],
+      ['IGNORE','Ignore']
+    ].map(([v,l])=>`<option value="${v}" ${guess===v?'selected':''}>${l}</option>`).join('');
+    return `<tr>
+      <td style="padding:5px 6px;font-family:'JetBrains Mono',monospace;font-size:11px">${qgEsc(task)}</td>
+      <td style="padding:5px 6px;text-align:center">${info.count}</td>
+      <td style="padding:5px 6px;color:var(--ink3);font-size:11px">${qgEsc(sample)}</td>
+      <td style="padding:5px 6px"><select class="qg-task-map" data-task="${qgEsc(task)}" style="width:130px">${opts}</select></td>
+    </tr>`;
+  }).join('');
+
+  showModal(`🧭 Map qGenda Tasks — ${filename}`,
+    `<div style="font-size:12px;color:var(--ink3);margin-bottom:10px">
+      Map this site's qGenda task labels to the scheduler's shift types. These choices are saved for this group after import.
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px">
+      <div style="background:#eef5fb;border-radius:4px;padding:8px;text-align:center"><div style="font-size:20px;font-weight:700;color:#1b4d8f">${tasks.length}</div><div style="font-size:11px;color:#555">task labels</div></div>
+      <div style="background:#dff5e6;border-radius:4px;padding:8px;text-align:center"><div style="font-size:20px;font-weight:700;color:#0a7044">${rawRecords.length}</div><div style="font-size:11px;color:#555">provider rows</div></div>
+      <div style="background:#f5f5f5;border-radius:4px;padding:8px;text-align:center"><div style="font-size:20px;font-weight:700;color:#666">${totalIgnored}</div><div style="font-size:11px;color:#555">non-provider rows skipped</div></div>
+    </div>
+    <div style="max-height:360px;overflow-y:auto;border:1px solid var(--line);border-radius:4px">
+      <table class="htbl" style="font-size:12px;margin:0">
+        <thead><tr><th>qGenda Task</th><th>Rows</th><th>Sample Providers</th><th>Map To</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`,
+    'Continue',
+    ()=>applyQgendaTaskMap(filename,totalParsed,totalIgnored)
+  );
+}
+
+function applyQgendaTaskMap(filename,totalParsed,totalIgnored){
+  const rawRecords=window._qgRawRecords||[];
+  const map={};
+  let needsReview=0;
+  document.querySelectorAll('.qg-task-map').forEach(sel=>{
+    const task=sel.getAttribute('data-task');
+    const val=sel.value;
+    if(!val)needsReview++;
+    map[task]=val;
+  });
+  if(needsReview){
+    toast(`Map or ignore ${needsReview} task label${needsReview===1?'':'s'} before continuing.`,'error',4000);
+    return;
+  }
+  S.qgendaShiftMap={...(S.qgendaShiftMap||{}),...map};
+  const ignoredTasks=new Set();
+  const records=[];
+  rawRecords.forEach(r=>{
+    const shift=map[r.task];
+    if(!shift||shift==='IGNORE'){ignoredTasks.add(r.task);return;}
+    const doc=qgMatchName(r.rawName);
+    records.push({
+      date:new Date(r.date),
+      shift,
+      rawName:r.rawName,
+      docId:doc?doc.id:null
+    });
+  });
+  if(!records.length){
+    toast('All qGenda task labels were ignored. Map at least one task to R, S, or N.','error',6000);
+    return;
+  }
+  showQgendaMapModal(records, filename, totalParsed, totalIgnored+ignoredTasks.size, [...ignoredTasks]);
 }
 
 function showQgendaMapModal(records, filename, totalParsed, totalIgnored, unknownShifts=[]){
@@ -1473,7 +1591,7 @@ function showQgendaMapModal(records, filename, totalParsed, totalIgnored, unknow
     const count=displayRecords.filter(r=>r.rawName===rawName).length;
     const safeId=rawName.replace(/[^a-zA-Z0-9]/g,'_');
     return `<div class="qg-match-row" style="flex-wrap:wrap;row-gap:4px">
-      <span class="qg-name-raw">${rawName} <span style="color:#999;font-size:10px">(${count})</span></span>
+      <span class="qg-name-raw">${qgEsc(rawName)} <span style="color:#999;font-size:10px">(${count})</span></span>
       <span class="qg-arrow">→</span>
       <select class="qg-match-sel ${cls}" data-raw="${rawName.replace(/"/g,'&quot;')}"
         data-deflast="${defLast.replace(/"/g,'&quot;')}" data-deffirst="${defFirst.replace(/"/g,'&quot;')}"
@@ -1516,7 +1634,7 @@ function showQgendaMapModal(records, filename, totalParsed, totalIgnored, unknow
       </div>
       <div style="background:#f5f5f5;border-radius:4px;padding:8px;text-align:center">
         <div style="font-size:20px;font-weight:700;color:#666">${totalIgnored}</div>
-        <div style="font-size:11px;color:#555">APP/backup ignored</div>
+        <div style="font-size:11px;color:#555">rows skipped</div>
       </div>
     </div>
     <div style="font-size:11px;color:#555;margin-bottom:12px">
@@ -1528,7 +1646,7 @@ function showQgendaMapModal(records, filename, totalParsed, totalIgnored, unknow
       <span style="font-weight:400;color:var(--ink3)"> — verify and correct before importing</span>
     </div>
     ${onboardingEmptyRoster?'<div style="background:#eef5fb;border:1px solid #b8d4f0;color:#1b4d8f;border-radius:4px;padding:8px 10px;font-size:12px;margin-bottom:10px">Blank roster detected. qGenda provider names are preselected to be added as new standard 1.0 FTE physicians. Adjust type or FTE before importing if needed.</div>':''}
-    ${unknownShifts.length?`<div style="background:#fff5dc;border:1px solid #f0d080;color:#8a5400;border-radius:4px;padding:8px 10px;font-size:12px;margin-bottom:10px">Ignored unrecognized task labels: ${unknownShifts.slice(0,8).join(', ')}${unknownShifts.length>8?'…':''}</div>`:''}
+    ${unknownShifts.length?`<div style="background:#fff5dc;border:1px solid #f0d080;color:#8a5400;border-radius:4px;padding:8px 10px;font-size:12px;margin-bottom:10px">Ignored task labels: ${qgEsc(unknownShifts.slice(0,8).join(', '))}${unknownShifts.length>8?'...':''}</div>`:''}
     <div style="max-height:220px;overflow-y:auto;border:1px solid var(--line);border-radius:4px;padding:6px 10px" id="qg-match-container">
       ${matchRows}
     </div>
@@ -1568,12 +1686,14 @@ function previewQgendaImport(){
     if(rec.date>=today) return; // skip future
     const docId=rec.docId||corrections[rec.rawName];
     if(!docId) return;
+    let previewDocId=docId;
     let doc=byId(docId);
     if(docId==='__add__'){
       const sel=[...document.querySelectorAll('#qg-match-container .qg-match-sel')]
         .find(s=>s.getAttribute('data-raw')===rec.rawName);
+      previewDocId='__add__:'+rec.rawName;
       doc={
-        id:'__add__',
+        id:previewDocId,
         last:sel?.getAttribute('data-deflast')||rec.rawName,
         first:sel?.getAttribute('data-deffirst')||'',
         fte:parseFloat(document.querySelector('#np_'+rec.rawName.replace(/[^a-zA-Z0-9]/g,'_')+' .qg-new-fte')?.value)||1.0
@@ -1587,7 +1707,7 @@ function previewQgendaImport(){
     const qKey2=`${rec.date.getFullYear()}-${Math.floor(rec.date.getMonth()/3)+1}`;
     const baseSh=S.baseSchedule&&S.baseSchedule[qKey2]&&S.baseSchedule[qKey2][docId]&&S.baseSchedule[qKey2][docId][ds];
     const isBonus=(!baseSh || baseSh==='OFF') && (rec.shift==='R'||rec.shift==='S'||rec.shift==='N');
-    preview.push({date:ds, name:`${doc.last}, ${doc.first}`, shift:rec.shift, existing, changed, docId, isBonus});
+    preview.push({date:ds, name:`${doc.last}, ${doc.first}`, shift:rec.shift, existing, changed, docId:previewDocId, isBonus});
   });
 
   // Build preview table sorted by date then name
@@ -1857,6 +1977,7 @@ function freshGroupState(){
     cycleStarts: {},
     hols: {},
     announcement: '',
+    qgendaShiftMap: {},
     cfg: {annual:182, R:13, S:3, maxReq:15, maxWeekendReq:6, maxRequired:5},
     ui: {
       role:'admin',
