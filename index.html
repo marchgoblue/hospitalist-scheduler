@@ -13,6 +13,7 @@
 const SUPABASE_URL  = 'https://wyvrtaqpakncaotlusdd.supabase.co';
 const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind5dnJ0YXFwYWtuY2FvdGx1c2RkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxMjgwMzIsImV4cCI6MjA5NDcwNDAzMn0.GSSZ9cY_rtJtL76mb2uChSXHrPbs3K8s05F1uX2Jpy4';
 const DATA_ROW_ID = 'main';
+const DEFAULT_GROUP_ID = 'main';
 
 // Direct REST helpers — no Supabase client library needed
 async function _sbFetch(path, opts={}){
@@ -819,6 +820,21 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
         <strong>Save Version</strong> creates a named snapshot you can restore later. <strong>Clear Schedule</strong> wipes all shifts and requests but keeps your roster and settings.
       </div>
     </div>
+    <div class="card">
+      <h3>Group Onboarding</h3>
+      <div class="row">
+        <div class="fg"><label>Group Name</label><input type="text" id="g-name" placeholder="Athens Hospitalists" style="width:190px" oninput="suggestGroupId()"></div>
+        <div class="fg"><label>Group ID</label><input type="text" id="g-id" placeholder="athens-hospitalists" style="width:180px" oninput="this.dataset.touched='1'"></div>
+      </div>
+      <div class="row">
+        <div class="fg"><label>Admin Username</label><input type="text" id="g-admin" placeholder="athens.admin" style="width:160px" autocapitalize="none" spellcheck="false"></div>
+        <div class="fg"><label>Temporary Password</label><input type="password" id="g-pass" placeholder="Min 6 chars" style="width:140px"></div>
+      </div>
+      <button class="btn btn-g btn-sm" onclick="createGroupAdmin()">Create Group Admin</button>
+      <div id="group-onboard-status" class="tx-xs tx-mu" style="margin-top:8px">
+        Creates a separate storage lane for a new hospitalist site.
+      </div>
+    </div>
   </div>
 </div>
 
@@ -956,44 +972,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
 // ════════════════════════════════════════════════════════
 //  PHYSICIAN ROSTER
 // ════════════════════════════════════════════════════════
-const INIT_DOCS = [
-  {id:'adelore',   last:'Adelore',     first:'Tejumade',    role:'MD',fte:1.0,type:'standard',  active:true,startDate:null,    title:''},
-  {id:'ahmad',     last:'Ahmad',       first:'Fakhar',      role:'MD',fte:1.0,type:'standard',  active:true,startDate:null,    title:''},
-  {id:'ahmadani',  last:'Ahmadani',    first:'Ikramullah',  role:'MD',fte:1.0,type:'nocturnist',active:true,startDate:null,    title:'Nocturnist'},
-  {id:'aligwekwe', last:'Aligwekwe',   first:'Chinwe',      role:'MD',fte:1.0,type:'standard',  active:true,startDate:null,    title:''},
-  {id:'anderson',  last:'Anderson',    first:'Courtney',    role:'MD',fte:1.0,type:'standard',  active:true,startDate:null,    title:''},
-  {id:'blair',     last:'Blair',       first:'Daniel',      role:'MD',fte:1.0,type:'standard',  active:true,startDate:null,    title:''},
-  {id:'bonilla',   last:'Bonilla',     first:'Frank',       role:'MD',fte:1.0,type:'standard',  active:true,startDate:null,    title:''},
-  {id:'bueno',     last:'Bueno',       first:'Yolin',       role:'MD',fte:1.0,type:'standard',  active:true,startDate:null,    title:''},
-  {id:'chaudhry',  last:'Chaudhry',    first:'Mannan',      role:'MD',fte:1.0,type:'standard',  active:true,startDate:null,    title:''},
-  {id:'cruz',      last:'Cruz',        first:'Danhely',     role:'MD',fte:1.0,type:'standard',  active:true,startDate:null,    title:''},
-  {id:'dasoveanu', last:'Dasoveanu',   first:'George',      role:'MD',fte:1.0,type:'standard',  active:true,startDate:null,    title:''},
-  {id:'dave',      last:'Dave',        first:'Isha',        role:'MD',fte:1.0,type:'standard',  active:true,startDate:null,    title:''},
-  {id:'fernando',  last:'Fernando',    first:'Nimeshi',     role:'MD',fte:1.0,type:'standard',  active:true,startDate:null,    title:''},
-  {id:'garg',      last:'Garg',        first:'Monisha',     role:'MD',fte:1.0,type:'standard',  active:true,startDate:null,    title:''},
-  {id:'groarke',   last:'Groarke',     first:'Brendan',     role:'MD',fte:1.0,type:'standard',  active:true,startDate:null,    title:''},
-  {id:'guillot',   last:'Guillot',     first:'Juan',        role:'MD',fte:1.0,type:'standard',  active:true,startDate:null,    title:''},
-  {id:'ifeadi',    last:'Ifeadi',      first:'Ngozi',       role:'MD',fte:1.0,type:'standard',  active:true,startDate:null,    title:''},
-  {id:'maalouf',   last:'Maalouf',     first:'Samer',       role:'MD',fte:1.0,type:'standard',  active:true,startDate:null,    title:''},
-  {id:'march',     last:'March',       first:'Christopher', role:'MD',fte:0.5,type:'standard',  active:true,startDate:null,    title:''},
-  {id:'middendorf',last:'Middendorf',  first:'Chris',       role:'MD',fte:1.0,type:'standard',  active:true,startDate:null,    title:''},
-  {id:'nestoiter', last:'Nestoiter',   first:'Adriana',     role:'MD',fte:1.0,type:'standard',  active:true,startDate:null,    title:''},
-  {id:'patel_j',   last:'Patel',       first:'Jaideep',     role:'MD',fte:1.0,type:'standard',  active:true,startDate:null,    title:''},
-  {id:'patel_jt',  last:'Patel',       first:'Jatan',       role:'MD',fte:1.0,type:'standard',  active:true,startDate:null,    title:''},
-  {id:'patel_r',   last:'Patel',       first:'Rak',         role:'MD',fte:1.0,type:'standard',  active:true,startDate:null,    title:''},
-  {id:'raza',      last:'Raza',        first:'Muhammad',    role:'MD',fte:1.0,type:'standard',  active:true,startDate:null,    title:''},
-  {id:'rizvi',     last:'Rizvi',       first:'Syed',        role:'MD',fte:1.0,type:'standard',  active:true,startDate:null,    title:''},
-  {id:'shah',      last:'Shah',        first:'Arpit',       role:'MD',fte:1.0,type:'standard',  active:true,startDate:null,    title:''},
-  {id:'singh',     last:'Singh',       first:'Geena',       role:'MD',fte:1.0,type:'standard',  active:true,startDate:null,    title:''},
-  {id:'slavina',   last:'Slavina',     first:'Irina',       role:'MD',fte:1.0,type:'swing-only',active:true,startDate:null,    title:''},
-  {id:'tahir',     last:'Tahir',       first:'Hindia',      role:'MD',fte:1.0,type:'weekday-only',active:true,startDate:null,    title:'Medical Director'},
-  {id:'turner',    last:'Turner',      first:'Chase',       role:'MD',fte:1.0,type:'standard',  active:true,startDate:null,    title:''},
-  {id:'walls',     last:'Walls',       first:'Sheri',       role:'MD',fte:1.0,type:'nocturnist',active:true,startDate:null,    title:'Nocturnist'},
-  {id:'wilson',    last:'Wilson',      first:'Kwasi',       role:'MD',fte:1.0,type:'standard',  active:true,startDate:null,    title:''},
-  {id:'zouain',    last:'Zouain',      first:'Eduardo',     role:'MD',fte:1.0,type:'standard',  active:true,startDate:null,    title:''},
-  {id:'odeyinka',  last:'Odeyinka',    first:'Oladipo',     role:'MD',fte:1.0,type:'standard',  active:true,startDate:'2026-07-01',title:''},
-  {id:'chapagain', last:'Chapagain',   first:'Sudeep',      role:'MD',fte:1.0,type:'standard',  active:true,startDate:'2026-07-01',title:''},
-];
+const INIT_DOCS = [];
 
 // ════════════════════════════════════════════════════════
 //  STATE
@@ -1009,7 +988,7 @@ let S = {
   cfg: {annual:182, R:13, S:3, maxReq:15, maxWeekendReq:6, maxRequired:5},
   ui: {
     role:'admin',          // 'admin' or 'phys'
-    currentPhysId: 'adelore',  // physician viewing as
+    currentPhysId: null,       // physician viewing as
     year:2025, quarter:1,
     wkStart:null,
     fillMode:null,
@@ -1029,10 +1008,13 @@ let S = {
 // ════════════════════════════════════════════════════════
 //  AUTH & STORAGE — per-user login, Supabase-backed
 // ════════════════════════════════════════════════════════
-let currentUser=null; // {username,role,docId}
+let currentUser=null; // {username,role,docId,groupId,groupName}
 let isSaving=false,pendingSave=false;
 function isAdmin(){return currentUser&&currentUser.role==='admin';}
 function isPhysician(){return currentUser&&currentUser.role==='physician';}
+function currentGroupId(){return (currentUser&&currentUser.groupId)||DEFAULT_GROUP_ID;}
+function currentGroupName(){return (currentUser&&currentUser.groupName)||currentGroupId();}
+function currentScheduleRowId(){return currentGroupId()||DATA_ROW_ID;}
 
 function setReadOnly(ro){
   const b=document.getElementById('readonly-banner');if(b)b.classList.toggle('on',ro);
@@ -1040,7 +1022,7 @@ function setReadOnly(ro){
 }
 function updateHeaderForUser(){
   const el=document.getElementById('user-display');if(!el||!currentUser)return;
-  el.textContent=isAdmin()?`👤 ${currentUser.username} (Admin)`:`👤 ${currentUser.username}`;
+  el.textContent=isAdmin()?`👤 ${currentUser.username} (Admin · ${currentGroupName()})`:`👤 ${currentUser.username} · ${currentGroupName()}`;
 }
 
 async function saveData(){
@@ -1048,7 +1030,7 @@ async function saveData(){
   if(isSaving){pendingSave=true;return;}
   isSaving=true;setSyncStatus('saving');
   try{
-    await _sbUpsert('schedule_data',{id:DATA_ROW_ID,data:JSON.stringify(S),updated_at:new Date().toISOString()});
+    await _sbUpsert('schedule_data',{id:currentScheduleRowId(),data:JSON.stringify(S),updated_at:new Date().toISOString()});
     setSyncStatus('saved');
     if(isAdmin())toast('Saved','success');
   }catch(e){console.error('saveData error:',errStr(e),e);setSyncStatus('error');toast('Save failed: '+errStr(e),'error');}
@@ -1058,7 +1040,7 @@ async function saveData(){
 async function loadData(){
   setSyncStatus('loading');
   try{
-    const rows = await _sbGet('schedule_data', {id: DATA_ROW_ID});
+    const rows = await _sbGet('schedule_data', {id: currentScheduleRowId()});
     if(rows && rows.length > 0 && rows[0].data){
       S = {...S, ...JSON.parse(rows[0].data)};
     }
@@ -1073,8 +1055,10 @@ async function loadData(){
 }
 
 function applyMigrations(){
+  if(!Array.isArray(S.docs))S.docs=[];
   if(!S.teams)S.teams={};if(!S.announcement)S.announcement='';
   if(!S.ui)S.ui={};
+  if(S.ui.currentPhysId&&!S.docs.find(d=>d.id===S.ui.currentPhysId))S.ui.currentPhysId=null;
   S.ui.selectedRow=null;S.ui.selectedCols=new Set();S.ui.fillMode=null;
   const u={odeyinka:{first:'Oladipo'},chapagain:{first:'Sudeep'},walls:{type:'nocturnist',title:'Nocturnist'},ahmadani:{type:'nocturnist',title:'Nocturnist'},tahir:{type:'weekday-only'}};
   Object.entries(u).forEach(([id,p])=>{const d=S.docs.find(d=>d.id===id);if(d)Object.assign(d,p);});
@@ -1090,7 +1074,7 @@ function setSyncStatus(state){
 let lastSyncTime=0;
 async function pollForChanges(){
   try{
-    const rows=await _sbGet('schedule_data',{id:DATA_ROW_ID});
+    const rows=await _sbGet('schedule_data',{id:currentScheduleRowId()});
     if(rows&&rows.length>0){
       const t=new Date(rows[0].updated_at).getTime();
       if(t>lastSyncTime&&lastSyncTime>0){
@@ -1110,9 +1094,74 @@ async function getUser(u){
   try{const rows=await _sbGet('users',{username:u});return(rows&&rows.length>0)?rows[0]:null;}
   catch(e){console.error('getUser:',errStr(e));return null;}
 }
+function userSessionFromRow(user){
+  return {
+    username:user.username,
+    role:user.role,
+    docId:user.doc_id,
+    groupId:user.group_id||DEFAULT_GROUP_ID,
+    groupName:user.group_name||user.group_id||DEFAULT_GROUP_ID
+  };
+}
 async function updatePasswordInDB(u,h){
   try{await _sbPatch('users',{username:u},{password_hash:h});return true;}
   catch(e){console.error('updatePwd:',errStr(e));return false;}
+}
+
+function slugifyGroupId(name){
+  return String(name||'')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g,'-')
+    .replace(/^-+|-+$/g,'')
+    .slice(0,60);
+}
+
+function suggestGroupId(){
+  const name=document.getElementById('g-name')?.value||'';
+  const idEl=document.getElementById('g-id');
+  if(!idEl||idEl.dataset.touched==='1')return;
+  idEl.value=slugifyGroupId(name);
+}
+
+async function createGroupAdmin(){
+  if(!isAdmin()){toast('Admin only','error');return;}
+  const name=(document.getElementById('g-name')?.value||'').trim();
+  const groupId=slugifyGroupId(document.getElementById('g-id')?.value||name);
+  const username=(document.getElementById('g-admin')?.value||'').trim().toLowerCase();
+  const password=document.getElementById('g-pass')?.value||'';
+  const status=document.getElementById('group-onboard-status');
+  if(status)status.textContent='';
+  if(!name){toast('Group name required','error');return;}
+  if(!groupId){toast('Group ID required','error');return;}
+  if(!username){toast('Admin username required','error');return;}
+  if(password.length<6){toast('Temporary password must be at least 6 characters','error');return;}
+  try{
+    const existingUser=await _sbGet('users',{username});
+    if(existingUser&&existingUser.length){
+      toast('That username already exists. Choose a site-specific username.','error');
+      if(status)status.textContent='Username already exists.';
+      return;
+    }
+    await _sbUpsert('groups',{id:groupId,name});
+    await _sbUpsert('users',{
+      username,
+      password_hash:await sha256(password),
+      role:'admin',
+      doc_id:null,
+      group_id:groupId,
+      group_name:name
+    });
+    ['g-name','g-id','g-admin','g-pass'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+    const msg=`Created ${name}. New admin can sign in as ${username}; their qGenda import will save separately under ${groupId}.`;
+    if(status)status.textContent=msg;
+    toast('Group admin created','success');
+  }catch(e){
+    console.error('createGroupAdmin error:',errStr(e),e);
+    const msg='Could not create group admin: '+errStr(e);
+    if(status)status.textContent=msg;
+    toast(msg,'error',5000);
+  }
 }
 
 async function tryLogin(){
@@ -1126,7 +1175,7 @@ async function tryLogin(){
     const user=await getUser(username);
     if(!user){errEl.textContent='User not found. Check username.';return;}
     if(user.password_hash!==hash){errEl.textContent='Incorrect password.';return;}
-    currentUser={username:user.username,role:user.role,docId:user.doc_id};
+    currentUser=userSessionFromRow(user);
     completeLogin();
   }catch(e){
     errEl.textContent='Login error: '+errStr(e);
@@ -1169,6 +1218,7 @@ async function adminResetPassword(docId){
   if(!isAdmin()){toast('Admin only','error');return;}
   const doc=byId(docId);if(!doc)return;
   let rows; try{rows=await _sbGet('users',{doc_id:docId});}catch(e){toast('No database: '+errStr(e),'error');return;}
+  rows=(rows||[]).filter(u=>!u.group_id||u.group_id===currentGroupId());
   if(!rows||rows.length===0){toast('No account found','error');return;}
   const data=rows[0];
   const uname=data.username;
@@ -1395,9 +1445,10 @@ function showQgendaMapModal(records, filename, totalParsed, totalIgnored){
 
   // Unique provider names — show ALL (matched and unmatched) for verification
   const allNames=[...new Set(records.map(r=>r.rawName))].sort();
-  const unmatchedNames=allNames.filter(n=>!records.find(r=>r.rawName===n&&r.docId));
-  const matchedNames=allNames.filter(n=>records.find(r=>r.rawName===n&&r.docId));
-  const matchedCount=pastRecords.filter(r=>r.docId).length;
+  const onboardingEmptyRoster=S.docs.filter(d=>d.active).length===0;
+  const unmatchedNames=onboardingEmptyRoster?[]:allNames.filter(n=>!records.find(r=>r.rawName===n&&r.docId));
+  const matchedNames=onboardingEmptyRoster?allNames:allNames.filter(n=>records.find(r=>r.rawName===n&&r.docId));
+  const matchedCount=onboardingEmptyRoster?pastRecords.length:pastRecords.filter(r=>r.docId).length;
 
   // Build match rows for ALL names — matched names pre-selected, unmatched need correction
   const matchRows=allNames.map(rawName=>{
@@ -1407,11 +1458,11 @@ function showQgendaMapModal(records, filename, totalParsed, totalIgnored){
     const nameParts=rawName.match(/^([^,]+),\s*(.+)$/);
     const defLast=nameParts?nameParts[1].trim():'';
     const defFirst=nameParts?nameParts[2].trim():'';
-    const addOpt=isUnmatched?`<option value="__add__" style="color:#0a7044;font-weight:700">➕ Add as new physician</option>`:'';
+    const addOpt=(isUnmatched||onboardingEmptyRoster)?`<option value="__add__" ${onboardingEmptyRoster?'selected':''} style="color:#0a7044;font-weight:700">➕ Add as new physician</option>`:'';
     const opts=addOpt+`<option value="">— skip —</option>`+
       S.docs.filter(d=>d.active).sort((a,b)=>{const pa=a.type==='prn'?1:0,pb=b.type==='prn'?1:0;return pa!==pb?pa-pb:a.last.localeCompare(b.last)})
         .map(d=>`<option value="${d.id}" ${matched===d.id?'selected':''}>${d.last}, ${d.first}</option>`).join('');
-    const cls=matched?'matched':'unmatched';
+    const cls=(matched||onboardingEmptyRoster)?'matched':'unmatched';
     const count=pastRecords.filter(r=>r.rawName===rawName).length;
     const safeId=rawName.replace(/[^a-zA-Z0-9]/g,'_');
     return `<div class="qg-match-row" style="flex-wrap:wrap;row-gap:4px">
@@ -1421,26 +1472,26 @@ function showQgendaMapModal(records, filename, totalParsed, totalIgnored){
         data-deflast="${defLast.replace(/"/g,'&quot;')}" data-deffirst="${defFirst.replace(/"/g,'&quot;')}"
         onchange="this.className='qg-match-sel '+(this.value?'matched':'unmatched');var nr=document.getElementById('np_${safeId}');if(nr)nr.style.display=this.value==='__add__'?'flex':'none';"
       >${opts}</select>
-      <div id="np_${safeId}" style="display:none;align-items:center;gap:6px;width:100%;padding:4px 8px;background:#f0faf4;border-radius:4px;font-size:11px">
+      <div id="np_${safeId}" style="display:${onboardingEmptyRoster?'flex':'none'};align-items:center;gap:6px;width:100%;padding:4px 8px;background:#f0faf4;border-radius:4px;font-size:11px">
         <span style="color:#555">Type:</span>
         <select class="qg-new-type" data-raw="${rawName.replace(/"/g,'&quot;')}" style="padding:2px 4px;font-size:11px">
-          <option value="prn" selected>PRN</option>
-          <option value="standard">Standard</option>
+          <option value="standard" ${onboardingEmptyRoster?'selected':''}>Standard</option>
+          <option value="prn" ${onboardingEmptyRoster?'':'selected'}>PRN</option>
           <option value="nocturnist">Nocturnist</option>
           <option value="swing-only">Swing Only</option>
         </select>
         <span style="color:#555">FTE:</span>
-        <input type="number" class="qg-new-fte" data-raw="${rawName.replace(/"/g,'&quot;')}" value="0.0" min="0.0" max="1.0" step="0.1" style="width:50px;padding:2px 4px;font-size:11px">
+        <input type="number" class="qg-new-fte" data-raw="${rawName.replace(/"/g,'&quot;')}" value="${onboardingEmptyRoster?'1.0':'0.0'}" min="0.0" max="1.0" step="0.1" style="width:50px;padding:2px 4px;font-size:11px">
         <span style="color:#888">(${defFirst} ${defLast})</span>
       </div>
     </div>`;
   }).join('');
 
   // Summary breakdown by shift type
-  const rCount=pastRecords.filter(r=>r.shift==='R'&&r.docId).length;
-  const sCount=pastRecords.filter(r=>r.shift==='S'&&r.docId).length;
-  const nCount=pastRecords.filter(r=>r.shift==='N'&&r.docId).length;
-  const skipCount=pastRecords.filter(r=>!r.docId).length;
+  const rCount=pastRecords.filter(r=>r.shift==='R'&&(r.docId||onboardingEmptyRoster)).length;
+  const sCount=pastRecords.filter(r=>r.shift==='S'&&(r.docId||onboardingEmptyRoster)).length;
+  const nCount=pastRecords.filter(r=>r.shift==='N'&&(r.docId||onboardingEmptyRoster)).length;
+  const skipCount=onboardingEmptyRoster?0:pastRecords.filter(r=>!r.docId).length;
 
   showModal(`📊 Import qGenda — ${filename}`,
     `<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;margin-bottom:14px">
@@ -1469,6 +1520,7 @@ function showQgendaMapModal(records, filename, totalParsed, totalIgnored){
       <span style="color:#a85800">${unmatchedNames.length} unmatched</span>
       <span style="font-weight:400;color:var(--ink3)"> — verify and correct before importing</span>
     </div>
+    ${onboardingEmptyRoster?'<div style="background:#eef5fb;border:1px solid #b8d4f0;color:#1b4d8f;border-radius:4px;padding:8px 10px;font-size:12px;margin-bottom:10px">Blank roster detected. qGenda provider names are preselected to be added as new standard 1.0 FTE physicians. Adjust type or FTE before importing if needed.</div>':''}
     <div style="max-height:220px;overflow-y:auto;border:1px solid var(--line);border-radius:4px;padding:6px 10px" id="qg-match-container">
       ${matchRows}
     </div>
@@ -1508,7 +1560,17 @@ function previewQgendaImport(){
     if(rec.date>=today) return; // skip future
     const docId=rec.docId||corrections[rec.rawName];
     if(!docId) return;
-    const doc=byId(docId);
+    let doc=byId(docId);
+    if(docId==='__add__'){
+      const sel=[...document.querySelectorAll('#qg-match-container .qg-match-sel')]
+        .find(s=>s.getAttribute('data-raw')===rec.rawName);
+      doc={
+        id:'__add__',
+        last:sel?.getAttribute('data-deflast')||rec.rawName,
+        first:sel?.getAttribute('data-deffirst')||'',
+        fte:parseFloat(document.querySelector('#np_'+rec.rawName.replace(/[^a-zA-Z0-9]/g,'_')+' .qg-new-fte')?.value)||1.0
+      };
+    }
     if(!doc) return;
     const ds=dstrD(rec.date);
     const existing=(S.sched[docId]&&S.sched[docId][ds])||'—';
@@ -1588,10 +1650,11 @@ async function runQgendaImport(records){
 
   // Create new providers first so their IDs are available
   for(const [rawName, np] of Object.entries(newProviders)){
-    const baseId=(np.last+np.first).toLowerCase().replace(/[^a-z]/g,'');
+    const baseId=(np.last+np.first).toLowerCase().replace(/[^a-z]/g,'')||'provider';
     let uid=baseId; let n=2;
     while(S.docs.find(d=>d.id===uid)) uid=baseId+n++;
     S.docs.push({id:uid,last:np.last,first:np.first,role:'MD',fte:np.fte,type:(np.type||'prn'),active:true,startDate:null,title:''});
+    if(!S.ui.currentPhysId)S.ui.currentPhysId=uid;
     corrections[rawName]=uid;
   }
 
@@ -1633,6 +1696,8 @@ async function runQgendaImport(records){
 
   await saveData();
   renderSchedule(); renderRoster(); renderDocList(); populatePhysPicker();
+  if(document.getElementById('pg-myreq')?.classList.contains('on'))renderMyRequestCal();
+  if(document.getElementById('pg-myschd')?.classList.contains('on'))renderMySchedule();
   toast(`Imported ${imported} shifts${newCount?' + '+newCount+' new providers':''}`,'success');
   setTimeout(()=>{ document.getElementById('modal').style.display='none'; }, 2500);
 }
@@ -1652,12 +1717,20 @@ async function saveVersion(){
     async ()=>{
       const name=document.getElementById('version-name-input')?.value?.trim()||defaultName;
       try{
-        await _sbUpsert('versions',{
+        const versionRow={
           name,
           data: JSON.stringify(S),
           saved_at: new Date().toISOString(),
-          saved_by: currentUser.username
-        });
+          saved_by: currentUser.username,
+          group_id: currentGroupId()
+        };
+        try{
+          await _sbUpsert('versions',versionRow);
+        }catch(scopeErr){
+          if(currentGroupId()!==DEFAULT_GROUP_ID) throw scopeErr;
+          const {group_id, ...legacyRow}=versionRow;
+          await _sbUpsert('versions',legacyRow);
+        }
         toast(`Snapshot "${name}" saved`,'success');
       }catch(e){
         // Fallback: save to localStorage
@@ -1675,8 +1748,15 @@ async function showVersions(){
   if(!isAdmin()){ toast('Admin only','error'); return; }
   let versions=[];
   try{
-    const rows=await _sbGet('versions',{});
-    versions=(rows||[]).sort((a,b)=>new Date(b.saved_at)-new Date(a.saved_at));
+    let rows=[];
+    try{
+      rows=await _sbGet('versions',{group_id:currentGroupId()});
+    }catch(scopeErr){
+      rows=await _sbGet('versions',{});
+    }
+    versions=(rows||[])
+      .filter(v=>(v.group_id||DEFAULT_GROUP_ID)===currentGroupId())
+      .sort((a,b)=>new Date(b.saved_at)-new Date(a.saved_at));
   }catch(e){
     // Fallback: load from localStorage
     versions=JSON.parse(localStorage.getItem('hs_versions')||'[]');
@@ -1974,6 +2054,10 @@ function generateQuarter(){
   try {
     const year=parseInt(document.getElementById('yr-sel').value);
     const q=parseInt(document.getElementById('q-sel').value);
+    if(!activeDocs(year,(q-1)*3).length){
+      toast('Add physicians or import qGenda before generating a schedule.','error');
+      return;
+    }
     let best=null;
     const CANDIDATE_COUNT=48;
     for(let seed=0;seed<CANDIDATE_COUNT;seed++){
@@ -2697,6 +2781,15 @@ function updateGenButton(){
   const exists=S.cycleStarts[qKey]&&S.cycleStarts[qKey].generated;
   const btn=document.getElementById('gen-btn');
   if(!btn) return;
+  if(!activeDocs(year,(q-1)*3).length){
+    btn.textContent='⚡ Generate Schedule';
+    btn.className='btn btn-p';
+    btn.disabled=true;
+    btn.title='Import qGenda or add physicians before generating.';
+    return;
+  }
+  btn.disabled=false;
+  btn.title='';
   if(exists){
     btn.textContent='🔄 Regenerate Schedule';
     btn.className='btn btn-warn';
@@ -2710,6 +2803,10 @@ function tryGenerateQuarter(){
   if(!isAdmin()){ toast('View-only — admin access required','error'); return; }
   const year=parseInt(document.getElementById('yr-sel').value)||S.ui.year;
   const q=parseInt(document.getElementById('q-sel').value)||S.ui.quarter;
+  if(!activeDocs(year,(q-1)*3).length){
+    toast('Import qGenda or add physicians before generating a schedule.','error');
+    return;
+  }
   const qKey=`${year}-${q}`;
   const exists=S.cycleStarts[qKey]&&S.cycleStarts[qKey].generated;
   if(exists){
@@ -2950,6 +3047,10 @@ function renderSchedule(){
   const today=dstrD(new Date());
   const filterText=(document.getElementById('filter-name')?.value||'').toLowerCase().trim();
   const allDocs=activeDocs(year);
+  if(!allDocs.length){
+    document.getElementById('sheet-outer').innerHTML='<div class="sheet-wrap" id="sheet-wrap"><div style="padding:40px;text-align:center;color:var(--ink3)"><div style="font-weight:700;color:var(--ink);margin-bottom:6px">No physicians in this roster yet.</div><div>Use <strong>Settings → Import qGenda Excel</strong> to populate this group, or add physicians manually below.</div></div></div>';
+    return;
+  }
   const consultDocs=allDocs.filter(d=>d.type==='weekday-only');
   const nocturnistDocs=allDocs.filter(d=>d.type==='nocturnist').sort((a,b)=>a.last.localeCompare(b.last));
   const prnDocs=allDocs.filter(d=>d.type==='prn').sort((a,b)=>a.last.localeCompare(b.last));
@@ -3205,6 +3306,15 @@ function goToToday(){S.ui.wkStart=wkStart(new Date());renderWeek()}
 function renderMyRequestCal(){
   const qKey=document.getElementById('myq-sel').value;
   S.ui.requestQuarter=qKey;
+  const currentDoc=byId(S.ui.currentPhysId);
+  if(!currentDoc){
+    document.getElementById('my-req-cal').innerHTML='<div style="padding:40px;text-align:center;color:var(--ink3)">No physician selected. Import a qGenda roster or add physicians manually first.</div>';
+    const statusEl=document.getElementById('active-phys-status');
+    if(statusEl) statusEl.textContent='';
+    document.querySelectorAll('#pg-myreq .btn-p, #pg-myreq input[type="radio"]').forEach(el=>el.disabled=true);
+    ['cnt-total','cnt-weekend'].forEach(id=>{const el=document.getElementById(id);if(el)el.textContent='0';});
+    return;
+  }
   const [y,q]=qKey.split('-').map(Number);
   const days=quarterDays(y,q);
   if(!S.requests[qKey]) S.requests[qKey]={};
@@ -3901,7 +4011,7 @@ function renderDocList(){
     </div>`;
     html+=noctDocs.map(buildDocCard).join('');
   }
-  document.getElementById('doc-grid').innerHTML=html||'<div class="tx-mu tx-sm">No physicians found.</div>';
+  document.getElementById('doc-grid').innerHTML=html||'<div class="tx-mu tx-sm" style="grid-column:1/-1;padding:28px;text-align:center">No physicians yet. Import a qGenda Excel file from Settings or add physicians manually.</div>';
 }
 
 function showDocDetail(docId){
@@ -4234,6 +4344,10 @@ function renderHolidayTable(){
 function renderRoster(){
   const docs=[...S.docs].sort((a,b)=>{const pa=a.type==='prn'?1:0,pb=b.type==='prn'?1:0;return pa!==pb?pa-pb:a.last.localeCompare(b.last)});
   document.getElementById('roster-count').textContent=docs.filter(d=>d.active).length;
+  if(!docs.length){
+    document.getElementById('roster-list').innerHTML='<div style="padding:28px;text-align:center;color:var(--ink3)"><div style="font-weight:700;color:var(--ink);margin-bottom:6px">Start with a blank roster.</div><div>Import a qGenda Excel file to create physicians from provider names, or add them manually here.</div></div>';
+    return;
+  }
   let html='<table class="htbl"><thead><tr><th>Name</th><th>Role</th><th>FTE</th><th>Type</th><th>Schedule</th><th>Pref R</th><th>Title</th><th>Start</th><th>Actions</th></tr></thead><tbody>';
   docs.forEach(d=>{
     const prefR=(d.preferences&&d.preferences.preferredR);
@@ -4401,7 +4515,9 @@ function addPhysician(){
     startDate:document.getElementById('n-start').value||null,
     title:document.getElementById('n-title').value.trim()
   });
-  renderRoster();renderDocList();populatePhysPicker();
+  if(!S.ui.currentPhysId)S.ui.currentPhysId=id;
+  saveData();
+  renderRoster();renderDocList();populatePhysPicker();renderSchedule();
   ['n-last','n-first','n-title'].forEach(i=>document.getElementById(i).value='');
   toast(`Added ${last}`,'success');
 }
@@ -4439,20 +4555,24 @@ function switchRole(role){
 }
 function populatePhysPicker(){
   const docs=[...S.docs].filter(d=>d.active).sort((a,b)=>{const pa=a.type==='prn'?1:0,pb=b.type==='prn'?1:0;return pa!==pb?pa-pb:a.last.localeCompare(b.last)});
-  const opts=docs.map(d=>`<option value="${d.id}"${d.id===S.ui.currentPhysId?' selected':''}>${dname(d)}</option>`).join('');
+  if(docs.length&&!docs.find(d=>d.id===S.ui.currentPhysId))S.ui.currentPhysId=docs[0].id;
+  if(!docs.length)S.ui.currentPhysId=null;
+  const opts=docs.length
+    ? docs.map(d=>`<option value="${d.id}"${d.id===S.ui.currentPhysId?' selected':''}>${dname(d)}</option>`).join('')
+    : '<option value="">No physicians yet</option>';
   // Populate both page-header pickers
   const reqPick=document.getElementById('phys-pick-req');
   const schdPick=document.getElementById('phys-pick-schd');
-  if(reqPick) reqPick.innerHTML=opts;
-  if(schdPick) schdPick.innerHTML=opts;
+  if(reqPick){reqPick.innerHTML=opts;reqPick.disabled=!docs.length;}
+  if(schdPick){schdPick.innerHTML=opts;schdPick.disabled=!docs.length;}
   // Keep legacy hidden one in sync
   const legPick=document.getElementById('phys-pick');
-  if(legPick) legPick.innerHTML=opts;
+  if(legPick){legPick.innerHTML=opts;legPick.disabled=!docs.length;}
   updatePhysHeaders();
 }
 function updatePhysHeaders(){
   const doc=byId(S.ui.currentPhysId);
-  const name=doc?dname(doc):'—';
+  const name=doc?dname(doc):'No physician selected';
   ['phys-hdr-name-req','phys-hdr-name-schd'].forEach(id=>{
     const el=document.getElementById(id);
     if(el) el.textContent=name;
@@ -4469,7 +4589,9 @@ function updatePhysHeaders(){
   });
 }
 function onPhysPickReq(){
-  S.ui.currentPhysId=document.getElementById('phys-pick-req').value;
+  const val=document.getElementById('phys-pick-req').value;
+  if(!val)return;
+  S.ui.currentPhysId=val;
   // Sync the other picker
   const schdPick=document.getElementById('phys-pick-schd');
   if(schdPick) schdPick.value=S.ui.currentPhysId;
@@ -4477,7 +4599,9 @@ function onPhysPickReq(){
   renderMyRequestCal();
 }
 function onPhysPickSchd(){
-  S.ui.currentPhysId=document.getElementById('phys-pick-schd').value;
+  const val=document.getElementById('phys-pick-schd').value;
+  if(!val)return;
+  S.ui.currentPhysId=val;
   const reqPick=document.getElementById('phys-pick-req');
   if(reqPick) reqPick.value=S.ui.currentPhysId;
   updatePhysHeaders();
@@ -4485,7 +4609,9 @@ function onPhysPickSchd(){
 }
 // Legacy — keep for any code that still calls it
 function onPhysPick(){
-  S.ui.currentPhysId=document.getElementById('phys-pick').value;
+  const val=document.getElementById('phys-pick').value;
+  if(!val)return;
+  S.ui.currentPhysId=val;
   populatePhysPicker();
   if(S.ui.role==='phys'){
     if(document.getElementById('pg-myreq').classList.contains('on')) renderMyRequestCal();
@@ -4605,7 +4731,14 @@ async function appInit(){
         if(statusEl)statusEl.textContent='Verifying session for '+parsed.username+'…';
         const dbUser=await getUser(parsed.username);
         if(dbUser&&dbUser.role===parsed.role&&dbUser.doc_id===parsed.docId){
-          currentUser=parsed;
+          const verified=userSessionFromRow(dbUser);
+          if((parsed.groupId||DEFAULT_GROUP_ID)!==verified.groupId){
+            sessionStorage.removeItem('hs_user');
+            currentUser=null;
+            if(statusEl)statusEl.textContent='Session group changed — please sign in again';
+            return;
+          }
+          currentUser=verified;
           document.getElementById('login-overlay').style.display='none';
           if(statusEl)statusEl.textContent='Loading schedule data…';
           await loadData();
