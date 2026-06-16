@@ -783,15 +783,15 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
       <button class="btn btn-p btn-sm" onclick="saveCfg()">Save</button>
     </div>
     <div class="card">
-      <h3>Add Physician</h3>
+      <h3>Add Provider</h3>
       <div class="row">
         <div class="fg"><label>Last Name</label><input type="text" id="n-last" style="width:130px"></div>
         <div class="fg"><label>First Name</label><input type="text" id="n-first" style="width:120px"></div>
       </div>
       <div class="row">
         <div class="fg"><label>Role</label><select id="n-role" style="width:80px"><option>MD</option><option>APP</option><option>NP</option></select></div>
-        <div class="fg"><label>FTE</label><select id="n-fte" style="width:80px"><option>1.0</option><option>0.5</option></select></div>
-        <div class="fg"><label>Type</label><select id="n-type" style="width:120px"><option value="standard">Standard</option><option value="swing-only">Swing Only</option><option value="weekday-only">Weekday Only</option><option value="nocturnist">Nocturnist</option></select></div>
+        <div class="fg"><label>FTE</label><select id="n-fte" style="width:80px"><option>1.0</option><option>0.75</option><option>0.5</option><option>0.0</option></select></div>
+        <div class="fg"><label>Type</label><select id="n-type" style="width:150px" onchange="var f=document.getElementById('n-fte');var t=document.getElementById('n-title');if(f&&this.value==='prn')f.value='0.0';else if(f&&parseFloat(f.value)===0)f.value='1.0';if(t&&this.value==='weekday-only'&&!t.value.trim())t.value='Medical Director';"><option value="standard">Standard</option><option value="prn">PRN / Track Only</option><option value="weekday-only">Medical Director</option><option value="swing-only">Swing Only</option><option value="nocturnist">Nocturnist</option></select></div>
       </div>
       <div class="row">
         <div class="fg"><label>Start Date</label><input type="date" id="n-start" style="width:140px"></div>
@@ -800,7 +800,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
       <button class="btn btn-g btn-sm" onclick="addPhysician()">+ Add</button>
     </div>
     <div class="card" style="grid-column:1/-1">
-      <h3>Physician Roster (<span id="roster-count">0</span>)</h3>
+      <h3>Provider Roster (<span id="roster-count">0</span>)</h3>
       <div style="max-height:380px;overflow-y:auto" id="roster-list"></div>
     </div>
     <div class="card">
@@ -1590,9 +1590,9 @@ function showQgendaMapModal(records, filename, totalParsed, totalIgnored, unknow
     const defLast=nameParts?nameParts[1].trim():'';
     const defFirst=nameParts?nameParts[2].trim():'';
     const defaultRole=records.some(r=>r.rawName===rawName&&qgIsAppTask(r.task))?'APP':'MD';
-    const addOpt=(isUnmatched||onboardingEmptyRoster)?`<option value="__add__" ${onboardingEmptyRoster?'selected':''} style="color:#0a7044;font-weight:700">➕ Add as new physician</option>`:'';
+    const addOpt=(isUnmatched||onboardingEmptyRoster)?`<option value="__add__" ${onboardingEmptyRoster?'selected':''} style="color:#0a7044;font-weight:700">+ Add as new provider</option>`:'';
     const opts=addOpt+`<option value="">— skip —</option>`+
-      S.docs.filter(d=>d.active).sort((a,b)=>{const pa=a.type==='prn'?1:0,pb=b.type==='prn'?1:0;return pa!==pb?pa-pb:a.last.localeCompare(b.last)})
+      S.docs.filter(d=>d.active).sort((a,b)=>providerGridRank(a)-providerGridRank(b)||providerSort(a,b))
         .map(d=>`<option value="${d.id}" ${matched===d.id?'selected':''}>${d.last}, ${d.first}</option>`).join('');
     const cls=(matched||onboardingEmptyRoster)?'matched':'unmatched';
     const count=displayRecords.filter(r=>r.rawName===rawName).length;
@@ -1612,9 +1612,11 @@ function showQgendaMapModal(records, filename, totalParsed, totalIgnored, unknow
           <option value="NP" ${defaultRole==='NP'?'selected':''}>NP</option>
         </select>
         <span style="color:#555">Type:</span>
-        <select class="qg-new-type" data-raw="${rawName.replace(/"/g,'&quot;')}" style="padding:2px 4px;font-size:11px">
+        <select class="qg-new-type" data-raw="${rawName.replace(/"/g,'&quot;')}" style="padding:2px 4px;font-size:11px"
+          onchange="var f=this.parentElement.querySelector('.qg-new-fte');if(f&&this.value==='prn')f.value='0.0';else if(f&&parseFloat(f.value)===0)f.value='1.0';">
           <option value="standard" ${onboardingEmptyRoster?'selected':''}>Standard</option>
-          <option value="prn" ${onboardingEmptyRoster?'':'selected'}>PRN</option>
+          <option value="prn" ${onboardingEmptyRoster?'':'selected'}>PRN / Track Only</option>
+          <option value="weekday-only">Medical Director</option>
           <option value="nocturnist">Nocturnist</option>
           <option value="swing-only">Swing Only</option>
         </select>
@@ -1658,7 +1660,7 @@ function showQgendaMapModal(records, filename, totalParsed, totalIgnored, unknow
       <span style="color:#a85800">${unmatchedNames.length} unmatched</span>
       <span style="font-weight:400;color:var(--ink3)"> — verify and correct before importing</span>
     </div>
-    ${onboardingEmptyRoster?'<div style="background:#eef5fb;border:1px solid #b8d4f0;color:#1b4d8f;border-radius:4px;padding:8px 10px;font-size:12px;margin-bottom:10px">Blank roster detected. qGenda provider names are preselected to be added as new standard 1.0 FTE physicians. Adjust type or FTE before importing if needed.</div>':''}
+    ${onboardingEmptyRoster?'<div style="background:#eef5fb;border:1px solid #b8d4f0;color:#1b4d8f;border-radius:4px;padding:8px 10px;font-size:12px;margin-bottom:10px">Blank roster detected. qGenda provider names are preselected as standard 1.0 FTE providers. Mark PRN physicians/APPs as PRN / Track Only and mark the site medical director before importing.</div>':''}
     ${unknownShifts.length?`<div style="background:#fff5dc;border:1px solid #f0d080;color:#8a5400;border-radius:4px;padding:8px 10px;font-size:12px;margin-bottom:10px">Ignored task labels: ${qgEsc(unknownShifts.slice(0,8).join(', '))}${unknownShifts.length>8?'...':''}</div>`:''}
     <div style="max-height:220px;overflow-y:auto;border:1px solid var(--line);border-radius:4px;padding:6px 10px" id="qg-match-container">
       ${matchRows}
@@ -1780,12 +1782,14 @@ async function runQgendaImport(records){
       const roleEl=document.querySelector('#np_'+safeId+' .qg-new-role');
       const typeEl=document.querySelector('#np_'+safeId+' .qg-new-type');
       const fteEl=document.querySelector('#np_'+safeId+' .qg-new-fte');
+      const type=typeEl?typeEl.value:'prn';
       newProviders[raw]={
         last:sel.getAttribute('data-deflast')||'',
         first:sel.getAttribute('data-deffirst')||'',
         role:roleEl?roleEl.value:'MD',
-        type:typeEl?typeEl.value:'prn',
-        fte:fteEl?parseFloat(fteEl.value)||1.0:1.0
+        type,
+        fte:type==='prn'?0:(fteEl?parseFloat(fteEl.value)||1.0:1.0),
+        title:type==='weekday-only'?'Medical Director':''
       };
     } else if(val){
       corrections[raw]=val;
@@ -1797,7 +1801,7 @@ async function runQgendaImport(records){
     const baseId=(np.last+np.first).toLowerCase().replace(/[^a-z]/g,'')||'provider';
     let uid=baseId; let n=2;
     while(S.docs.find(d=>d.id===uid)) uid=baseId+n++;
-    S.docs.push({id:uid,last:np.last,first:np.first,role:(np.role||'MD'),fte:np.fte,type:(np.type||'prn'),active:true,startDate:null,title:''});
+    S.docs.push({id:uid,last:np.last,first:np.first,role:(np.role||'MD'),fte:np.fte,type:(np.type||'prn'),active:true,startDate:null,title:np.title||''});
     if(!S.ui.currentPhysId)S.ui.currentPhysId=uid;
     corrections[rawName]=uid;
   }
@@ -1836,7 +1840,7 @@ async function runQgendaImport(records){
 
   if(bar) bar.style.width='100%';
   const newCount=Object.keys(newProviders).length;
-  if(status) status.textContent=`Done: ${imported} shifts imported${newCount?' · '+newCount+' new physicians added':''} · ${unmatched} unmatched skipped`;
+  if(status) status.textContent=`Done: ${imported} shifts imported${newCount?' · '+newCount+' new providers added':''} · ${unmatched} unmatched skipped`;
 
   await saveData();
   renderSchedule(); renderRoster(); renderDocList(); populatePhysPicker();
@@ -2054,6 +2058,17 @@ function monN(m){return ['January','February','March','April','May','June','July
 function monAbbr(m){return ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][m]}
 function dname(d){return d.last+(d.first?', '+d.first:'')}
 function byId(id){return S.docs.find(d=>d.id===id)}
+function providerSort(a,b){return a.last.localeCompare(b.last)||a.first.localeCompare(b.first)}
+function isMedicalDirectorDoc(d){return !!d&&(d.type==='weekday-only'||/medical director/i.test(d.title||''))}
+function providerGridRank(d){return isMedicalDirectorDoc(d)?0:d.type==='prn'?2:1}
+function providerTypeLabel(d){
+  if(isMedicalDirectorDoc(d))return 'Medical Director';
+  if(d.type==='prn')return 'PRN / Track Only';
+  if(d.type==='swing-only')return 'Swing Only';
+  if(d.type==='nocturnist')return 'Nocturnist';
+  return 'Standard';
+}
+function providerExtraTitle(d){return d&&d.title&&d.title.toLowerCase()!=='medical director'?d.title:''}
 function isWeekend(date){return date.getDay()===0||date.getDay()===6}
 function quarterRange(year,q){
   // q is 1-indexed, returns {start, end, months:[m0,m1,m2]}
@@ -2255,7 +2270,7 @@ function generateQuarter(){
     const year=parseInt(document.getElementById('yr-sel').value);
     const q=parseInt(document.getElementById('q-sel').value);
     if(!activeDocs(year,(q-1)*3).length){
-      toast('Add physicians or import qGenda before generating a schedule.','error');
+      toast('Add providers or import qGenda before generating a schedule.','error');
       return;
     }
     let best=null;
@@ -2293,17 +2308,17 @@ function _generateQuarter(candidateSeed=0,finalize=true){
 
   const allActive=activeDocs(year,range.months[0]);
   const swingOnly=allActive.filter(d=>d.type==='swing-only');
-  const weekdayOnly=allActive.filter(d=>d.type==='weekday-only');
+  const weekdayOnly=allActive.filter(isMedicalDirectorDoc);
   const nocturnists=allActive.filter(d=>d.type==='nocturnist');
 
   // Strict providers are pre-assigned before variable scheduling
-  const strictMixed=allActive.filter(d=>d.type==='standard'&&d.preferences&&d.preferences.scheduleStyle==='strict');
-  const strictSwing=allActive.filter(d=>d.type==='standard'&&d.preferences&&d.preferences.scheduleStyle==='strict-swing-block');
+  const strictMixed=allActive.filter(d=>d.type==='standard'&&!isMedicalDirectorDoc(d)&&d.preferences&&d.preferences.scheduleStyle==='strict');
+  const strictSwing=allActive.filter(d=>d.type==='standard'&&!isMedicalDirectorDoc(d)&&d.preferences&&d.preferences.scheduleStyle==='strict-swing-block');
   const strictAll=[...strictMixed,...strictSwing];
 
   // Variable providers: standard type only — PRN are NOT scheduled in generation
-  const rotation=allActive.filter(d=>d.type==='standard'&&d.fte===1.0&&!isStrictStyle(d));
-  const partTime=allActive.filter(d=>d.type==='standard'&&d.fte<1.0&&!isStrictStyle(d));
+  const rotation=allActive.filter(d=>d.type==='standard'&&!isMedicalDirectorDoc(d)&&d.fte===1.0&&!isStrictStyle(d));
+  const partTime=allActive.filter(d=>d.type==='standard'&&!isMedicalDirectorDoc(d)&&d.fte<1.0&&!isStrictStyle(d));
   // PRN providers are never scheduled by the algorithm (0 FTE / on-call only)
 
   rotation.sort((a,b)=>a.last.localeCompare(b.last)||a.first.localeCompare(b.first));
@@ -3248,20 +3263,20 @@ function renderSchedule(){
   const filterText=(document.getElementById('filter-name')?.value||'').toLowerCase().trim();
   const allDocs=activeDocs(year);
   if(!allDocs.length){
-    document.getElementById('sheet-outer').innerHTML='<div class="sheet-wrap" id="sheet-wrap"><div style="padding:40px;text-align:center;color:var(--ink3)"><div style="font-weight:700;color:var(--ink);margin-bottom:6px">No physicians in this roster yet.</div><div>Use <strong>Settings → Import qGenda Excel</strong> to populate this group, or add physicians manually below.</div></div></div>';
+    document.getElementById('sheet-outer').innerHTML='<div class="sheet-wrap" id="sheet-wrap"><div style="padding:40px;text-align:center;color:var(--ink3)"><div style="font-weight:700;color:var(--ink);margin-bottom:6px">No providers in this roster yet.</div><div>Use <strong>Settings → Import qGenda Excel</strong> to populate this group, or add providers manually below.</div></div></div>';
     return;
   }
-  const consultDocs=allDocs.filter(d=>d.type==='weekday-only');
-  const nocturnistDocs=allDocs.filter(d=>d.type==='nocturnist').sort((a,b)=>a.last.localeCompare(b.last));
-  const prnDocs=allDocs.filter(d=>d.type==='prn').sort((a,b)=>a.last.localeCompare(b.last));
-  const rotationDocs=allDocs.filter(d=>d.type!=='weekday-only'&&d.type!=='nocturnist'&&d.type!=='prn')
-    .sort((a,b)=>a.last.localeCompare(b.last));
+  const consultDocs=allDocs.filter(isMedicalDirectorDoc).sort(providerSort);
+  const nocturnistDocs=allDocs.filter(d=>d.type==='nocturnist').sort(providerSort);
+  const prnDocs=allDocs.filter(d=>d.type==='prn').sort(providerSort);
+  const rotationDocs=allDocs.filter(d=>!isMedicalDirectorDoc(d)&&d.type!=='nocturnist'&&d.type!=='prn')
+    .sort(providerSort);
   const fConsult=filterText?consultDocs.filter(d=>dname(d).toLowerCase().includes(filterText)):consultDocs;
   const fRotation=filterText?rotationDocs.filter(d=>dname(d).toLowerCase().includes(filterText)):rotationDocs;
   const fNocturnist=filterText?nocturnistDocs.filter(d=>dname(d).toLowerCase().includes(filterText)):nocturnistDocs;
   const fPrn=filterText?prnDocs.filter(d=>dname(d).toLowerCase().includes(filterText)):prnDocs;
   if(!fConsult.length&&!fRotation.length&&!fNocturnist.length&&!fPrn.length){
-    document.getElementById('sheet-outer').innerHTML='<div class="sheet-wrap" id="sheet-wrap"><div style="padding:40px;text-align:center;color:var(--ink3)">No physicians match filter.</div></div>';
+    document.getElementById('sheet-outer').innerHTML='<div class="sheet-wrap" id="sheet-wrap"><div style="padding:40px;text-align:center;color:var(--ink3)">No providers match filter.</div></div>';
     return;
   }
 
@@ -3324,7 +3339,7 @@ function renderSchedule(){
     // Single sticky name cell — Q∑ total embedded in bottom-right of the cell
     row+=`<td class="name-col${isHighlighted?' name-col-hl':''}" onclick="toggleRowHighlight('${doc.id}')" ondblclick="navToDoc('${doc.id}')" title="Q${q} total: ${qTotalR}R+${qTotalS}S${qTotalN?'+'+qTotalN+'N':''}=${qTotal} (target ~${target})&#10;${mTip}&#10;Double-click to open detail">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:4px">
-        <span>${isConsult?'<span class="consult-badge">CONSULT</span>':''}${dname(doc)}</span>
+        <span>${isConsult?'<span class="consult-badge">MED DIR</span>':''}${dname(doc)}</span>
         <span class="qtot-inline" style="color:${qColor}">${qTotal}<span style="font-size:8px;color:#999;display:block;line-height:1;text-align:right">${qTotalR}R ${qTotalS}S${qTotalN?' '+qTotalN+'N':''}</span></span>
       </div>
     </td>`;
@@ -3352,7 +3367,7 @@ function renderSchedule(){
 
   const allCols=nCols+1; // name + days
   if(fConsult.length){
-    html+=`<tr><td class="section-hdr consult-hdr" colspan="${allCols}">▶ Consult Team</td></tr>`;
+    html+=`<tr><td class="section-hdr consult-hdr" colspan="${allCols}">▶ Medical Director / Leadership</td></tr>`;
     fConsult.forEach(d=>html+=buildRow(d,true));
   }
   if(fRotation.length){
@@ -3508,7 +3523,7 @@ function renderMyRequestCal(){
   S.ui.requestQuarter=qKey;
   const currentDoc=byId(S.ui.currentPhysId);
   if(!currentDoc){
-    document.getElementById('my-req-cal').innerHTML='<div style="padding:40px;text-align:center;color:var(--ink3)">No physician selected. Import a qGenda roster or add physicians manually first.</div>';
+    document.getElementById('my-req-cal').innerHTML='<div style="padding:40px;text-align:center;color:var(--ink3)">No provider selected. Import a qGenda roster or add providers manually first.</div>';
     const statusEl=document.getElementById('active-phys-status');
     if(statusEl) statusEl.textContent='';
     document.querySelectorAll('#pg-myreq .btn-p, #pg-myreq input[type="radio"]').forEach(el=>el.disabled=true);
@@ -4080,9 +4095,9 @@ function renderMySchedule(){
           <span class="tag tag-r">${doc.role}</span>
           ${doc.fte<1?`<span class="tag tag-f">${doc.fte} FTE</span>`:''}
           ${doc.type==='swing-only'?'<span class="tag tag-s">Swing Only</span>':''}
-          ${doc.type==='weekday-only'?'<span class="tag tag-w">Mon–Fri</span>':''}
+          ${isMedicalDirectorDoc(doc)?'<span class="tag tag-w">Medical Director</span>':''}
           ${doc.type==='nocturnist'?'<span class="tag tag-n">Nocturnist</span>':''}
-          ${doc.title?`<span class="tag tag-d">${doc.title}</span>`:''}
+          ${providerExtraTitle(doc)?`<span class="tag tag-d">${providerExtraTitle(doc)}</span>`:''}
         </div>
         <div style="margin-top:10px;font-size:11px;color:var(--ink3)">
           <strong>Swing per quarter:</strong>
@@ -4155,7 +4170,7 @@ function renderMySchedule(){
 function renderDocList(){
   const q=(document.getElementById('doc-search')?.value||'').toLowerCase();
   const year=S.ui.year;
-  const allDocs=activeDocs(year).filter(d=>!q||dname(d).toLowerCase().includes(q)).sort((a,b)=>a.last.localeCompare(b.last));
+  const allDocs=activeDocs(year).filter(d=>!q||dname(d).toLowerCase().includes(q)).sort((a,b)=>providerGridRank(a)-providerGridRank(b)||providerSort(a,b));
 
   // Split nocturnists from rotation
   const rotDocs=allDocs.filter(d=>d.type!=='nocturnist');
@@ -4194,7 +4209,7 @@ function renderDocList(){
     }
     return `<div class="dc${doc.type==='nocturnist'?' dc-noct':''}" onclick="showDocDetail('${doc.id}')">
       <div class="dcn">${dname(doc)}</div>
-      <div class="dcm">${doc.role}${doc.fte<1?` · ${doc.fte} FTE`:''}${doc.type==='swing-only'?' · Swing Only':''}${doc.type==='weekday-only'?' · Mon–Fri':''}${doc.type==='nocturnist'?' · Nocturnist':''}${doc.title?' · '+doc.title:''}</div>
+      <div class="dcm">${doc.role}${doc.fte<1?` · ${doc.fte} FTE`:''}${doc.type==='swing-only'?' · Swing Only':''}${isMedicalDirectorDoc(doc)?' · Medical Director':''}${doc.type==='nocturnist'?' · Nocturnist':''}${providerExtraTitle(doc)?' · '+providerExtraTitle(doc):''}</div>
       <div class="dcs">${doc.type==='nocturnist'?'Self-scheduled (not in rotation)':totalScheduled+' / '+target+' shifts scheduled'}</div>
       ${doc.type!=='nocturnist'?`<div class="pb" style="margin-top:5px"><div class="pbf ${pct>100?'pf-over':pct>=90?'pf-ok':'pf-warn'}" style="width:${pct}%"></div></div>`:''}
       ${paceLabel?`<div class="dc-pace ${paceClass}">${paceLabel}</div>`:''}
@@ -4211,7 +4226,7 @@ function renderDocList(){
     </div>`;
     html+=noctDocs.map(buildDocCard).join('');
   }
-  document.getElementById('doc-grid').innerHTML=html||'<div class="tx-mu tx-sm" style="grid-column:1/-1;padding:28px;text-align:center">No physicians yet. Import a qGenda Excel file from Settings or add physicians manually.</div>';
+  document.getElementById('doc-grid').innerHTML=html||'<div class="tx-mu tx-sm" style="grid-column:1/-1;padding:28px;text-align:center">No providers yet. Import a qGenda Excel file from Settings or add providers manually.</div>';
 }
 
 function showDocDetail(docId){
@@ -4314,9 +4329,9 @@ function showDocDetail(docId){
           <span class="tag tag-r">${doc.role}</span>
           ${doc.fte<1?`<span class="tag tag-f">${doc.fte} FTE</span>`:''}
           ${doc.type==='swing-only'?'<span class="tag tag-s">Swing Only</span>':''}
-          ${doc.type==='weekday-only'?'<span class="tag tag-w">Mon–Fri</span>':''}
+          ${isMedicalDirectorDoc(doc)?'<span class="tag tag-w">Medical Director</span>':''}
           ${doc.type==='nocturnist'?'<span class="tag tag-n">Nocturnist</span>':''}
-          ${doc.title?`<span class="tag tag-d">${doc.title}</span>`:''}
+          ${providerExtraTitle(doc)?`<span class="tag tag-d">${providerExtraTitle(doc)}</span>`:''}
           ${doc.startDate?`<span class="tag" style="background:#eee;color:var(--ink3);border-color:var(--line)">Start ${doc.startDate}</span>`:''}
         </div>
         <div style="margin-top:10px;font-size:11px;color:var(--ink3)">
@@ -4542,10 +4557,10 @@ function renderHolidayTable(){
 //  SETTINGS / ROSTER
 // ════════════════════════════════════════════════════════
 function renderRoster(){
-  const docs=[...S.docs].sort((a,b)=>{const pa=a.type==='prn'?1:0,pb=b.type==='prn'?1:0;return pa!==pb?pa-pb:a.last.localeCompare(b.last)});
+  const docs=[...S.docs].sort((a,b)=>providerGridRank(a)-providerGridRank(b)||providerSort(a,b));
   document.getElementById('roster-count').textContent=docs.filter(d=>d.active).length;
   if(!docs.length){
-    document.getElementById('roster-list').innerHTML='<div style="padding:28px;text-align:center;color:var(--ink3)"><div style="font-weight:700;color:var(--ink);margin-bottom:6px">Start with a blank roster.</div><div>Import a qGenda Excel file to create physicians from provider names, or add them manually here.</div></div>';
+    document.getElementById('roster-list').innerHTML='<div style="padding:28px;text-align:center;color:var(--ink3)"><div style="font-weight:700;color:var(--ink);margin-bottom:6px">Start with a blank roster.</div><div>Import a qGenda Excel file to create providers from provider names, or add them manually here.</div></div>';
     return;
   }
   let html='<table class="htbl"><thead><tr><th>Name</th><th>Role</th><th>FTE</th><th>Type</th><th>Schedule</th><th>Pref R</th><th>Title</th><th>Start</th><th>Actions</th></tr></thead><tbody>';
@@ -4561,7 +4576,7 @@ function renderRoster(){
         ?'<span style="background:#e8f5e9;color:#0a7044;font-size:10px;font-weight:700;padding:1px 6px;border-radius:2px;border:1px solid #a8d8b8">7on/7off swing</span>'
         :'<span class="tx-mu" style="font-size:11px">Variable</span>';
     html+=`<tr style="opacity:${d.active?1:.5}">
-      <td>${dname(d)}</td><td>${d.role}</td><td>${d.fte}</td><td>${d.type}</td>
+      <td>${dname(d)}</td><td>${d.role}</td><td>${d.fte}</td><td>${providerTypeLabel(d)}</td>
       <td>${styleBadge}</td>
       <td>${prefDisplay}</td>
       <td class="tx-mu">${d.title||''}</td>
@@ -4598,16 +4613,17 @@ function openEditDoc(id){
       <div class="fg"><label>FTE</label>
         <select id="ed-fte" style="width:80px">
           <option value="1.0" ${doc.fte===1.0?'selected':''}>1.0</option>
-          <option value="0.5" ${doc.fte===0.5?'selected':''}>0.5</option>
           <option value="0.75" ${doc.fte===0.75?'selected':''}>0.75</option>
+          <option value="0.5" ${doc.fte===0.5?'selected':''}>0.5</option>
+          <option value="0.0" ${doc.fte===0?'selected':''}>0.0</option>
         </select>
       </div>
       <div class="fg"><label>Type</label>
-        <select id="ed-type" style="width:140px">
+        <select id="ed-type" style="width:150px" onchange="var f=document.getElementById('ed-fte');var t=document.getElementById('ed-title');if(f&&this.value==='prn')f.value='0.0';else if(f&&parseFloat(f.value)===0)f.value='1.0';if(t&&this.value==='weekday-only'&&!t.value.trim())t.value='Medical Director';">
           <option value="standard" ${doc.type==='standard'?'selected':''}>Standard</option>
-          <option value="prn" ${doc.type==='prn'?'selected':''}>PRN</option>
+          <option value="prn" ${doc.type==='prn'?'selected':''}>PRN / Track Only</option>
+          <option value="weekday-only" ${doc.type==='weekday-only'?'selected':''}>Medical Director</option>
           <option value="swing-only" ${doc.type==='swing-only'?'selected':''}>Swing Only</option>
-          <option value="weekday-only" ${doc.type==='weekday-only'?'selected':''}>Weekday Only (Mon–Fri)</option>
           <option value="nocturnist" ${doc.type==='nocturnist'?'selected':''}>Nocturnist</option>
         </select>
       </div>
@@ -4681,10 +4697,11 @@ function saveEditDoc(id){
   doc.last=document.getElementById('ed-last').value.trim()||doc.last;
   doc.first=document.getElementById('ed-first').value.trim();
   doc.role=document.getElementById('ed-role').value;
-  doc.fte=parseFloat(document.getElementById('ed-fte').value);
   doc.type=document.getElementById('ed-type').value;
+  doc.fte=doc.type==='prn'?0:parseFloat(document.getElementById('ed-fte').value);
   doc.startDate=document.getElementById('ed-start').value||null;
   doc.title=document.getElementById('ed-title').value.trim();
+  if(doc.type==='weekday-only'&&!doc.title) doc.title='Medical Director';
   // Preferences
   const prefR=parseInt(document.getElementById('ed-prefR').value)||5;
   const maxW=parseInt(document.getElementById('ed-maxW').value)||7;
@@ -4707,14 +4724,16 @@ function addPhysician(){
   const first=document.getElementById('n-first').value.trim();
   if(!last){toast('Last name required','error');return}
   const id=(last+first).toLowerCase().replace(/\s+/g,'')+'_'+Date.now();
+  const type=document.getElementById('n-type').value;
+  const title=document.getElementById('n-title').value.trim()||(type==='weekday-only'?'Medical Director':'');
   S.docs.push({
     id,last,first,
     role:document.getElementById('n-role').value,
-    fte:parseFloat(document.getElementById('n-fte').value),
-    type:document.getElementById('n-type').value,
+    fte:type==='prn'?0:parseFloat(document.getElementById('n-fte').value),
+    type,
     active:true,
     startDate:document.getElementById('n-start').value||null,
-    title:document.getElementById('n-title').value.trim()
+    title
   });
   if(!S.ui.currentPhysId)S.ui.currentPhysId=id;
   saveData();
@@ -4760,7 +4779,7 @@ function populatePhysPicker(){
   if(!docs.length)S.ui.currentPhysId=null;
   const opts=docs.length
     ? docs.map(d=>`<option value="${d.id}"${d.id===S.ui.currentPhysId?' selected':''}>${dname(d)}</option>`).join('')
-    : '<option value="">No physicians yet</option>';
+    : '<option value="">No providers yet</option>';
   // Populate both page-header pickers
   const reqPick=document.getElementById('phys-pick-req');
   const schdPick=document.getElementById('phys-pick-schd');
