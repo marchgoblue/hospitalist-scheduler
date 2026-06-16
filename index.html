@@ -789,7 +789,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
         <div class="fg"><label>First Name</label><input type="text" id="n-first" style="width:120px"></div>
       </div>
       <div class="row">
-        <div class="fg"><label>Role</label><select id="n-role" style="width:80px"><option>MD</option><option>NP</option></select></div>
+        <div class="fg"><label>Role</label><select id="n-role" style="width:80px"><option>MD</option><option>APP</option><option>NP</option></select></div>
         <div class="fg"><label>FTE</label><select id="n-fte" style="width:80px"><option>1.0</option><option>0.5</option></select></div>
         <div class="fg"><label>Type</label><select id="n-type" style="width:120px"><option value="standard">Standard</option><option value="swing-only">Swing Only</option><option value="weekday-only">Weekday Only</option><option value="nocturnist">Nocturnist</option></select></div>
       </div>
@@ -1247,7 +1247,7 @@ async function adminResetPassword(docId){
 //  QGENDA EXCEL IMPORT
 // ════════════════════════════════════════════════════════
 
-const QGENDA_IGNORE = ['backup','app','cross cover','cross-cover'];
+const QGENDA_IGNORE = ['backup','cross cover','cross-cover'];
 
 function qgEsc(s){
   return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -1275,6 +1275,9 @@ function qgShouldSkipProviderName(raw){
   if(qgLooksLikeTaskLabel(s)) return true;
   return false;
 }
+function qgIsAppTask(raw){
+  return /\bapp\b/i.test(String(raw||''));
+}
 
 // Suggest a shift code for a qGenda task. Admin can override in the import modal.
 function qgGuessShift(raw){
@@ -1286,8 +1289,10 @@ function qgGuessShift(raw){
   if(qgLooksLikePersonName(s)||qgLooksLikeTimeOrDate(s)) return 'IGNORE';
 
   if(/\bnocturn/.test(s)) return 'N';
+  if(/\bnight\b/.test(s) && /\bapp\b/.test(s)) return 'N';
   if(/\bnight\b/.test(s) && /\b(md|physician|doc|doctor)\b/.test(s)) return 'N';
   if(/\bswing\b/.test(s)) return 'S';
+  if(/\b(remote|evening)\b/.test(s) && /\bapp\b/.test(s)) return 'S';
   if(/\b(afternoon|evening)\b/.test(s) && /\badmit/.test(s)) return 'S';
   if(/\bam\b/.test(s) && /\badmit/.test(s)) return 'R';
   if(/\bround(er|ing)?\b/.test(s)) return 'R';
@@ -1548,6 +1553,7 @@ function applyQgendaTaskMap(filename,totalParsed,totalIgnored){
     records.push({
       date:new Date(r.date),
       shift,
+      task:r.task,
       rawName:r.rawName,
       docId:doc?doc.id:null
     });
@@ -1583,6 +1589,7 @@ function showQgendaMapModal(records, filename, totalParsed, totalIgnored, unknow
     const nameParts=rawName.match(/^([^,]+),\s*(.+)$/);
     const defLast=nameParts?nameParts[1].trim():'';
     const defFirst=nameParts?nameParts[2].trim():'';
+    const defaultRole=records.some(r=>r.rawName===rawName&&qgIsAppTask(r.task))?'APP':'MD';
     const addOpt=(isUnmatched||onboardingEmptyRoster)?`<option value="__add__" ${onboardingEmptyRoster?'selected':''} style="color:#0a7044;font-weight:700">➕ Add as new physician</option>`:'';
     const opts=addOpt+`<option value="">— skip —</option>`+
       S.docs.filter(d=>d.active).sort((a,b)=>{const pa=a.type==='prn'?1:0,pb=b.type==='prn'?1:0;return pa!==pb?pa-pb:a.last.localeCompare(b.last)})
@@ -1598,6 +1605,12 @@ function showQgendaMapModal(records, filename, totalParsed, totalIgnored, unknow
         onchange="this.className='qg-match-sel '+(this.value?'matched':'unmatched');var nr=document.getElementById('np_${safeId}');if(nr)nr.style.display=this.value==='__add__'?'flex':'none';"
       >${opts}</select>
       <div id="np_${safeId}" style="display:${onboardingEmptyRoster?'flex':'none'};align-items:center;gap:6px;width:100%;padding:4px 8px;background:#f0faf4;border-radius:4px;font-size:11px">
+        <span style="color:#555">Role:</span>
+        <select class="qg-new-role" data-raw="${rawName.replace(/"/g,'&quot;')}" style="padding:2px 4px;font-size:11px">
+          <option value="MD" ${defaultRole==='MD'?'selected':''}>MD</option>
+          <option value="APP" ${defaultRole==='APP'?'selected':''}>APP</option>
+          <option value="NP" ${defaultRole==='NP'?'selected':''}>NP</option>
+        </select>
         <span style="color:#555">Type:</span>
         <select class="qg-new-type" data-raw="${rawName.replace(/"/g,'&quot;')}" style="padding:2px 4px;font-size:11px">
           <option value="standard" ${onboardingEmptyRoster?'selected':''}>Standard</option>
@@ -1696,6 +1709,7 @@ function previewQgendaImport(){
         id:previewDocId,
         last:sel?.getAttribute('data-deflast')||rec.rawName,
         first:sel?.getAttribute('data-deffirst')||'',
+        role:document.querySelector('#np_'+rec.rawName.replace(/[^a-zA-Z0-9]/g,'_')+' .qg-new-role')?.value||'MD',
         fte:parseFloat(document.querySelector('#np_'+rec.rawName.replace(/[^a-zA-Z0-9]/g,'_')+' .qg-new-fte')?.value)||1.0
       };
     }
@@ -1707,7 +1721,7 @@ function previewQgendaImport(){
     const qKey2=`${rec.date.getFullYear()}-${Math.floor(rec.date.getMonth()/3)+1}`;
     const baseSh=S.baseSchedule&&S.baseSchedule[qKey2]&&S.baseSchedule[qKey2][docId]&&S.baseSchedule[qKey2][docId][ds];
     const isBonus=(!baseSh || baseSh==='OFF') && (rec.shift==='R'||rec.shift==='S'||rec.shift==='N');
-    preview.push({date:ds, name:`${doc.last}, ${doc.first}`, shift:rec.shift, existing, changed, docId:previewDocId, isBonus});
+    preview.push({date:ds, name:`${doc.last}, ${doc.first}${doc.role&&doc.role!=='MD'?' · '+doc.role:''}`, shift:rec.shift, existing, changed, docId:previewDocId, isBonus});
   });
 
   // Build preview table sorted by date then name
@@ -1763,11 +1777,13 @@ async function runQgendaImport(records){
     const val=sel.value;
     if(val==='__add__'){
       const safeId=raw.replace(/[^a-zA-Z0-9]/g,'_');
+      const roleEl=document.querySelector('#np_'+safeId+' .qg-new-role');
       const typeEl=document.querySelector('#np_'+safeId+' .qg-new-type');
       const fteEl=document.querySelector('#np_'+safeId+' .qg-new-fte');
       newProviders[raw]={
         last:sel.getAttribute('data-deflast')||'',
         first:sel.getAttribute('data-deffirst')||'',
+        role:roleEl?roleEl.value:'MD',
         type:typeEl?typeEl.value:'prn',
         fte:fteEl?parseFloat(fteEl.value)||1.0:1.0
       };
@@ -1781,7 +1797,7 @@ async function runQgendaImport(records){
     const baseId=(np.last+np.first).toLowerCase().replace(/[^a-z]/g,'')||'provider';
     let uid=baseId; let n=2;
     while(S.docs.find(d=>d.id===uid)) uid=baseId+n++;
-    S.docs.push({id:uid,last:np.last,first:np.first,role:'MD',fte:np.fte,type:(np.type||'prn'),active:true,startDate:null,title:''});
+    S.docs.push({id:uid,last:np.last,first:np.first,role:(np.role||'MD'),fte:np.fte,type:(np.type||'prn'),active:true,startDate:null,title:''});
     if(!S.ui.currentPhysId)S.ui.currentPhysId=uid;
     corrections[rawName]=uid;
   }
@@ -4575,6 +4591,7 @@ function openEditDoc(id){
       <div class="fg"><label>Role</label>
         <select id="ed-role" style="width:80px">
           <option ${doc.role==='MD'?'selected':''}>MD</option>
+          <option ${doc.role==='APP'?'selected':''}>APP</option>
           <option ${doc.role==='NP'?'selected':''}>NP</option>
         </select>
       </div>
