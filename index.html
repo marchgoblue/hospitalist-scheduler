@@ -1245,13 +1245,6 @@ async function adminResetPassword(docId){
 //  QGENDA EXCEL IMPORT
 // ════════════════════════════════════════════════════════
 
-// qGenda shift type → internal shift code
-const QGENDA_SHIFT_MAP = {
-  'md par dir':   'R',   // Director rounding
-  'par rounder':  'R',   // Standard rounding
-  'par swing':    'S',   // Swing shift
-  'par night md': 'N',   // Nocturnist shift
-};
 const QGENDA_IGNORE = ['backup','app','cross cover','cross-cover'];
 
 // Normalise a qGenda shift name to a key
@@ -1259,9 +1252,14 @@ function qgNormShift(raw){
   if(!raw) return null;
   const s=String(raw).trim().toLowerCase();
   if(QGENDA_IGNORE.some(x=>s.includes(x))) return 'IGNORE';
-  for(const [k,v] of Object.entries(QGENDA_SHIFT_MAP)){
-    if(s.includes(k)) return v;
-  }
+
+  // qGenda task names often include site prefixes such as PAR or PAH.
+  // Match the clinical role, not the site code, so each hospital can import.
+  if(/\bnight\b/.test(s) && /\b(md|physician|doc|doctor)\b/.test(s)) return 'N';
+  if(/\bswing\b/.test(s)) return 'S';
+  if(/\bround(er|ing)?\b/.test(s)) return 'R';
+  if(/\bdir(ector)?\b/.test(s) && /\b(md|physician|doc|doctor)\b/.test(s)) return 'R';
+  if(/\badmit(ter)?\b/.test(s)) return 'S';
   return null; // unknown
 }
 
@@ -1370,6 +1368,7 @@ function parseQgendaWorkbook(wb, filename){
   // First pass: extract all (date, shiftType, providerName) records
   const records=[]; // {date:Date, shift:'R'|'S'|'N', rawName:string, docId:string|null}
   let totalParsed=0, totalIgnored=0;
+  const unknownShifts=new Set();
   const today=new Date(); today.setHours(0,0,0,0);
 
   let i=0;
@@ -1414,7 +1413,7 @@ function parseQgendaWorkbook(wb, filename){
           if(nameRaw.startsWith('aa Schedule')) continue;
 
           const shiftCode=qgNormShift(shiftRaw);
-          if(!shiftCode){ totalIgnored++; continue; }
+          if(!shiftCode){ totalIgnored++; unknownShifts.add(shiftRaw); continue; }
           if(shiftCode==='IGNORE'){ totalIgnored++; continue; }
 
           const doc=qgMatchName(nameRaw);
@@ -1435,13 +1434,14 @@ function parseQgendaWorkbook(wb, filename){
 
   // Show preview + confirmation modal
   if(!records.length){
-    toast('No recognized qGenda provider shifts found in that Excel file.','error',5000);
+    const examples=[...unknownShifts].slice(0,5).join(', ');
+    toast('No recognized qGenda provider shifts found.'+(examples?' Saw: '+examples:''),'error',8000);
     return;
   }
-  showQgendaMapModal(records, filename, totalParsed, totalIgnored);
+  showQgendaMapModal(records, filename, totalParsed, totalIgnored, [...unknownShifts]);
 }
 
-function showQgendaMapModal(records, filename, totalParsed, totalIgnored){
+function showQgendaMapModal(records, filename, totalParsed, totalIgnored, unknownShifts=[]){
   // Store records globally so the modal button can access them
   window._qgRecords=records;
 
@@ -1528,6 +1528,7 @@ function showQgendaMapModal(records, filename, totalParsed, totalIgnored){
       <span style="font-weight:400;color:var(--ink3)"> — verify and correct before importing</span>
     </div>
     ${onboardingEmptyRoster?'<div style="background:#eef5fb;border:1px solid #b8d4f0;color:#1b4d8f;border-radius:4px;padding:8px 10px;font-size:12px;margin-bottom:10px">Blank roster detected. qGenda provider names are preselected to be added as new standard 1.0 FTE physicians. Adjust type or FTE before importing if needed.</div>':''}
+    ${unknownShifts.length?`<div style="background:#fff5dc;border:1px solid #f0d080;color:#8a5400;border-radius:4px;padding:8px 10px;font-size:12px;margin-bottom:10px">Ignored unrecognized task labels: ${unknownShifts.slice(0,8).join(', ')}${unknownShifts.length>8?'…':''}</div>`:''}
     <div style="max-height:220px;overflow-y:auto;border:1px solid var(--line);border-radius:4px;padding:6px 10px" id="qg-match-container">
       ${matchRows}
     </div>
