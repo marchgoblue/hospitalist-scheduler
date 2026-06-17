@@ -779,8 +779,8 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
   <div class="g2">
     <div class="card">
       <h3>Schedule Parameters</h3>
+      <div style="font-weight:700;font-size:12px;color:var(--ink2);margin-bottom:6px">Daily Staffing Counts</div>
       <div class="row">
-        <div class="fg"><label>Annual Shifts (FT)</label><input type="number" id="c-annual" value="182" style="width:90px"></div>
         <div class="fg"><label>Rounders/Day</label><input type="number" id="c-r" value="13" min="0" style="width:80px" onchange="renderShiftParamFields()"></div>
         <div class="fg"><label>Swing/Day</label><input type="number" id="c-s" value="3" min="0" style="width:80px" onchange="renderShiftParamFields()"></div>
       </div>
@@ -790,7 +790,9 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
         <div class="fg"><label>APP Admitters/Day</label><input type="number" id="c-app-s" value="0" min="0" style="width:100px" onchange="renderShiftParamFields()"></div>
       </div>
       <div id="shift-param-fields"></div>
+      <div style="font-weight:700;font-size:12px;color:var(--ink2);margin:14px 0 6px;padding-top:10px;border-top:1px solid var(--line)">Annual Target & Request Limits</div>
       <div class="row">
+        <div class="fg"><label>Annual Shifts (1.0 FTE)</label><input type="number" id="c-annual" value="182" style="width:110px"></div>
         <div class="fg"><label>Max Requests/Quarter</label><input type="number" id="c-max-req" value="15" style="width:90px"></div>
         <div class="fg"><label>Max Required Requests</label><input type="number" id="c-max-required" value="5" style="width:90px"></div>
         <div class="fg"><label>Max Weekend Requests</label><input type="number" id="c-max-wk" value="6" style="width:90px"></div>
@@ -834,7 +836,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
         <button class="btn btn-d btn-sm" onclick="if(confirm('FACTORY RESET: Delete ALL data including physician roster, schedule, settings, and saved versions? This cannot be undone and cannot be recovered. Type OK to confirm.')){localStorage.clear();location.reload()}">⚠️ Factory Reset</button>
       </div>
       <div class="tx-xs tx-mu">
-        <strong>Save Version</strong> creates a named snapshot you can restore later. <strong>Clear Schedule</strong> keeps your roster. <strong>Reset Group</strong> returns this group to a blank roster and schedule.
+        <strong>Save Version</strong> creates a named snapshot for the current group only. <strong>Restore Version</strong> only shows snapshots saved for this group. <strong>Clear Schedule</strong> keeps your roster. <strong>Reset Group</strong> returns this group to a blank roster and schedule.
       </div>
     </div>
     <div class="card">
@@ -1925,7 +1927,8 @@ async function saveVersion(){
   if(!isAdmin()){ toast('Admin only','error'); return; }
   const defaultName=`v${new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'2-digit'})} – ${S.cycleStarts&&Object.keys(S.cycleStarts).length?Object.keys(S.cycleStarts).sort().pop():'manual'}`;
   showModal('💾 Save Version',
-    `<div style="margin-bottom:12px;font-size:13px">Save a named snapshot of the current schedule and settings. You can restore it later from "Restore Version".</div>
+    `<div style="margin-bottom:8px;font-size:13px">Save a named snapshot of the current schedule and settings for <strong>${currentGroupName()}</strong>. You can restore it later from "Restore Version".</div>
+     <div style="margin-bottom:12px;font-size:12px;color:var(--ink3);background:#f8fafc;border:1px solid var(--line);border-radius:4px;padding:7px 9px">Versions are scoped by group ID: <strong>${currentGroupId()}</strong>.</div>
      <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Snapshot name:</label>
      <input id="version-name-input" type="text" value="${defaultName}" style="width:100%;padding:6px 8px;border:1px solid var(--line);border-radius:4px;font-size:13px">`,
     'Save Snapshot',
@@ -1950,7 +1953,7 @@ async function saveVersion(){
       }catch(e){
         // Fallback: save to localStorage
         const versions=JSON.parse(localStorage.getItem('hs_versions')||'[]');
-        versions.unshift({name, data:JSON.stringify(S), saved_at:new Date().toISOString()});
+        versions.unshift({name, data:JSON.stringify(S), saved_at:new Date().toISOString(), saved_by:currentUser.username, group_id:currentGroupId()});
         localStorage.setItem('hs_versions', JSON.stringify(versions.slice(0,20)));
         toast(`Snapshot "${name}" saved locally`,'success');
         console.warn('Version saved to localStorage (Supabase unavailable):', errStr(e));
@@ -1974,7 +1977,9 @@ async function showVersions(){
       .sort((a,b)=>new Date(b.saved_at)-new Date(a.saved_at));
   }catch(e){
     // Fallback: load from localStorage
-    versions=JSON.parse(localStorage.getItem('hs_versions')||'[]');
+    versions=JSON.parse(localStorage.getItem('hs_versions')||'[]')
+      .filter(v=>(v.group_id||DEFAULT_GROUP_ID)===currentGroupId())
+      .sort((a,b)=>new Date(b.saved_at)-new Date(a.saved_at));
     console.warn('Versions from localStorage (Supabase unavailable):', errStr(e));
   }
 
@@ -1996,7 +2001,7 @@ async function showVersions(){
 
   window._versionsList=versions;
   showModal('🕓 Restore Version',
-    `<div style="font-size:12px;color:var(--ink3);margin-bottom:10px">Restoring a version replaces ALL current data. Save the current state first if needed.</div>
+    `<div style="font-size:12px;color:var(--ink3);margin-bottom:10px">Showing saved versions for <strong>${currentGroupName()}</strong> only. Restoring a version replaces ALL current data for this group. Save the current state first if needed.</div>
      <div style="max-height:320px;overflow-y:auto;border:1px solid var(--line);border-radius:4px">${rows}</div>`,
     null, null
   );
@@ -2261,12 +2266,24 @@ function renderFlexibleGuidance(){
   const r=flexibleRequestRecommendation();
   const pct=Math.round(r.share*100);
   const tone=r.variable===0?'#a01918':r.share<0.15?'#a85800':'#0a7044';
+  const note=r.variable===0
+    ?'No one is currently set to Variable, so flexible request limits should stay very conservative.'
+    :r.share<0.15
+      ?'Only a small fraction of the group is flexible. The scheduler can honor some requests, but most providers remain locked into fixed 7-on/7-off blocks.'
+      :r.share<0.3
+        ?'A moderate flexible pool is available. The scheduler has some room to move variable providers around strict teams.'
+        :'A broad flexible pool is available. The scheduler can support higher request limits while still protecting coverage.';
   el.innerHTML=`
     <div style="font-weight:700;color:var(--ink2);margin-bottom:5px">Flexible Model Guidance</div>
     <div style="color:var(--ink3);line-height:1.5">
-      Variable providers: <strong style="color:${tone}">${r.variable}</strong> of ${r.active} standard providers (${pct}% FTE).
-      Strict providers: ${r.strict}. Based on that mix, suggested request limits are
-      <strong>${r.maxReq}</strong> total, <strong>${r.maxRequired}</strong> required, and <strong>${r.maxWeekend}</strong> weekend dates per quarter.
+      This tool treats <strong>strict</strong> providers as fixed 7-on/7-off blocks and uses only <strong>variable</strong> providers as the movable pool for honoring time-off requests.
+      Variable providers: <strong style="color:${tone}">${r.variable}</strong> of ${r.active} standard providers (${pct}% FTE). Strict providers: ${r.strict}.
+    </div>
+    <div style="color:${tone};font-weight:600;margin-top:6px;line-height:1.45">${note}</div>
+    <div style="color:var(--ink3);line-height:1.5;margin-top:6px">
+      Suggested quarterly limits for this mix: <strong>${r.maxReq}</strong> total request dates,
+      <strong>${r.maxRequired}</strong> required dates, and <strong>${r.maxWeekend}</strong> weekend dates.
+      These are starting points for the admin to apply, then adjust after seeing generated schedule quality.
     </div>
     <button class="btn btn-sm" style="margin-top:7px;background:#eef5fb;color:#1b4d8f;border:1px solid #b8d4f0" onclick="applyFlexibleRecommendation()">Apply Suggested Limits</button>`;
 }
