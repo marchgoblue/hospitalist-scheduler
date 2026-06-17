@@ -137,22 +137,29 @@ html{font-size:13px}
 body{font-family:'Source Sans 3',-apple-system,Helvetica,Arial,sans-serif;background:var(--paper);color:var(--ink);min-height:100vh}
 
 /* HEADER */
-#hdr{position:sticky;top:0;z-index:100;background:#fff;border-bottom:1px solid var(--line);display:flex;align-items:center;height:48px;padding:0 16px;gap:0}
-.brand{display:flex;align-items:center;gap:9px;padding-right:18px;border-right:1px solid var(--line);height:100%;min-width:230px}
-.brand-mark{width:26px;height:26px;border-radius:4px;background:#1f5a99;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:11px;letter-spacing:.5px;font-family:'JetBrains Mono',monospace}
+#hdr{position:sticky;top:0;z-index:100;background:rgba(255,255,255,.96);border-bottom:1px solid #e6e6e6;display:flex;align-items:center;height:54px;padding:0 28px;gap:0;backdrop-filter:saturate(180%) blur(12px)}
+.brand{display:flex;align-items:center;gap:9px;padding-right:28px;height:100%;min-width:220px}
+.brand-mark{display:none}
 .brand-text{display:flex;flex-direction:column;line-height:1.1}
-.brand-name{font-size:14px;font-weight:700;color:var(--ink)}
-.brand-sub{font-size:10px;color:var(--ink3);font-family:'JetBrains Mono',monospace;letter-spacing:.5px;text-transform:uppercase}
+.brand-name{font-size:14px;font-weight:700;color:#111;letter-spacing:.1px}
+.brand-sub{font-size:10px;color:#666;font-family:'JetBrains Mono',monospace;letter-spacing:1px;text-transform:uppercase}
 
 .tabs{display:flex;height:100%}
-.tab{display:flex;align-items:center;gap:6px;padding:0 14px;height:100%;background:none;border:none;border-bottom:2px solid transparent;color:var(--ink2);font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;transition:all .12s}
-.tab:hover{background:var(--hdr);color:var(--ink)}
-.tab.on{color:#1f5a99;border-bottom-color:#1f5a99;background:var(--paper)}
+.tab{display:flex;align-items:center;padding:0 13px;height:100%;background:none;border:none;border-bottom:2px solid transparent;color:#2f2f2f;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;transition:all .12s}
+.tab:hover{color:#000;background:#f5f5f5}
+.tab.on{color:#000;border-bottom-color:#111;background:transparent}
 
 .hdr-r{margin-left:auto;display:flex;align-items:center;gap:8px}
 .role-switch{display:flex;background:var(--hdr);border:1px solid var(--line);border-radius:4px;padding:2px;font-size:11px}
 .role-switch button{padding:4px 10px;background:none;border:none;border-radius:3px;font-family:inherit;font-weight:600;cursor:pointer;color:var(--ink3);text-transform:uppercase;letter-spacing:.5px;font-size:10px}
 .role-switch button.on{background:#fff;color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.1)}
+
+.dm-section{border-top:1px solid var(--line);padding-top:12px;margin-top:12px}
+.dm-section:first-of-type{border-top:none;padding-top:0;margin-top:0}
+.dm-title{font-size:11px;font-weight:700;color:var(--ink2);letter-spacing:.7px;text-transform:uppercase;margin-bottom:6px}
+.dm-help{font-size:12px;color:var(--ink3);line-height:1.45;max-width:720px;margin-top:7px}
+.btn-lg{padding:10px 16px;font-size:13px;border-radius:4px}
+.btn-quiet{background:#fff;color:var(--ink);border-color:var(--line)}
 
 /* PAGES */
 .pg{display:none;padding:18px 22px;max-width:1500px;margin:0 auto}
@@ -553,7 +560,6 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
 <!-- Login overlay -->
 <div id="login-overlay">
   <div class="login-box">
-    <div style="font-size:36px;margin-bottom:8px">🏥</div>
     <h2>Hospitalist Schedule</h2>
     <p style="color:var(--ink3);font-size:13px;margin-bottom:20px">Sign in with your username and password.</p>
     <input class="login-input" id="un-input" type="text" placeholder="Username (e.g. jane.smith)" autocomplete="username" autocapitalize="none" spellcheck="false">
@@ -573,12 +579,12 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
     </div>
   </div>
   <div class="tabs" id="tabs-admin">
-    <button class="tab on" id="t-sched" onclick="nav('sched')">📊 Schedule</button>
-    <button class="tab" id="t-week" onclick="nav('week')">📅 Weekly View</button>
-    <button class="tab" id="t-requests" onclick="nav('requests')">📋 Requests</button>
-    <button class="tab" id="t-docs" onclick="nav('docs')">👤 Physicians</button>
-    <button class="tab" id="t-hol" onclick="nav('hol')">🎄 Holidays</button>
-    <button class="tab" id="t-cfg" onclick="nav('cfg')">⚙️ Settings</button>
+    <button class="tab on" id="t-sched" onclick="nav('sched')">Schedule</button>
+    <button class="tab" id="t-week" onclick="nav('week')">Weekly View</button>
+    <button class="tab" id="t-requests" onclick="nav('requests')">Requests</button>
+    <button class="tab" id="t-docs" onclick="nav('docs')">Providers</button>
+    <button class="tab" id="t-hol" onclick="nav('hol')">Holidays</button>
+    <button class="tab" id="t-cfg" onclick="nav('cfg')">Settings</button>
   </div>
   <div class="tabs" id="tabs-phys" style="display:none">
     <!-- Physician navigation now in the page header, not the tab bar -->
@@ -589,12 +595,12 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
       <button id="r-phys" onclick="switchRole('phys')">Physician</button>
     </div>
     <select id="phys-pick" style="display:none;width:160px" onchange="onPhysPick()"></select>
-    <button class="btn btn-sm" onclick="window.print()">🖨️ Print</button>
+    <button class="btn btn-sm" onclick="window.print()">Print</button>
     <span id="user-display" style="font-size:12px;color:var(--ink3);font-weight:600;margin-right:4px"></span>
-    <span id="sync-status">⏳ loading</span>
-    <button class="btn btn-p btn-sm" id="save-btn" onclick="saveData()" disabled>💾 Save</button>
-    <button class="btn btn-sm" onclick="showChangePasswordModal()" title="Change your password">🔒 Pwd</button>
-    <button class="btn btn-sm" style="background:#f3f3f3;border-color:#ccc" onclick="logout()" title="Sign out">↩ Out</button>
+    <span id="sync-status">loading</span>
+    <button class="btn btn-p btn-sm" id="save-btn" onclick="saveData()" disabled>Save</button>
+    <button class="btn btn-sm" onclick="showChangePasswordModal()" title="Change your password">Password</button>
+    <button class="btn btn-sm" style="background:#f3f3f3;border-color:#ccc" onclick="logout()" title="Sign out">Sign Out</button>
   </div>
 </div>
 
@@ -617,8 +623,8 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
         <option value="3">Q3 · Jul–Sep</option>
         <option value="4">Q4 · Oct–Dec</option>
       </select>
-      <button class="btn btn-p" id="gen-btn" onclick="tryGenerateQuarter()">⚡ Generate Schedule</button>
-      <button class="btn btn-sm" onclick="recheckFairness()" title="Check shift distribution fairness">📊 Fairness Check</button>
+      <button class="btn btn-p" id="gen-btn" onclick="tryGenerateQuarter()">Generate Schedule</button>
+      <button class="btn btn-sm" onclick="recheckFairness()" title="Check shift distribution fairness">Fairness Check</button>
     </div>
   </div>
 
@@ -660,7 +666,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
         <h3 style="margin:0">Schedule Fairness Review</h3>
         <p class="tx-sm tx-mu" style="margin:2px 0 0">Flags providers with abnormal shift counts, swing counts, or weekend loads — or unmet required requests.</p>
       </div>
-      <button class="btn btn-p btn-sm" onclick="recheckFairness()">🔄 Recheck</button>
+      <button class="btn btn-p btn-sm" onclick="recheckFairness()">Recheck</button>
     </div>
     <div id="fairness-content"><div class="tx-mu tx-sm">Generate a schedule then click Recheck to evaluate fairness.</div></div>
   </div>
@@ -668,7 +674,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
   <!-- Admin Announcement -->
   <div class="card" style="margin-top:16px">
     <div class="fb" style="align-items:center;margin-bottom:8px">
-      <h3 style="margin:0">📢 Physician Portal Announcement</h3>
+      <h3 style="margin:0">Physician Portal Announcement</h3>
       <span class="tx-xs tx-mu">Displayed on physician portal pages</span>
     </div>
     <textarea id="admin-announcement" rows="2" style="width:100%;box-sizing:border-box;padding:8px;border:1px solid var(--line);border-radius:3px;font-family:inherit;font-size:13px;resize:vertical" placeholder="Type a message for all physicians (e.g. 'Q3 schedule is posted — please review by June 15.')..." oninput="saveAnnouncement()">${S.announcement||''}</textarea>
@@ -686,7 +692,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
       <button class="btn btn-sm" onclick="chWeek(1)">Next ▶</button>
       <button class="btn btn-sm" onclick="goToToday()">Today</button>
     </div>
-    <button class="btn btn-p btn-sm" onclick="window.print()">🖨️ Print Week</button>
+    <button class="btn btn-p btn-sm" onclick="window.print()">Print Week</button>
   </div>
   <div id="wk-grid"><div style="padding:40px;text-align:center;color:var(--ink3)">Generate schedule first.</div></div>
 </div>
@@ -754,15 +760,15 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
       <select id="hol-yr" onchange="renderHolidayTable()">
         <option>2025</option><option>2026</option><option>2027</option>
       </select>
-      <button class="btn btn-p btn-sm" onclick="autoAssignHolidays()">⚡ Auto-Assign</button>
+      <button class="btn btn-p btn-sm" onclick="autoAssignHolidays()">Auto-Assign</button>
     </div>
   </div>
   <div class="card mb">
     <h3>Rules</h3>
     <ul style="margin:0;padding-left:20px;font-size:13px;line-height:1.7">
-      <li>🎄 No physician works two Christmases in a row</li>
+      <li>No physician works two Christmases in a row</li>
       <li>🦃 Each physician works Thanksgiving OR Christmas in a given year — never both</li>
-      <li>🔄 Holiday assignments alternate from year to year</li>
+      <li>Holiday assignments alternate from year to year</li>
     </ul>
   </div>
   <div class="card">
@@ -823,20 +829,37 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
     </div>
     <div class="card">
       <h3>Data Management</h3>
-      <div class="fl" style="flex-wrap:wrap;gap:6px;margin-bottom:8px">
-        <button class="btn btn-sm" onclick="exportData()">📤 Export JSON</button>
-        <button class="btn btn-sm" onclick="importData()">📥 Import JSON</button>
-        <button class="btn btn-p btn-sm" onclick="importQgenda()">📊 Import qGenda Excel</button>
+      <div class="dm-section">
+        <div class="dm-title">qGenda Import</div>
+        <button class="btn btn-p btn-lg" onclick="importQgenda()">Import qGenda Excel</button>
+        <div class="dm-help">
+          Use this to build a new site from a qGenda Calendar by Task file. The import creates providers, detects shift names, and maps those shifts into the scheduler. Use it again after each quarter to account for the shifts actually worked and correct the historical schedule from qGenda.
+        </div>
       </div>
-      <div class="fl" style="flex-wrap:wrap;gap:6px;margin-bottom:8px">
-        <button class="btn btn-sm" style="background:#eef5fb;border:1px solid #b8d4f0;color:#1b4d8f" onclick="saveVersion()">💾 Save Version</button>
-        <button class="btn btn-sm" style="background:#eef5fb;border:1px solid #b8d4f0;color:#1b4d8f" onclick="showVersions()">🕓 Restore Version</button>
-        <button class="btn btn-d btn-sm" onclick="confirmClearSchedule()">🗑️ Clear Schedule</button>
-        <button class="btn btn-d btn-sm" onclick="confirmResetGroup()">🧼 Reset Group</button>
-        <button class="btn btn-d btn-sm" onclick="if(confirm('FACTORY RESET: Delete ALL data including physician roster, schedule, settings, and saved versions? This cannot be undone and cannot be recovered. Type OK to confirm.')){localStorage.clear();location.reload()}">⚠️ Factory Reset</button>
+      <div class="dm-section">
+        <div class="dm-title">Versions</div>
+        <div class="fl" style="flex-wrap:wrap;gap:6px">
+          <button class="btn btn-quiet btn-sm" onclick="saveVersion()">Save Version</button>
+          <button class="btn btn-quiet btn-sm" onclick="showVersions()">Restore Version</button>
+        </div>
+        <div class="dm-help">Versions are saved for the current group only and let you return to a known-good schedule before major edits.</div>
       </div>
-      <div class="tx-xs tx-mu">
-        <strong>Save Version</strong> creates a named snapshot for the current group only. <strong>Restore Version</strong> only shows snapshots saved for this group. <strong>Clear Schedule</strong> keeps your roster. <strong>Reset Group</strong> returns this group to a blank roster and schedule.
+      <div class="dm-section">
+        <div class="dm-title">Schedule Maintenance</div>
+        <div class="fl" style="flex-wrap:wrap;gap:6px">
+          <button class="btn btn-d btn-sm" onclick="confirmClearSchedule()">Clear Schedule</button>
+          <button class="btn btn-d btn-sm" onclick="confirmResetGroup()">Reset Group</button>
+          <button class="btn btn-d btn-sm" onclick="if(confirm('FACTORY RESET: Delete ALL data including physician roster, schedule, settings, and saved versions? This cannot be undone and cannot be recovered. Type OK to confirm.')){localStorage.clear();location.reload()}">Factory Reset</button>
+        </div>
+        <div class="dm-help">Clear Schedule keeps the roster and settings. Reset Group returns this site to a blank roster and schedule. Factory Reset clears local browser data.</div>
+      </div>
+      <div class="dm-section">
+        <div class="dm-title">JSON Utilities</div>
+        <div class="fl" style="flex-wrap:wrap;gap:6px">
+          <button class="btn btn-sm" onclick="exportData()">Export JSON</button>
+          <button class="btn btn-sm" onclick="importData()">Import JSON</button>
+        </div>
+        <div class="dm-help">Low-frequency backup tools for moving raw app data manually.</div>
       </div>
     </div>
     <div class="card">
@@ -873,7 +896,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
         📝 Time-Off Requests
       </button>
       <button class="phys-nav-btn" id="phys-nav-schd" onclick="nav('myschd')">
-        📅 My Schedule
+        My Schedule
       </button>
     </div>
     <div class="phys-page-hdr-right" style="flex:1;justify-content:flex-end;gap:16px">
@@ -959,7 +982,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
         📝 Time-Off Requests
       </button>
       <button class="phys-nav-btn active" id="phys-nav-schd2" onclick="nav('myschd')">
-        📅 My Schedule
+        My Schedule
       </button>
     </div>
     <div class="phys-page-hdr-right" style="flex:1;justify-content:flex-end;gap:16px">
@@ -969,7 +992,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
   <span style="display:none" id="my-name-lbl"></span>
   <div id="my-schd-content"><div class="tx-mu tx-sm" style="padding:40px;text-align:center">Schedule not generated yet. Ask your admin to generate the schedule.</div></div>
   <div style="padding:16px 24px;border-top:1px solid rgba(255,255,255,.2)">
-    <button class="phys-nav-btn" onclick="showChangePasswordModal()" style="font-size:12px;padding:6px 14px">🔒 Change My Password</button>
+    <button class="phys-nav-btn" onclick="showChangePasswordModal()" style="font-size:12px;padding:6px 14px">Change My Password</button>
   </div>
 </div>
 
@@ -1042,7 +1065,7 @@ function setReadOnly(ro){
 }
 function updateHeaderForUser(){
   const el=document.getElementById('user-display');if(!el||!currentUser)return;
-  el.textContent=isAdmin()?`👤 ${currentUser.username} (Admin · ${currentGroupName()})`:`👤 ${currentUser.username} · ${currentGroupName()}`;
+  el.textContent=isAdmin()?`${currentUser.username} (Admin · ${currentGroupName()})`:`${currentUser.username} · ${currentGroupName()}`;
 }
 
 async function saveData(){
@@ -1090,7 +1113,7 @@ function applyMigrations(){
 
 function setSyncStatus(state){
   const el=document.getElementById('sync-status');if(!el)return;
-  const m={loading:'⏳ loading',saving:'💾 saving…',saved:'✓ saved',synced:'✓ synced',error:'⚠ error'};
+  const m={loading:'loading',saving:'saving',saved:'saved',synced:'synced',error:'error'};
   el.textContent=m[state]||state;
   el.style.color=state==='error'?'#a01918':(state==='saved'||state==='synced')?'#0a7044':'var(--ink3)';
 }
@@ -1218,7 +1241,7 @@ function completeLogin(){
 function logout(){sessionStorage.removeItem('hs_user');currentUser=null;location.reload();}
 
 function showChangePasswordModal(){
-  showModal('🔒 Change My Password',
+  showModal('Change My Password',
     `<div class="fg mb"><label>Current Password</label><input type="password" id="cp-old" class="login-input" placeholder="Current password"></div>
      <div class="fg mb"><label>New Password</label><input type="password" id="cp-new" class="login-input" placeholder="New password (min 6 chars)"></div>
      <div class="fg mb"><label>Confirm</label><input type="password" id="cp-confirm" class="login-input" placeholder="Confirm new password"></div>
@@ -1687,7 +1710,7 @@ function showQgendaMapModal(records, filename, totalParsed, totalIgnored, unknow
   const nCount=displayRecords.filter(r=>r.shift==='N'&&(r.docId||onboardingEmptyRoster)).length;
   const skipCount=onboardingEmptyRoster?0:pastRecords.filter(r=>!r.docId).length;
 
-  showModal(`📊 Import qGenda — ${filename}`,
+  showModal(`Import qGenda — ${filename}`,
     `<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;margin-bottom:14px">
       <div style="background:#dff5e6;border-radius:4px;padding:8px;text-align:center">
         <div style="font-size:20px;font-weight:700;color:#0a7044">${readyCount}</div>
@@ -1926,7 +1949,7 @@ async function runQgendaImport(records){
 async function saveVersion(){
   if(!isAdmin()){ toast('Admin only','error'); return; }
   const defaultName=`v${new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'2-digit'})} – ${S.cycleStarts&&Object.keys(S.cycleStarts).length?Object.keys(S.cycleStarts).sort().pop():'manual'}`;
-  showModal('💾 Save Version',
+  showModal('Save Version',
     `<div style="margin-bottom:8px;font-size:13px">Save a named snapshot of the current schedule and settings for <strong>${currentGroupName()}</strong>. You can restore it later from "Restore Version".</div>
      <div style="margin-bottom:12px;font-size:12px;color:var(--ink3);background:#f8fafc;border:1px solid var(--line);border-radius:4px;padding:7px 9px">Versions are scoped by group ID: <strong>${currentGroupId()}</strong>.</div>
      <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Snapshot name:</label>
@@ -2000,7 +2023,7 @@ async function showVersions(){
   }).join('');
 
   window._versionsList=versions;
-  showModal('🕓 Restore Version',
+  showModal('Restore Version',
     `<div style="font-size:12px;color:var(--ink3);margin-bottom:10px">Showing saved versions for <strong>${currentGroupName()}</strong> only. Restoring a version replaces ALL current data for this group. Save the current state first if needed.</div>
      <div style="max-height:320px;overflow-y:auto;border:1px solid var(--line);border-radius:4px">${rows}</div>`,
     null, null
@@ -2024,7 +2047,7 @@ function confirmRestoreVersion(idx){
 
 function confirmClearSchedule(){
   if(!isAdmin()){ toast('Admin only','error'); return; }
-  showModal('🗑️ Clear Schedule',
+  showModal('Clear Schedule',
     `<div style="font-size:13px;margin-bottom:12px">This will permanently delete:</div>
      <ul style="font-size:12px;margin:0 0 12px 16px;line-height:1.8">
        <li>All generated shift schedules</li>
@@ -2091,7 +2114,7 @@ function freshGroupState(){
 
 function confirmResetGroup(){
   if(!isAdmin()){ toast('Admin only','error'); return; }
-  showModal('🧼 Reset Current Group',
+  showModal('Reset Current Group',
     `<div style="font-size:13px;margin-bottom:12px">This resets <strong>${currentGroupName()}</strong> to a blank slate in Supabase.</div>
      <ul style="font-size:12px;margin:0 0 12px 16px;line-height:1.8">
        <li>Deletes the physician roster for this group</li>
@@ -3237,7 +3260,7 @@ function updateGenButton(){
   const btn=document.getElementById('gen-btn');
   if(!btn) return;
   if(!activeDocs(year,(q-1)*3).length){
-    btn.textContent='⚡ Generate Schedule';
+    btn.textContent='Generate Schedule';
     btn.className='btn btn-p';
     btn.disabled=true;
     btn.title='Import qGenda or add physicians before generating.';
@@ -3246,10 +3269,10 @@ function updateGenButton(){
   btn.disabled=false;
   btn.title='';
   if(exists){
-    btn.textContent='🔄 Regenerate Schedule';
+    btn.textContent='Regenerate Schedule';
     btn.className='btn btn-warn';
   } else {
-    btn.textContent='⚡ Generate Schedule';
+    btn.textContent='Generate Schedule';
     btn.className='btn btn-p';
   }
 }
@@ -3266,7 +3289,7 @@ function tryGenerateQuarter(){
   const exists=S.cycleStarts[qKey]&&S.cycleStarts[qKey].generated;
   if(exists){
     showModal(
-      '🔄 Regenerate Schedule?',
+      'Regenerate Schedule?',
       `<div style="font-size:14px;line-height:1.6">
         <p><strong>This will replace the existing Q${q} ${year} schedule.</strong></p>
         <p>Any manual edits you've made will be lost. The schedule will be rebuilt from scratch using current requests and preferences.</p>
@@ -3750,7 +3773,7 @@ function renderWeek(){
     html+=`<div class="week-day"${isH?' style="background:#f8f3fe"':''}>
       <div class="wd-hdr">${dayN(d)}</div>
       <div class="wd-date${isT?' today':''}">${d.getDate()}</div>
-      ${isH?'<div style="font-size:10px;color:var(--H-tx);font-weight:600;margin-bottom:4px">🎄 Holiday</div>':''}
+      ${isH?'<div style="font-size:10px;color:var(--H-tx);font-weight:600;margin-bottom:4px">Holiday</div>':''}
       <div class="wd-section-tit r">Physician Rounders (${rs.length}/${S.cfg.R})</div>
       ${rs.map(({doc,team},idx)=>`<div class="wd-name">${renderTeam(team)} <strong>${shiftLabelFor('rounderLabels',idx,'Rounder')}</strong> · ${dname(doc)}</div>`).join('')||'<div class="wd-name tx-mu">—</div>'}
       <div class="wd-section-tit r">APP Rounders (${appRs.length}/${S.cfg.appRounders||0})</div>
@@ -3841,7 +3864,7 @@ function renderMyRequestCal(){
         const color=isLow?'#0a7044':isMid?'#1b4d8f':'#a85800';
         const bg=isLow?'#dff5e6':isMid?'#eef5fb':'#fff5dc';
         peerBanner.innerHTML=`<div style="background:${bg};border:1px solid ${color}44;border-radius:4px;padding:8px 12px;font-size:12px">
-          <strong style="color:${color}">📊 Your request honoring rate: ${myRatePct}%</strong>
+          <strong style="color:${color}">Your request honoring rate: ${myRatePct}%</strong>
           <span style="color:#555;margin-left:8px">— Rank ${myRank} of ${total} providers</span>
           ${isLow?`<span style="color:#0a7044;font-weight:600;margin-left:8px">✓ You have scheduling priority</span>`:''}
           <div style="color:#777;font-size:11px;margin-top:3px">Providers with lower honoring rates receive higher priority when scheduling conflicts occur.</div>
@@ -3864,7 +3887,6 @@ function renderMyRequestCal(){
     const calCard=document.getElementById('my-req-cal').closest('.card');
     document.getElementById('my-req-cal').innerHTML=`
       <div style="background:#f0f4f8;border:2px dashed #b8c8d8;border-radius:6px;padding:30px;text-align:center;color:#5a6a7a;margin-top:8px">
-        <div style="font-size:24px;margin-bottom:8px">🔒</div>
         <div style="font-weight:700;font-size:14px;margin-bottom:6px">Strict 7-on / 7-off schedule</div>
         <div style="font-size:12px;color:#7a8a9a">Time-off requests are not available for providers on a strict rotating schedule.<br>Contact your administrator to adjust individual days if needed.</div>
       </div>`;
@@ -4275,7 +4297,7 @@ function renderMySchedule(){
       const myEntry=allRates.find(r=>r.docId===docId);
       if(myEntry!==undefined){
         peerHTML=`<div style="background:${bg};border:1px solid ${color}33;border-radius:4px;padding:10px 14px;margin-top:8px">
-          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:${color};margin-bottom:4px">📊 Request Honoring — Peer Comparison</div>
+          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:${color};margin-bottom:4px">Request Honoring — Peer Comparison</div>
           <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
             <div>
               <span style="font-size:22px;font-weight:700;color:${color}">${myRatePct}%</span>
@@ -4323,7 +4345,7 @@ function renderMySchedule(){
       }).filter(Boolean).join('');
       reqHonoringHTML=`
         <div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--line)">
-          <div class="tx-xs tx-mu" style="margin-bottom:4px;font-weight:700">📅 Time-Off Request Honoring</div>
+          <div class="tx-xs tx-mu" style="margin-bottom:4px;font-weight:700">Time-Off Request Honoring</div>
           <div style="font-size:18px;font-weight:700;color:${yearColor};margin-bottom:5px">${yearPct}% honored <span style="font-size:12px;font-weight:400;color:var(--ink3)">(${totalHonored}/${totalReq} days, ${yr} total)</span></div>
           <div style="display:flex;flex-wrap:wrap;gap:4px">${monthBadges}</div>
         </div>`;
@@ -4768,7 +4790,7 @@ function renderHolidayTable(){
     <th>🎆 July 4th<br><span style="color:var(--ink3);font-weight:400;font-size:10px">${hd.jul4}</span></th>
     <th>👷 Labor Day<br><span style="color:var(--ink3);font-weight:400;font-size:10px">${hd.lab}</span></th>
     <th>🦃 Thanksgiving<br><span style="color:var(--ink3);font-weight:400;font-size:10px">${hd.tg}</span></th>
-    <th>🎄 Christmas<br><span style="color:var(--ink3);font-weight:400;font-size:10px">${hd.xm}</span></th>
+    <th>Christmas<br><span style="color:var(--ink3);font-weight:400;font-size:10px">${hd.xm}</span></th>
     <th>Xmas ${y-1}?</th>
     <th>Rule</th>
   </tr></thead><tbody>`;
@@ -5107,7 +5129,7 @@ function updatePhysHeaders(){
   });
   // Announcement: prominent inline chip below name
   const ann=S.announcement||'';
-  const annDisplay = ann ? `📢 ${ann}` : '';
+  const annDisplay = ann ? ann : '';
   ['phys-announcement-req','phys-announcement-schd'].forEach(id=>{
     const el=document.getElementById(id);
     if(el){
