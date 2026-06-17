@@ -807,7 +807,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
         <div class="fg"><label>First Name</label><input type="text" id="n-first" style="width:120px"></div>
       </div>
       <div class="row">
-        <div class="fg"><label>Role</label><select id="n-role" style="width:80px"><option>MD</option><option>APP</option><option>NP</option></select></div>
+        <div class="fg"><label>Role</label><select id="n-role" style="width:90px"><option value="MD/DO">MD/DO</option><option value="APP">APP</option></select></div>
         <div class="fg"><label>FTE</label><select id="n-fte" style="width:80px"><option>1.0</option><option>0.75</option><option>0.5</option><option>0.0</option></select></div>
         <div class="fg"><label>Type</label><select id="n-type" style="width:150px" onchange="var f=document.getElementById('n-fte');var t=document.getElementById('n-title');if(f&&this.value==='prn')f.value='0.0';else if(f&&parseFloat(f.value)===0)f.value='1.0';if(t&&this.value==='weekday-only'&&!t.value.trim())t.value='Medical Director';"><option value="standard">Standard</option><option value="prn">PRN / Track Only</option><option value="weekday-only">Medical Director</option><option value="swing-only">Swing Only</option><option value="nocturnist">Nocturnist</option></select></div>
       </div>
@@ -1084,6 +1084,7 @@ function applyMigrations(){
   S.ui.selectedRow=null;S.ui.selectedCols=new Set();S.ui.fillMode=null;
   const u={odeyinka:{first:'Oladipo'},chapagain:{first:'Sudeep'},walls:{type:'nocturnist',title:'Nocturnist'},ahmadani:{type:'nocturnist',title:'Nocturnist'},tahir:{type:'weekday-only'}};
   Object.entries(u).forEach(([id,p])=>{const d=S.docs.find(d=>d.id===id);if(d)Object.assign(d,p);});
+  S.docs.forEach(d=>{d.role=normalizeRole(d.role);});
   S.docs.forEach(normalizeProviderDefaults);
 }
 
@@ -1356,7 +1357,7 @@ function qgGuessShift(raw){
 function qgNameKey(raw){
   const s=String(raw||'').trim();
   // Remove suffixes like MD, DO, PA, APRN, NP, etc.
-  const clean=s.replace(/,?\s*(MD|DO|PA-C|PA|APRN|NP|FNP|RN|DIR\.?|DIRECTOR|MEDICAL DIRECTOR)\b\.?/gi,'').trim();
+  const clean=s.replace(/,?\s*(MD\/DO|MD|DO|PA-C|PA|APRN|NP|FNP|RN|DIR\.?|DIRECTOR|MEDICAL DIRECTOR)\b\.?/gi,'').trim();
   // "Last, First" → "first last"
   const m=clean.match(/^([^,]+),\s*(.+)$/);
   if(m) return (m[2]+' '+m[1]).toLowerCase().replace(/\s+/g,' ').trim();
@@ -1641,7 +1642,7 @@ function showQgendaMapModal(records, filename, totalParsed, totalIgnored, unknow
     const nameParts=rawName.match(/^([^,]+),\s*(.+)$/);
     const defLast=nameParts?nameParts[1].trim():'';
     const defFirst=nameParts?nameParts[2].trim():'';
-    const defaultRole=records.some(r=>r.rawName===rawName&&qgIsAppTask(r.task))?'APP':'MD';
+    const defaultRole=records.some(r=>r.rawName===rawName&&qgIsAppTask(r.task))?'APP':'MD/DO';
     const defaultType=records.some(r=>r.rawName===rawName&&qgIsMedicalDirectorTask(r.task))?'weekday-only':(onboardingEmptyRoster?'standard':'prn');
     const defaultFte=defaultType==='prn'?'0.0':'1.0';
     const addOpt=(isUnmatched||onboardingEmptyRoster)?`<option value="__add__" ${onboardingEmptyRoster?'selected':''} style="color:#0a7044;font-weight:700">+ Add as new provider</option>`:'';
@@ -1661,9 +1662,8 @@ function showQgendaMapModal(records, filename, totalParsed, totalIgnored, unknow
       <div id="np_${safeId}" style="display:${onboardingEmptyRoster?'flex':'none'};align-items:center;gap:6px;width:100%;padding:4px 8px;background:#f0faf4;border-radius:4px;font-size:11px">
         <span style="color:#555">Role:</span>
         <select class="qg-new-role" data-raw="${rawName.replace(/"/g,'&quot;')}" style="padding:2px 4px;font-size:11px">
-          <option value="MD" ${defaultRole==='MD'?'selected':''}>MD</option>
+          <option value="MD/DO" ${defaultRole==='MD/DO'?'selected':''}>MD/DO</option>
           <option value="APP" ${defaultRole==='APP'?'selected':''}>APP</option>
-          <option value="NP" ${defaultRole==='NP'?'selected':''}>NP</option>
         </select>
         <span style="color:#555">Type:</span>
         <select class="qg-new-type" data-raw="${rawName.replace(/"/g,'&quot;')}" style="padding:2px 4px;font-size:11px"
@@ -1765,7 +1765,7 @@ function previewQgendaImport(){
         id:previewDocId,
         last:sel?.getAttribute('data-deflast')||rec.rawName,
         first:sel?.getAttribute('data-deffirst')||'',
-        role:document.querySelector('#np_'+rec.rawName.replace(/[^a-zA-Z0-9]/g,'_')+' .qg-new-role')?.value||'MD',
+        role:normalizeRole(document.querySelector('#np_'+rec.rawName.replace(/[^a-zA-Z0-9]/g,'_')+' .qg-new-role')?.value),
         fte:parseFloat(document.querySelector('#np_'+rec.rawName.replace(/[^a-zA-Z0-9]/g,'_')+' .qg-new-fte')?.value)||1.0
       };
     }
@@ -1777,7 +1777,7 @@ function previewQgendaImport(){
     const qKey2=`${rec.date.getFullYear()}-${Math.floor(rec.date.getMonth()/3)+1}`;
     const baseSh=S.baseSchedule&&S.baseSchedule[qKey2]&&S.baseSchedule[qKey2][docId]&&S.baseSchedule[qKey2][docId][ds];
     const isBonus=(!baseSh || baseSh==='OFF') && (rec.shift==='R'||rec.shift==='S'||rec.shift==='N');
-    preview.push({date:ds, name:`${doc.last}, ${doc.first}${doc.role&&doc.role!=='MD'?' · '+doc.role:''}`, shift:rec.shift, existing, changed, docId:previewDocId, isBonus});
+    preview.push({date:ds, name:`${doc.last}, ${doc.first}${isAppProvider(doc)?' · APP':''}`, shift:rec.shift, existing, changed, docId:previewDocId, isBonus});
   });
 
   // Build preview table sorted by date then name
@@ -1840,7 +1840,7 @@ async function runQgendaImport(records){
       newProviders[raw]={
         last:sel.getAttribute('data-deflast')||'',
         first:sel.getAttribute('data-deffirst')||'',
-        role:roleEl?roleEl.value:'MD',
+        role:normalizeRole(roleEl?roleEl.value:'MD/DO'),
         type,
         fte:type==='prn'?0:(fteEl?parseFloat(fteEl.value)||1.0:1.0),
         title:type==='weekday-only'?'Medical Director':'',
@@ -1857,7 +1857,7 @@ async function runQgendaImport(records){
     const baseId=(np.last+np.first).toLowerCase().replace(/[^a-z]/g,'')||'provider';
     let uid=baseId; let n=2;
     while(S.docs.find(d=>d.id===uid)) uid=baseId+n++;
-    S.docs.push(normalizeProviderDefaults({id:uid,last:np.last,first:np.first,role:(np.role||'MD'),fte:np.fte,type:(np.type||'prn'),active:true,startDate:null,title:np.title||'',preferences:np.preferences,teamColor:np.teamColor||''}));
+    S.docs.push(normalizeProviderDefaults({id:uid,last:np.last,first:np.first,role:normalizeRole(np.role),fte:np.fte,type:(np.type||'prn'),active:true,startDate:null,title:np.title||'',preferences:np.preferences,teamColor:np.teamColor||''}));
     if(!S.ui.currentPhysId)S.ui.currentPhysId=uid;
     corrections[rawName]=uid;
   }
@@ -2141,6 +2141,8 @@ function providerTypeLabel(d){
   return 'Standard';
 }
 function providerExtraTitle(d){return d&&d.title&&d.title.toLowerCase()!=='medical director'?d.title:''}
+function normalizeRole(role){return role==='NP'?'APP':(role==='MD'?'MD/DO':(role||'MD/DO'))}
+function providerRoleLabel(d){return normalizeRole(d&&d.role)}
 function isStrictTeamEligible(d){return d&&d.type==='standard'&&!isMedicalDirectorDoc(d)&&d.type!=='nocturnist'&&d.type!=='prn'}
 function isAppProvider(d){return d&&(d.role==='APP'||d.role==='NP')}
 function physicianRounderTarget(){return (S.cfg.R||0)+(S.cfg.appRounders||0)}
@@ -3730,15 +3732,15 @@ function renderWeek(){
     const ds=dstrD(d);
     const isT=ds===today;
     const isH=isHol(ds,d.getFullYear());
-    const rs=docs.filter(doc=>S.sched[doc.id]&&S.sched[doc.id][ds]==='R'&&doc.role!=='APP'&&doc.role!=='NP')
+    const rs=docs.filter(doc=>S.sched[doc.id]&&S.sched[doc.id][ds]==='R'&&!isAppProvider(doc))
       .map(doc=>({doc, team:(S.teams && S.teams[doc.id] && S.teams[doc.id][ds]) || ''}))
       .sort((a,b)=>teamSortValue(a.doc)-teamSortValue(b.doc)||providerSort(a.doc,b.doc));
-    const appRs=docs.filter(doc=>S.sched[doc.id]&&S.sched[doc.id][ds]==='R'&&(doc.role==='APP'||doc.role==='NP'))
+    const appRs=docs.filter(doc=>S.sched[doc.id]&&S.sched[doc.id][ds]==='R'&&isAppProvider(doc))
       .map(doc=>({doc, team:(S.teams && S.teams[doc.id] && S.teams[doc.id][ds]) || ''}))
       .sort((a,b)=>teamSortValue(a.doc)-teamSortValue(b.doc)||providerSort(a.doc,b.doc));
-    const ss=docs.filter(doc=>S.sched[doc.id]&&(S.sched[doc.id][ds]==='S'||S.sched[doc.id][ds]==='H')&&doc.role!=='APP'&&doc.role!=='NP')
+    const ss=docs.filter(doc=>S.sched[doc.id]&&(S.sched[doc.id][ds]==='S'||S.sched[doc.id][ds]==='H')&&!isAppProvider(doc))
       .sort(providerSort);
-    const appSs=docs.filter(doc=>S.sched[doc.id]&&(S.sched[doc.id][ds]==='S'||S.sched[doc.id][ds]==='H')&&(doc.role==='APP'||doc.role==='NP'))
+    const appSs=docs.filter(doc=>S.sched[doc.id]&&(S.sched[doc.id][ds]==='S'||S.sched[doc.id][ds]==='H')&&isAppProvider(doc))
       .sort(providerSort);
     const ns=docs.filter(doc=>S.sched[doc.id]&&S.sched[doc.id][ds]==='N')
       .sort(providerSort);
@@ -4344,7 +4346,7 @@ function renderMySchedule(){
       <div>
         <div class="doc-name">${dname(doc)}</div>
         <div class="fl" style="flex-wrap:wrap;gap:5px;margin-top:6px">
-          <span class="tag tag-r">${doc.role}</span>
+          <span class="tag tag-r">${providerRoleLabel(doc)}</span>
           ${doc.teamColor?`<span class="team-chip ${doc.teamColor}">${teamLabel(doc.teamColor)}</span>`:''}
           ${doc.fte<1?`<span class="tag tag-f">${doc.fte} FTE</span>`:''}
           ${doc.type==='swing-only'?'<span class="tag tag-s">Swing Only</span>':''}
@@ -4462,7 +4464,7 @@ function renderDocList(){
     }
     return `<div class="dc${doc.type==='nocturnist'?' dc-noct':''}" onclick="showDocDetail('${doc.id}')">
       <div class="dcn">${dname(doc)}</div>
-      <div class="dcm">${doc.role}${doc.teamColor?' · '+teamLabel(doc.teamColor):''}${doc.fte<1?` · ${doc.fte} FTE`:''}${doc.type==='swing-only'?' · Swing Only':''}${isMedicalDirectorDoc(doc)?' · Medical Director':''}${doc.type==='nocturnist'?' · Nocturnist':''}${providerExtraTitle(doc)?' · '+providerExtraTitle(doc):''}</div>
+      <div class="dcm">${providerRoleLabel(doc)}${doc.teamColor?' · '+teamLabel(doc.teamColor):''}${doc.fte<1?` · ${doc.fte} FTE`:''}${doc.type==='swing-only'?' · Swing Only':''}${isMedicalDirectorDoc(doc)?' · Medical Director':''}${doc.type==='nocturnist'?' · Nocturnist':''}${providerExtraTitle(doc)?' · '+providerExtraTitle(doc):''}</div>
       <div class="dcs">${doc.type==='nocturnist'?'Self-scheduled (not in rotation)':totalScheduled+' / '+target+' shifts scheduled'}</div>
       ${doc.type!=='nocturnist'?`<div class="pb" style="margin-top:5px"><div class="pbf ${pct>100?'pf-over':pct>=90?'pf-ok':'pf-warn'}" style="width:${pct}%"></div></div>`:''}
       ${paceLabel?`<div class="dc-pace ${paceClass}">${paceLabel}</div>`:''}
@@ -4579,7 +4581,7 @@ function showDocDetail(docId){
       <div>
         <div class="doc-name">${dname(doc)}</div>
         <div class="fl" style="flex-wrap:wrap;gap:5px;margin-top:6px">
-          <span class="tag tag-r">${doc.role}</span>
+          <span class="tag tag-r">${providerRoleLabel(doc)}</span>
           ${doc.teamColor?`<span class="team-chip ${doc.teamColor}">${teamLabel(doc.teamColor)}</span>`:''}
           ${doc.fte<1?`<span class="tag tag-f">${doc.fte} FTE</span>`:''}
           ${doc.type==='swing-only'?'<span class="tag tag-s">Swing Only</span>':''}
@@ -4833,7 +4835,7 @@ function renderRoster(){
       ?`<select class="team-select" onchange="setProviderTeam('${d.id}',this.value)"><option value="green" ${d.teamColor==='green'?'selected':''}>Green</option><option value="white" ${d.teamColor==='white'?'selected':''}>White</option></select>`
       :'<span class="tx-mu">—</span>';
     html+=`<tr style="opacity:${d.active?1:.5}">
-      <td>${dname(d)}</td><td>${d.role}</td><td>${d.fte}</td><td>${providerTypeLabel(d)}</td>
+      <td>${dname(d)}</td><td>${providerRoleLabel(d)}</td><td>${d.fte}</td><td>${providerTypeLabel(d)}</td>
       <td>${teamCell}</td>
       <td>${styleBadge}</td>
       <td>${prefDisplay}</td>
@@ -4872,10 +4874,9 @@ function openEditDoc(id){
     </div>
     <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;align-items:flex-end">
       <div class="fg"><label>Role</label>
-        <select id="ed-role" style="width:80px">
-          <option ${doc.role==='MD'?'selected':''}>MD</option>
-          <option ${doc.role==='APP'?'selected':''}>APP</option>
-          <option ${doc.role==='NP'?'selected':''}>NP</option>
+        <select id="ed-role" style="width:90px">
+          <option value="MD/DO" ${!isAppProvider(doc)?'selected':''}>MD/DO</option>
+          <option value="APP" ${isAppProvider(doc)?'selected':''}>APP</option>
         </select>
       </div>
       <div class="fg"><label>FTE</label>
@@ -4943,7 +4944,7 @@ function openEditDoc(id){
           <input type="number" id="ed-maxW" value="${maxW}" min="3" max="21" style="width:90px">
         </div>
       </div>
-      <div class="tx-xs tx-mu" style="margin-top:6px">
+      <div id="ed-variable-help" class="tx-xs tx-mu" style="margin-top:6px">
         Default: 5-day R blocks, max 7 consecutive work days. Set preferred R higher (e.g. 10) for providers who prefer longer rounding stretches.
         Max work must be ≥ preferred R + 2 to allow a 2-day swing tail.
       </div>
@@ -4968,9 +4969,12 @@ function openEditDoc(id){
 
 function toggleEditVariablePrefs(){
   const box=document.getElementById('ed-variable-prefs');
+  const help=document.getElementById('ed-variable-help');
   if(!box)return;
   const styleEl=document.querySelector('input[name="ed-style"]:checked');
-  box.style.display=styleEl&&styleEl.value==='variable'?'flex':'none';
+  const show=styleEl&&styleEl.value==='variable';
+  box.style.display=show?'flex':'none';
+  if(help) help.style.display=show?'block':'none';
 }
 
 function saveEditDoc(id){
@@ -4979,7 +4983,7 @@ function saveEditDoc(id){
   if(!doc){document.getElementById('modal').style.display='none';return;}
   doc.last=document.getElementById('ed-last').value.trim()||doc.last;
   doc.first=document.getElementById('ed-first').value.trim();
-  doc.role=document.getElementById('ed-role').value;
+  doc.role=normalizeRole(document.getElementById('ed-role').value);
   doc.type=document.getElementById('ed-type').value;
   doc.fte=doc.type==='prn'?0:parseFloat(document.getElementById('ed-fte').value);
   doc.teamColor=document.getElementById('ed-team')?.value||'';
@@ -5014,7 +5018,7 @@ function addPhysician(){
   const title=document.getElementById('n-title').value.trim()||(type==='weekday-only'?'Medical Director':'');
   S.docs.push({
     id,last,first,
-    role:document.getElementById('n-role').value,
+    role:normalizeRole(document.getElementById('n-role').value),
     fte:type==='prn'?0:parseFloat(document.getElementById('n-fte').value),
     type,
     active:true,
