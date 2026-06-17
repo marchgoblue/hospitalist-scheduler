@@ -535,6 +535,20 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
 .qg-match-sel.unmatched{border-color:#a85800;background:#fff8f0}
 .qg-progress{height:6px;background:var(--line);border-radius:3px;margin-top:8px;overflow:hidden}
 .qg-progress-bar{height:100%;background:#1b4d8f;border-radius:3px;transition:width .3s}
+.qg-import-grid{display:grid;grid-template-columns:minmax(0,1fr) 250px;gap:14px;align-items:start}
+.qg-drop-zone{border:1.5px dashed var(--line2);border-radius:6px;padding:14px;background:#fafafa;margin-top:10px;cursor:pointer;transition:all .12s}
+.qg-drop-zone:hover,.qg-drop-zone.drag{border-color:#111;background:#f4f4f4}
+.qg-drop-title{font-size:12px;font-weight:700;color:var(--ink)}
+.qg-drop-help{font-size:11px;color:var(--ink3);margin-top:3px;line-height:1.35}
+.qg-guide-layout{display:grid;grid-template-columns:minmax(0,1fr) 240px;gap:14px;align-items:start}
+.qg-guide-pane{border:1px solid var(--line);border-radius:6px;background:#fafafa;padding:12px;font-size:12px;color:var(--ink2);line-height:1.45}
+.qg-guide-pane h4{font-size:11px;text-transform:uppercase;letter-spacing:.7px;color:var(--ink);margin-bottom:6px}
+.qg-guide-pane p{margin:0 0 8px}
+.qg-guide-pane ul,.qg-guide-pane ol{margin:6px 0 0 18px;padding:0}
+.qg-guide-pane li{margin:4px 0}
+@media(max-width:900px){
+  .qg-import-grid,.qg-guide-layout{grid-template-columns:1fr}
+}
 
 /* PRINT *//* PRINT */
 @media print{
@@ -553,7 +567,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
 
 <!-- Read-only banner (shown when not admin) -->
 <div class="readonly-banner" id="readonly-banner">
-  👁️ View-only mode — you can see all schedules and data but cannot make changes.
+  View-only mode - you can see all schedules and data but cannot make changes.
   <button class="btn btn-sm" style="margin-left:12px" onclick="showLogin()">Admin Login</button>
 </div>
 
@@ -767,7 +781,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
     <h3>Rules</h3>
     <ul style="margin:0;padding-left:20px;font-size:13px;line-height:1.7">
       <li>No physician works two Christmases in a row</li>
-      <li>🦃 Each physician works Thanksgiving OR Christmas in a given year — never both</li>
+      <li>Each physician works Thanksgiving OR Christmas in a given year, never both</li>
       <li>Holiday assignments alternate from year to year</li>
     </ul>
   </div>
@@ -787,24 +801,42 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
       <h3>Schedule Parameters</h3>
       <div style="font-weight:700;font-size:12px;color:var(--ink2);margin-bottom:6px">Daily Staffing Counts</div>
       <div class="row">
-        <div class="fg"><label>Rounders/Day</label><input type="number" id="c-r" value="13" min="0" style="width:80px" onchange="renderShiftParamFields()"></div>
-        <div class="fg"><label>Swing/Day</label><input type="number" id="c-s" value="3" min="0" style="width:80px" onchange="renderShiftParamFields()"></div>
+        <div class="fg"><label>Rounders/Day</label><input type="number" id="c-r" value="13" min="0" style="width:80px" onchange="handleShiftCountChange()"></div>
+        <div class="fg"><label>Swing/Day</label><input type="number" id="c-s" value="3" min="0" style="width:80px" onchange="handleShiftCountChange()"></div>
       </div>
       <div class="row">
-        <div class="fg"><label>Nocturnists/Day</label><input type="number" id="c-n" value="1" min="0" style="width:90px" onchange="renderShiftParamFields()"></div>
-        <div class="fg"><label>APP Rounders/Day</label><input type="number" id="c-app-r" value="0" min="0" style="width:100px" onchange="renderShiftParamFields()"></div>
-        <div class="fg"><label>APP Admitters/Day</label><input type="number" id="c-app-s" value="0" min="0" style="width:100px" onchange="renderShiftParamFields()"></div>
+        <div class="fg"><label>Nocturnists/Day</label><input type="number" id="c-n" value="1" min="0" style="width:90px" onchange="handleShiftCountChange()"></div>
+        <div class="fg"><label>APP Rounders/Day</label><input type="number" id="c-app-r" value="0" min="0" style="width:100px" onchange="handleShiftCountChange()"></div>
+        <div class="fg"><label>APP Admitters/Day</label><input type="number" id="c-app-s" value="0" min="0" style="width:100px" onchange="handleShiftCountChange()"></div>
       </div>
       <div id="shift-param-fields"></div>
+      <div class="dm-section">
+        <div class="dm-title">Temporary Staffing Changes</div>
+        <div class="dm-help" style="margin-bottom:8px">Use this for short seasons when this site needs extra coverage. These numbers are added to the normal daily counts only during the dates below.</div>
+        <div class="row">
+          <div class="fg"><label>Start Date</label><input type="date" id="tmp-start" style="width:140px"></div>
+          <div class="fg"><label>End Date</label><input type="date" id="tmp-end" style="width:140px"></div>
+        </div>
+        <div class="row">
+          <div class="fg"><label>Extra Rounders</label><input type="number" id="tmp-r" value="0" min="0" style="width:90px"></div>
+          <div class="fg"><label>Extra Admitters</label><input type="number" id="tmp-s" value="0" min="0" style="width:90px"></div>
+          <div class="fg"><label>Extra Nocturnists</label><input type="number" id="tmp-n" value="0" min="0" style="width:100px"></div>
+        </div>
+        <div class="row">
+          <div class="fg"><label>Extra APP Rounders</label><input type="number" id="tmp-app-r" value="0" min="0" style="width:110px"></div>
+          <div class="fg"><label>Extra APP Admitters</label><input type="number" id="tmp-app-s" value="0" min="0" style="width:110px"></div>
+          <button class="btn btn-sm" onclick="addStaffingOverride()">Add Temporary Change</button>
+        </div>
+        <div id="staffing-overrides-list"></div>
+      </div>
       <div style="font-weight:700;font-size:12px;color:var(--ink2);margin:14px 0 6px;padding-top:10px;border-top:1px solid var(--line)">Annual Target & Request Limits</div>
       <div class="row">
-        <div class="fg"><label>Annual Shifts (1.0 FTE)</label><input type="number" id="c-annual" value="182" style="width:110px"></div>
-        <div class="fg"><label>Max Requests/Quarter</label><input type="number" id="c-max-req" value="15" style="width:90px"></div>
-        <div class="fg"><label>Max Required Requests</label><input type="number" id="c-max-required" value="5" style="width:90px"></div>
-        <div class="fg"><label>Max Weekend Requests</label><input type="number" id="c-max-wk" value="6" style="width:90px"></div>
+        <div class="fg"><label>Annual Shifts (1.0 FTE)</label><input type="number" id="c-annual" value="182" style="width:110px" onchange="autoSaveCfg()" oninput="autoSaveCfg()"></div>
+        <div class="fg"><label>Max Requests/Quarter</label><input type="number" id="c-max-req" value="15" style="width:90px" onchange="autoSaveCfg()" oninput="autoSaveCfg()"></div>
+        <div class="fg"><label>Max Required Requests</label><input type="number" id="c-max-required" value="5" style="width:90px" onchange="autoSaveCfg()" oninput="autoSaveCfg()"></div>
+        <div class="fg"><label>Max Weekend Requests</label><input type="number" id="c-max-wk" value="6" style="width:90px" onchange="autoSaveCfg()" oninput="autoSaveCfg()"></div>
       </div>
       <div id="flex-guidance" style="margin:10px 0;padding:10px;border:1px solid var(--line);border-radius:4px;background:#f8fafc;font-size:12px"></div>
-      <button class="btn btn-p btn-sm" onclick="saveCfg()">Save</button>
     </div>
     <div class="card">
       <h3>Add Provider</h3>
@@ -822,18 +854,34 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
         <div class="fg"><label>Title</label><input type="text" id="n-title" placeholder="Medical Director..." style="width:180px"></div>
       </div>
       <button class="btn btn-g btn-sm" onclick="addPhysician()">+ Add</button>
-    </div>
-    <div class="card" style="grid-column:1/-1">
-      <h3>Provider Roster (<span id="roster-count">0</span>)</h3>
-      <div style="max-height:380px;overflow-y:auto" id="roster-list"></div>
-    </div>
-    <div class="card">
-      <h3>Data Management</h3>
+      <div class="dm-section">
+        <div class="dm-title">Data Management</div>
+      </div>
       <div class="dm-section">
         <div class="dm-title">qGenda Import</div>
-        <button class="btn btn-p btn-lg" onclick="importQgenda()">Import qGenda Excel</button>
-        <div class="dm-help">
-          Use this to build a new site from a qGenda Calendar by Task file. The import creates providers, detects shift names, and maps those shifts into the scheduler. Use it again after each quarter to account for the shifts actually worked and correct the historical schedule from qGenda.
+        <div class="qg-import-grid">
+          <div>
+            <button class="btn btn-p btn-lg" onclick="importQgenda()">Import qGenda Excel</button>
+            <div id="qg-drop-zone" class="qg-drop-zone" onclick="importQgenda()" ondragover="setQgendaDropState(event,true)" ondragleave="setQgendaDropState(event,false)" ondrop="handleQgendaDrop(event)">
+              <div class="qg-drop-title">Choose or drop qGenda Excel file</div>
+              <div class="qg-drop-help">Use .xlsx or .xls from qGenda Calendar by Task.</div>
+            </div>
+            <div class="dm-help">
+              Use this to build a new site from a qGenda Calendar by Task file. The import creates providers, detects shift names, and maps those shifts into the scheduler. Use it again after each quarter to account for the shifts actually worked and correct the historical schedule from qGenda.
+            </div>
+          </div>
+          <aside class="qg-guide-pane">
+            <h4>Before You Start</h4>
+            <p><strong>New site:</strong> this builds the provider list and shift names.</p>
+            <p><strong>After a quarter:</strong> this fixes past days and counts what people worked.</p>
+            <ol>
+              <li>In qGenda, choose Calendar by Task.</li>
+              <li>Use the last quarter.</li>
+              <li>Show names as Last Name, First Name.</li>
+              <li>Export to Excel.</li>
+              <li>Drop the file here or click Import.</li>
+            </ol>
+          </aside>
         </div>
       </div>
       <div class="dm-section">
@@ -849,9 +897,8 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
         <div class="fl" style="flex-wrap:wrap;gap:6px">
           <button class="btn btn-d btn-sm" onclick="confirmClearSchedule()">Clear Schedule</button>
           <button class="btn btn-d btn-sm" onclick="confirmResetGroup()">Reset Group</button>
-          <button class="btn btn-d btn-sm" onclick="if(confirm('FACTORY RESET: Delete ALL data including physician roster, schedule, settings, and saved versions? This cannot be undone and cannot be recovered. Type OK to confirm.')){localStorage.clear();location.reload()}">Factory Reset</button>
         </div>
-        <div class="dm-help">Clear Schedule keeps the roster and settings. Reset Group returns this site to a blank roster and schedule. Factory Reset clears local browser data.</div>
+        <div class="dm-help">Clear Schedule keeps the roster and settings. Reset Group returns this site to a blank roster and schedule.</div>
       </div>
       <div class="dm-section">
         <div class="dm-title">JSON Utilities</div>
@@ -861,6 +908,10 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
         </div>
         <div class="dm-help">Low-frequency backup tools for moving raw app data manually.</div>
       </div>
+    </div>
+    <div class="card" style="grid-column:1/-1">
+      <h3>Provider Roster (<span id="roster-count">0</span>)</h3>
+      <div style="max-height:380px;overflow-y:auto" id="roster-list"></div>
     </div>
     <div class="card">
       <h3>Group Onboarding</h3>
@@ -1068,16 +1119,16 @@ function updateHeaderForUser(){
   el.textContent=isAdmin()?`${currentUser.username} (Admin · ${currentGroupName()})`:`${currentUser.username} · ${currentGroupName()}`;
 }
 
-async function saveData(){
+async function saveData(silent=false){
   if(!currentUser){toast('Not logged in','error');return;}
   if(isSaving){pendingSave=true;return;}
   isSaving=true;setSyncStatus('saving');
   try{
     await _sbUpsert('schedule_data',{id:currentScheduleRowId(),data:JSON.stringify(S),updated_at:new Date().toISOString()});
     setSyncStatus('saved');
-    if(isAdmin())toast('Saved','success');
+    if(isAdmin()&&!silent)toast('Saved','success');
   }catch(e){console.error('saveData error:',errStr(e),e);setSyncStatus('error');toast('Save failed: '+errStr(e),'error');}
-  finally{isSaving=false;if(pendingSave){pendingSave=false;saveData();}}
+  finally{isSaving=false;if(pendingSave){pendingSave=false;saveData(silent);}}
 }
 
 async function loadData(){
@@ -1439,27 +1490,78 @@ function qgMatchName(rawName){
   return bestScore>=0.7 ? best : null; // higher threshold to avoid false matches
 }
 
+function qgGuidePane(step, firstTime){
+  const title=firstTime?'New Site Setup':'Quarter Check';
+  const intro=firstTime
+    ? 'You are building this site for the first time.'
+    : 'You are checking what happened last quarter.';
+  const steps={
+    tasks:[
+      'Look at each qGenda task name.',
+      'Choose what kind of shift it is.',
+      'Pick Ignore for backup, notes, or rows you do not schedule.',
+      firstTime?'These choices help set daily counts and shift names.':'These choices help count past shifts worked.'
+    ],
+    providers:[
+      firstTime?'Keep Add as new provider for people in this group.':'Most names should match a provider.',
+      'Check names before you import.',
+      'Mark PRN people as PRN / Track Only.',
+      'Mark the Medical Director if you see that person.'
+    ]
+  };
+  const list=(steps[step]||[]).map(item=>`<li>${qgEsc(item)}</li>`).join('');
+  return `<aside class="qg-guide-pane">
+    <h4>${title}</h4>
+    <p>${intro}</p>
+    <ul>${list}</ul>
+  </aside>`;
+}
+
+function qgGuideLayout(mainHtml, step, firstTime){
+  return `<div class="qg-guide-layout"><div>${mainHtml}</div>${qgGuidePane(step,firstTime)}</div>`;
+}
+
+function handleQgendaFile(file){
+  if(!isAdmin()){ toast('Admin only','error'); return; }
+  if(!file) return;
+  if(typeof XLSX==='undefined'){ toast('Excel parser did not load. Refresh and try again.','error',5000); return; }
+  if(!/\.(xlsx|xls)$/i.test(file.name||'')){
+    toast('Choose a qGenda Excel file (.xlsx or .xls).','error');
+    return;
+  }
+  const reader=new FileReader();
+  reader.onload=ev=>{
+    try{
+      const wb=XLSX.read(ev.target.result,{type:'array',cellDates:true});
+      parseQgendaWorkbook(wb, file.name);
+    } catch(err){
+      toast('Could not read Excel file: '+errStr(err),'error');
+      console.error('qGenda parse error:',errStr(err),err);
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function setQgendaDropState(ev,on){
+  ev.preventDefault();
+  const zone=document.getElementById('qg-drop-zone');
+  if(zone) zone.classList.toggle('drag',on);
+}
+
+function handleQgendaDrop(ev){
+  ev.preventDefault();
+  const zone=document.getElementById('qg-drop-zone');
+  if(zone) zone.classList.remove('drag');
+  const file=ev.dataTransfer&&ev.dataTransfer.files&&ev.dataTransfer.files[0];
+  handleQgendaFile(file);
+}
+
 // Main import entry point
 function importQgenda(){
   if(!isAdmin()){ toast('Admin only','error'); return; }
-  if(typeof XLSX==='undefined'){ toast('Excel parser did not load. Refresh and try again.','error',5000); return; }
   const inp=document.createElement('input');
   inp.type='file'; inp.accept='.xlsx,.xls';
-  inp.onchange=e=>{
-    const file=e.target.files[0];
-    if(!file) return;
-    const reader=new FileReader();
-    reader.onload=ev=>{
-      try{
-        const wb=XLSX.read(ev.target.result,{type:'array',cellDates:true});
-        parseQgendaWorkbook(wb, file.name);
-      } catch(err){
-        toast('Could not read Excel file: '+errStr(err),'error');
-        console.error('qGenda parse error:',errStr(err),err);
-      }
-    };
-    reader.readAsArrayBuffer(file);
-  };
+  inp.onchange=e=>handleQgendaFile(e.target.files[0]);
   inp.click();
 }
 
@@ -1554,6 +1656,7 @@ function parseQgendaWorkbook(wb, filename){
 function showQgendaTaskMapModal(rawRecords, filename, totalParsed, totalIgnored){
   window._qgRawRecords=rawRecords;
   if(!S.qgendaShiftMap) S.qgendaShiftMap={};
+  const firstTime=S.docs.filter(d=>d.active).length===0;
 
   const taskStats={};
   rawRecords.forEach(r=>{
@@ -1583,8 +1686,7 @@ function showQgendaTaskMapModal(rawRecords, filename, totalParsed, totalIgnored)
     </tr>`;
   }).join('');
 
-  showModal(`🧭 Map qGenda Tasks — ${filename}`,
-    `<div style="font-size:12px;color:var(--ink3);margin-bottom:10px">
+  const mainHtml=`<div style="font-size:12px;color:var(--ink3);margin-bottom:10px">
       Map this site's qGenda task labels to the scheduler's shift types. These choices are saved for this group after import.
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px">
@@ -1597,7 +1699,10 @@ function showQgendaTaskMapModal(rawRecords, filename, totalParsed, totalIgnored)
         <thead><tr><th>qGenda Task</th><th>Rows</th><th>Sample Providers</th><th>Map To</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
-    </div>`,
+    </div>`;
+
+  showModal(`Map qGenda Tasks - ${filename}`,
+    qgGuideLayout(mainHtml,'tasks',firstTime),
     'Continue',
     ()=>applyQgendaTaskMap(filename,totalParsed,totalIgnored)
   );
@@ -1710,8 +1815,7 @@ function showQgendaMapModal(records, filename, totalParsed, totalIgnored, unknow
   const nCount=displayRecords.filter(r=>r.shift==='N'&&(r.docId||onboardingEmptyRoster)).length;
   const skipCount=onboardingEmptyRoster?0:pastRecords.filter(r=>!r.docId).length;
 
-  showModal(`Import qGenda — ${filename}`,
-    `<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;margin-bottom:14px">
+  const mainHtml=`<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;margin-bottom:14px">
       <div style="background:#dff5e6;border-radius:4px;padding:8px;text-align:center">
         <div style="font-size:20px;font-weight:700;color:#0a7044">${readyCount}</div>
         <div style="font-size:11px;color:#555">${onboardingEmptyRoster?'providers ready':'ready to import'}</div>
@@ -1733,9 +1837,9 @@ function showQgendaMapModal(records, filename, totalParsed, totalIgnored, unknow
       Breakdown: <strong>${rCount} R</strong> · <strong>${sCount} S</strong> · <strong>${nCount} N</strong> ${onboardingEmptyRoster?'recognized shifts in file':'matched past shifts'}
     </div>
     <div style="font-weight:700;font-size:12px;margin-bottom:6px">
-      All provider name matches — <span style="color:#0a7044">${matchedNames.length} matched</span>,
+      All provider name matches - <span style="color:#0a7044">${matchedNames.length} matched</span>,
       <span style="color:#a85800">${unmatchedNames.length} unmatched</span>
-      <span style="font-weight:400;color:var(--ink3)"> — verify and correct before importing</span>
+      <span style="font-weight:400;color:var(--ink3)"> - verify and correct before importing</span>
     </div>
     ${onboardingEmptyRoster?'<div style="background:#eef5fb;border:1px solid #b8d4f0;color:#1b4d8f;border-radius:4px;padding:8px 10px;font-size:12px;margin-bottom:10px">Blank roster detected. qGenda provider names are preselected as standard 1.0 FTE providers. Mark PRN physicians/APPs as PRN / Track Only and mark the site medical director before importing.</div>':''}
     ${unknownShifts.length?`<div style="background:#fff5dc;border:1px solid #f0d080;color:#8a5400;border-radius:4px;padding:8px 10px;font-size:12px;margin-bottom:10px">Ignored task labels: ${qgEsc(unknownShifts.slice(0,8).join(', '))}${unknownShifts.length>8?'...':''}</div>`:''}
@@ -1744,7 +1848,7 @@ function showQgendaMapModal(records, filename, totalParsed, totalIgnored, unknow
     </div>
     <div style="margin-top:10px;display:flex;gap:8px;align-items:center">
       <button class="btn btn-sm" onclick="previewQgendaImport()" style="background:#eef5fb;color:#1b4d8f;border:1px solid #b8d4f0">
-        👁️ Preview Changes
+        Preview Changes
       </button>
       <span style="font-size:11px;color:var(--ink3)">${onboardingEmptyRoster?'Preview past shifts that will be written; roster additions happen even if all shifts are future-dated':'Preview what shifts will be written before importing'}</span>
     </div>
@@ -1752,7 +1856,10 @@ function showQgendaMapModal(records, filename, totalParsed, totalIgnored, unknow
     <div id="qg-import-progress" style="display:none;margin-top:8px">
       <div class="qg-progress"><div class="qg-progress-bar" id="qg-bar" style="width:0%"></div></div>
       <div id="qg-status" style="font-size:11px;color:var(--ink3);margin-top:4px">Importing…</div>
-    </div>`,
+    </div>`;
+
+  showModal(`Import qGenda - ${filename}`,
+    qgGuideLayout(mainHtml,'providers',onboardingEmptyRoster),
     onboardingEmptyRoster?'Import Roster':'Import Shifts',
     ()=>runQgendaImport(window._qgRecords)
   );
@@ -2170,6 +2277,41 @@ function isStrictTeamEligible(d){return d&&d.type==='standard'&&!isMedicalDirect
 function isAppProvider(d){return d&&(d.role==='APP'||d.role==='NP')}
 function physicianRounderTarget(){return (S.cfg.R||0)+(S.cfg.appRounders||0)}
 function admitterTarget(){return (S.cfg.S||0)+(S.cfg.appAdmitters||0)}
+function baseStaffingCounts(){
+  ensureShiftCfg();
+  return {
+    R:S.cfg.R||0,
+    S:S.cfg.S||0,
+    nocturnists:S.cfg.nocturnists||0,
+    appRounders:S.cfg.appRounders||0,
+    appAdmitters:S.cfg.appAdmitters||0
+  };
+}
+function staffingOverridesForDate(ds){
+  ensureShiftCfg();
+  return (S.cfg.staffingOverrides||[]).filter(o=>o&&o.start&&o.end&&o.start<=ds&&ds<=o.end);
+}
+function staffingForDate(ds){
+  const counts=baseStaffingCounts();
+  staffingOverridesForDate(ds).forEach(o=>{
+    counts.R+=(o.R||0);
+    counts.S+=(o.S||0);
+    counts.nocturnists+=(o.nocturnists||0);
+    counts.appRounders+=(o.appRounders||0);
+    counts.appAdmitters+=(o.appAdmitters||0);
+  });
+  return counts;
+}
+function physicianRounderTargetForDate(ds){const c=staffingForDate(ds);return c.R+c.appRounders}
+function admitterTargetForDate(ds){const c=staffingForDate(ds);return c.S+c.appAdmitters}
+function avgPhysicianRounderTarget(days){
+  if(!days||!days.length)return physicianRounderTarget();
+  return days.reduce((sum,d)=>sum+physicianRounderTargetForDate(dstrD(d)),0)/days.length;
+}
+function avgAdmitterTarget(days){
+  if(!days||!days.length)return admitterTarget();
+  return days.reduce((sum,d)=>sum+admitterTargetForDate(dstrD(d)),0)/days.length;
+}
 function defaultPreferencesForType(type){
   return type==='standard'?{preferredR:7,maxWork:7,scheduleStyle:'strict-swing-block'}:{preferredR:5,maxWork:7,scheduleStyle:'variable'};
 }
@@ -2202,7 +2344,8 @@ function shiftCfgDefaults(){
     swingLabels:[],
     nocturnistLabels:[],
     appRounderLabels:[],
-    appAdmitterLabels:[]
+    appAdmitterLabels:[],
+    staffingOverrides:[]
   };
 }
 function ensureShiftCfg(){
@@ -2216,6 +2359,11 @@ function getShiftLabels(key,count,prefix){
   return arr.slice(0,count);
 }
 function shiftLabelFor(key,index,prefix){return getShiftLabels(key,index+1,prefix)[index]||`${prefix} ${index+1}`}
+function cfgInputInt(id,fallback=0){
+  const el=document.getElementById(id);
+  const val=parseInt(el&&el.value,10);
+  return Number.isFinite(val)?val:fallback;
+}
 function syncCfgInputs(){
   ensureShiftCfg();
   const pairs=[
@@ -2231,16 +2379,81 @@ function syncCfgInputs(){
   ];
   pairs.forEach(([id,val])=>{const el=document.getElementById(id);if(el)el.value=val;});
 }
+function staffingOverrideText(o){
+  const parts=[];
+  if(o.R)parts.push(`+${o.R} rounder${o.R===1?'':'s'}`);
+  if(o.S)parts.push(`+${o.S} admitter${o.S===1?'':'s'}`);
+  if(o.nocturnists)parts.push(`+${o.nocturnists} nocturnist${o.nocturnists===1?'':'s'}`);
+  if(o.appRounders)parts.push(`+${o.appRounders} APP rounder${o.appRounders===1?'':'s'}`);
+  if(o.appAdmitters)parts.push(`+${o.appAdmitters} APP admitter${o.appAdmitters===1?'':'s'}`);
+  return parts.join(', ')||'No extra staffing';
+}
+function renderStaffingOverrides(){
+  ensureShiftCfg();
+  const el=document.getElementById('staffing-overrides-list');
+  if(!el)return;
+  const items=(S.cfg.staffingOverrides||[]).slice().sort((a,b)=>(a.start||'').localeCompare(b.start||''));
+  if(!items.length){
+    el.innerHTML='<div class="tx-xs tx-mu" style="padding:8px 0">No temporary staffing changes set.</div>';
+    return;
+  }
+  el.innerHTML=`<table class="htbl" style="font-size:12px;margin-top:4px">
+    <thead><tr><th>Dates</th><th>Extra Coverage</th><th></th></tr></thead>
+    <tbody>${items.map(o=>`<tr>
+      <td style="font-family:'JetBrains Mono',monospace;font-size:11px">${qgEsc(o.start)} to ${qgEsc(o.end)}</td>
+      <td>${qgEsc(staffingOverrideText(o))}</td>
+      <td style="text-align:right"><button class="btn btn-xs btn-d" onclick="removeStaffingOverride('${o.id}')">Remove</button></td>
+    </tr>`).join('')}</tbody>
+  </table>`;
+}
+function addStaffingOverride(){
+  if(!isAdmin()){toast('Admin only','error');return;}
+  ensureShiftCfg();
+  const start=document.getElementById('tmp-start')?.value;
+  const end=document.getElementById('tmp-end')?.value;
+  if(!start||!end){toast('Choose start and end dates','error');return;}
+  if(end<start){toast('End date must be after start date','error');return;}
+  const entry={
+    id:'tmp-'+Date.now()+'-'+Math.random().toString(36).slice(2,6),
+    start,
+    end,
+    R:cfgInputInt('tmp-r',0),
+    S:cfgInputInt('tmp-s',0),
+    nocturnists:cfgInputInt('tmp-n',0),
+    appRounders:cfgInputInt('tmp-app-r',0),
+    appAdmitters:cfgInputInt('tmp-app-s',0)
+  };
+  if(!entry.R&&!entry.S&&!entry.nocturnists&&!entry.appRounders&&!entry.appAdmitters){
+    toast('Add at least one extra staffing count','error');
+    return;
+  }
+  S.cfg.staffingOverrides.push(entry);
+  ['tmp-r','tmp-s','tmp-n','tmp-app-r','tmp-app-s'].forEach(id=>{const el=document.getElementById(id);if(el)el.value=0;});
+  renderStaffingOverrides();
+  renderSchedule();
+  renderWeek();
+  saveData(true);
+  toast('Temporary staffing change added','success');
+}
+function removeStaffingOverride(id){
+  if(!isAdmin()){toast('Admin only','error');return;}
+  ensureShiftCfg();
+  S.cfg.staffingOverrides=(S.cfg.staffingOverrides||[]).filter(o=>o.id!==id);
+  renderStaffingOverrides();
+  renderSchedule();
+  renderWeek();
+  saveData(true);
+}
 function renderShiftParamFields(){
   ensureShiftCfg();
   const el=document.getElementById('shift-param-fields');
   if(!el)return;
   const counts={
-    rounderLabels:parseInt(document.getElementById('c-r')?.value)||S.cfg.R||0,
-    swingLabels:parseInt(document.getElementById('c-s')?.value)||S.cfg.S||0,
-    nocturnistLabels:parseInt(document.getElementById('c-n')?.value)||S.cfg.nocturnists||0,
-    appRounderLabels:parseInt(document.getElementById('c-app-r')?.value)||S.cfg.appRounders||0,
-    appAdmitterLabels:parseInt(document.getElementById('c-app-s')?.value)||S.cfg.appAdmitters||0
+    rounderLabels:cfgInputInt('c-r',S.cfg.R||0),
+    swingLabels:cfgInputInt('c-s',S.cfg.S||0),
+    nocturnistLabels:cfgInputInt('c-n',S.cfg.nocturnists||0),
+    appRounderLabels:cfgInputInt('c-app-r',S.cfg.appRounders||0),
+    appAdmitterLabels:cfgInputInt('c-app-s',S.cfg.appAdmitters||0)
   };
   const meta={
     rounderLabels:['Rounder Names','Rounder'],
@@ -2255,7 +2468,7 @@ function renderShiftParamFields(){
     const labels=getShiftLabels(key,count,prefix);
     html+=`<label>${label}</label><div class="tx-xs tx-mu">${count} slots</div><div class="fl" style="flex-wrap:wrap;gap:5px">`;
     labels.forEach((name,idx)=>{
-      html+=`<input class="shift-label-input" data-key="${key}" data-idx="${idx}" value="${qgEsc(name)}" style="width:135px;padding:4px 6px;border:1px solid var(--line);border-radius:3px">`;
+      html+=`<input class="shift-label-input" data-key="${key}" data-idx="${idx}" value="${qgEsc(name)}" style="width:135px;padding:4px 6px;border:1px solid var(--line);border-radius:3px" oninput="autoSaveCfg()" onchange="autoSaveCfg()">`;
     });
     html+='</div>';
   });
@@ -2320,7 +2533,8 @@ function applyFlexibleRecommendation(){
   if(maxReq)maxReq.value=r.maxReq;
   if(maxRequired)maxRequired.value=r.maxRequired;
   if(maxWeekend)maxWeekend.value=r.maxWeekend;
-  toast('Suggested request limits applied. Click Save to keep them.','info',3500);
+  autoSaveCfg(true);
+  toast('Suggested request limits applied and saved.','success',2500);
 }
 function isWeekend(date){return date.getDay()===0||date.getDay()===6}
 function quarterRange(year,q){
@@ -2505,8 +2719,8 @@ function _scoreScheduleCandidate(year,q){
       if(sh==='R'||sh==='H') r++;
       else if(sh==='S') s++;
     });
-    shortages+=Math.max(0,physicianRounderTarget()-r)+Math.max(0,admitterTarget()-s);
-    overages+=Math.max(0,r-physicianRounderTarget())+Math.max(0,s-admitterTarget());
+    shortages+=Math.max(0,physicianRounderTargetForDate(ds)-r)+Math.max(0,admitterTargetForDate(ds)-s);
+    overages+=Math.max(0,r-physicianRounderTargetForDate(ds))+Math.max(0,s-admitterTargetForDate(ds));
   });
 
   return requiredMisses*1000000000
@@ -2730,7 +2944,7 @@ function _generateQuarter(candidateSeed=0,finalize=true){
     // Pro-rated quarterly S target based on FTE
     const doc=byId(docId);
     const fte=doc?doc.fte:1.0;
-    const baseQTarget=Math.round(S.cfg.S * totalDays / (rotation.length + partTime.length + strictAll.length || 1));
+    const baseQTarget=Math.round(avgAdmitterTarget(quarterDays(year,q)) * totalDays / (rotation.length + partTime.length + strictAll.length || 1));
     return Math.max(1, Math.round(baseQTarget * fte));
   }
   function canBeS_normal(docId){
@@ -2822,7 +3036,7 @@ function _generateQuarter(candidateSeed=0,finalize=true){
   const qStartDay=Math.floor((startD-new Date(year,0,1))/(86400000)); // day of year
 
   // Target ~8 S per quarter total for strict providers (same as variable)
-  const strictSTarget = Math.round(S.cfg.S * totalDays / (rotation.length + partTime.length + strictAll.length || 1));
+  const strictSTarget = Math.round(avgAdmitterTarget(quarterDays(year,q)) * totalDays / (rotation.length + partTime.length + strictAll.length || 1));
 
   // ── STRICT-MIXED: 7on/7off, append 0-2 S days to each work week ──────────
   // Work week = days 0-6 of 14-day cycle, rest = days 7-13.
@@ -2912,7 +3126,15 @@ function _generateQuarter(candidateSeed=0,finalize=true){
       continue; // don't generate for this day
     }
 
+    const dayStaffing=staffingForDate(ds);
+    const availableNocturnists=nocturnists
+      .filter(doc=>!doc.startDate||doc.startDate<=ds)
+      .sort((a,b)=>providerSort(a,b));
     nocturnists.forEach(doc=>{S.sched[doc.id][ds]='OFF';});
+    for(let ni=0;ni<Math.min(dayStaffing.nocturnists,availableNocturnists.length);ni++){
+      const doc=availableNocturnists[(di+ni)%availableNocturnists.length];
+      S.sched[doc.id][ds]='N';
+    }
 
     let tahirR=0;
     weekdayOnly.forEach(doc=>{
@@ -2936,7 +3158,7 @@ function _generateQuarter(candidateSeed=0,finalize=true){
     // Part-time providers: 7on/7off cycle with FTE-adjusted S quota
     // Compute their quarterly S target same as qSTarget() but inline since we're pre-loop
     const ptSTarget=Math.max(1, Math.round(
-      Math.round(S.cfg.S * totalDays / (rotation.length + partTime.length + strictAll.length || 1))
+      Math.round(avgAdmitterTarget(quarterDays(year,q)) * totalDays / (rotation.length + partTime.length + strictAll.length || 1))
     ));
     partTime.forEach(doc=>{
       if(doc.startDate&&doc.startDate>ds){S.sched[doc.id][ds]='OFF';return;}
@@ -2955,8 +3177,8 @@ function _generateQuarter(candidateSeed=0,finalize=true){
       if(m==='S'){ marchS++; doc._ptQS=(doc._ptQS||0)+1; }
     });
 
-    let needR=physicianRounderTarget()-tahirR-marchR;
-    let needS=admitterTarget()-slavinaS-marchS;
+    let needR=physicianRounderTargetForDate(ds)-tahirR-marchR;
+    let needS=admitterTargetForDate(ds)-slavinaS-marchS;
 
     // Deduct strict pre-assigned shifts
     strictAll.forEach(doc=>{
@@ -3648,25 +3870,25 @@ function renderSchedule(){
 
   // Coverage footer
   html+='<tfoot>';
-  const targetR=physicianRounderTarget()+consultDocs.length;
   function coverageRow(label,target,countFn){
     html+=`<tr class="cov"><td class="name-col">${label}</td>`;
     days.forEach((d,i)=>{
       const ds=dstrD(d);
+      const dayTarget=typeof target==='function'?target(ds):target;
       const v=countFn(ds);
       let cls='cell';
-      if(v===target)cls+=' cov-ok';else if(v<Math.max(0,target-1))cls+=' cov-bad';else cls+=' cov-low';
+      if(v===dayTarget)cls+=' cov-ok';else if(v<Math.max(0,dayTarget-1))cls+=' cov-bad';else cls+=' cov-low';
       if(i>0&&d.getDate()===1)cls+=' month-sep';
       if(selCols.has(ds))cls+=' col-hl';
       html+=`<td class="${cls}">${v}</td>`;
     });
     html+='</tr>';
   }
-  coverageRow('ROUNDERS',targetR,ds=>allDocs.filter(doc=>S.sched[doc.id]&&S.sched[doc.id][ds]==='R').length);
-  coverageRow('SWING',admitterTarget(),ds=>allDocs.filter(doc=>S.sched[doc.id]&&(S.sched[doc.id][ds]==='S'||S.sched[doc.id][ds]==='H')).length);
-  coverageRow('NOCTURNISTS',S.cfg.nocturnists||0,ds=>allDocs.filter(doc=>S.sched[doc.id]&&S.sched[doc.id][ds]==='N'&&!isAppProvider(doc)).length);
-  coverageRow('APP ROUND',S.cfg.appRounders||0,ds=>allDocs.filter(doc=>S.sched[doc.id]&&S.sched[doc.id][ds]==='R'&&isAppProvider(doc)).length);
-  coverageRow('APP SWING',S.cfg.appAdmitters||0,ds=>allDocs.filter(doc=>S.sched[doc.id]&&(S.sched[doc.id][ds]==='S'||S.sched[doc.id][ds]==='H')&&isAppProvider(doc)).length);
+  coverageRow('ROUNDERS',ds=>physicianRounderTargetForDate(ds)+consultDocs.length,ds=>allDocs.filter(doc=>S.sched[doc.id]&&S.sched[doc.id][ds]==='R').length);
+  coverageRow('SWING',ds=>admitterTargetForDate(ds),ds=>allDocs.filter(doc=>S.sched[doc.id]&&(S.sched[doc.id][ds]==='S'||S.sched[doc.id][ds]==='H')).length);
+  coverageRow('NOCTURNISTS',ds=>staffingForDate(ds).nocturnists,ds=>allDocs.filter(doc=>S.sched[doc.id]&&S.sched[doc.id][ds]==='N'&&!isAppProvider(doc)).length);
+  coverageRow('APP ROUND',ds=>staffingForDate(ds).appRounders,ds=>allDocs.filter(doc=>S.sched[doc.id]&&S.sched[doc.id][ds]==='R'&&isAppProvider(doc)).length);
+  coverageRow('APP SWING',ds=>staffingForDate(ds).appAdmitters,ds=>allDocs.filter(doc=>S.sched[doc.id]&&(S.sched[doc.id][ds]==='S'||S.sched[doc.id][ds]==='H')&&isAppProvider(doc)).length);
   coverageRow('APP NIGHT',0,ds=>allDocs.filter(doc=>S.sched[doc.id]&&S.sched[doc.id][ds]==='N'&&isAppProvider(doc)).length);
   html+='</tfoot></table>';
 
@@ -3753,6 +3975,7 @@ function renderWeek(){
   for(let i=0;i<7;i++){
     const d=addD(ws,i);
     const ds=dstrD(d);
+    const staffing=staffingForDate(ds);
     const isT=ds===today;
     const isH=isHol(ds,d.getFullYear());
     const rs=docs.filter(doc=>S.sched[doc.id]&&S.sched[doc.id][ds]==='R'&&!isAppProvider(doc))
@@ -3774,15 +3997,15 @@ function renderWeek(){
       <div class="wd-hdr">${dayN(d)}</div>
       <div class="wd-date${isT?' today':''}">${d.getDate()}</div>
       ${isH?'<div style="font-size:10px;color:var(--H-tx);font-weight:600;margin-bottom:4px">Holiday</div>':''}
-      <div class="wd-section-tit r">Physician Rounders (${rs.length}/${S.cfg.R})</div>
+      <div class="wd-section-tit r">Physician Rounders (${rs.length}/${staffing.R})</div>
       ${rs.map(({doc,team},idx)=>`<div class="wd-name">${renderTeam(team)} <strong>${shiftLabelFor('rounderLabels',idx,'Rounder')}</strong> · ${dname(doc)}</div>`).join('')||'<div class="wd-name tx-mu">—</div>'}
-      <div class="wd-section-tit r">APP Rounders (${appRs.length}/${S.cfg.appRounders||0})</div>
+      <div class="wd-section-tit r">APP Rounders (${appRs.length}/${staffing.appRounders})</div>
       ${appRs.map(({doc,team},idx)=>`<div class="wd-name">${renderTeam(team)} <strong>${shiftLabelFor('appRounderLabels',idx,'APP Rounder')}</strong> · ${dname(doc)}</div>`).join('')||'<div class="wd-name tx-mu">—</div>'}
-      <div class="wd-section-tit s">Admitters / Swing (${ss.length}/${S.cfg.S})</div>
+      <div class="wd-section-tit s">Admitters / Swing (${ss.length}/${staffing.S})</div>
       ${ss.map((doc,idx)=>`<div class="wd-name"><strong>${shiftLabelFor('swingLabels',idx,'Admitter')}</strong> · ${dname(doc)}</div>`).join('')||'<div class="wd-name tx-mu">—</div>'}
-      <div class="wd-section-tit s">APP Admitters (${appSs.length}/${S.cfg.appAdmitters||0})</div>
+      <div class="wd-section-tit s">APP Admitters (${appSs.length}/${staffing.appAdmitters})</div>
       ${appSs.map((doc,idx)=>`<div class="wd-name"><strong>${shiftLabelFor('appAdmitterLabels',idx,'APP Admitter')}</strong> · ${dname(doc)}</div>`).join('')||'<div class="wd-name tx-mu">—</div>'}
-      <div class="wd-section-tit" style="color:#3a3a6e;margin-top:8px">Nocturnists (${ns.length}/${S.cfg.nocturnists||0})</div>
+      <div class="wd-section-tit" style="color:#3a3a6e;margin-top:8px">Nocturnists (${ns.length}/${staffing.nocturnists})</div>
       ${ns.map((doc,idx)=>`<div class="wd-name"><strong>${shiftLabelFor('nocturnistLabels',idx,'Nocturnist')}</strong> · ${dname(doc)}</div>`).join('')||'<div class="wd-name tx-mu">—</div>'}
     </div>`;
   }
@@ -3970,7 +4193,7 @@ function renderMyRequestCal(){
       }
     } else {
       actionArea.innerHTML=`<div style="background:#f0f4f8;border:1px solid #c8d8e8;border-radius:4px;padding:8px 12px;color:#5a6a7a;font-size:12px">
-        👁️ View only — you can only submit requests for your own schedule
+        View only - you can only submit requests for your own schedule
       </div>`;
     }
   }
@@ -4785,11 +5008,11 @@ function renderHolidayTable(){
 
   let html=`<thead><tr>
     <th style="min-width:140px">Physician</th>
-    <th>🗓️ New Year's<br><span style="color:var(--ink3);font-weight:400;font-size:10px">${hd.ny}</span></th>
-    <th>🪖 Memorial Day<br><span style="color:var(--ink3);font-weight:400;font-size:10px">${hd.mem}</span></th>
-    <th>🎆 July 4th<br><span style="color:var(--ink3);font-weight:400;font-size:10px">${hd.jul4}</span></th>
-    <th>👷 Labor Day<br><span style="color:var(--ink3);font-weight:400;font-size:10px">${hd.lab}</span></th>
-    <th>🦃 Thanksgiving<br><span style="color:var(--ink3);font-weight:400;font-size:10px">${hd.tg}</span></th>
+    <th>New Year's<br><span style="color:var(--ink3);font-weight:400;font-size:10px">${hd.ny}</span></th>
+    <th>Memorial Day<br><span style="color:var(--ink3);font-weight:400;font-size:10px">${hd.mem}</span></th>
+    <th>July 4th<br><span style="color:var(--ink3);font-weight:400;font-size:10px">${hd.jul4}</span></th>
+    <th>Labor Day<br><span style="color:var(--ink3);font-weight:400;font-size:10px">${hd.lab}</span></th>
+    <th>Thanksgiving<br><span style="color:var(--ink3);font-weight:400;font-size:10px">${hd.tg}</span></th>
     <th>Christmas<br><span style="color:var(--ink3);font-weight:400;font-size:10px">${hd.xm}</span></th>
     <th>Xmas ${y-1}?</th>
     <th>Rule</th>
@@ -5056,15 +5279,29 @@ function addPhysician(){
   ['n-last','n-first','n-title'].forEach(i=>document.getElementById(i).value='');
   toast(`Added ${last}`,'success');
 }
-function saveCfg(){
+let cfgSaveTimer=null;
+function handleShiftCountChange(){
+  renderShiftParamFields();
+  autoSaveCfg(true);
+}
+function autoSaveCfg(immediate=false){
+  if(cfgSaveTimer)clearTimeout(cfgSaveTimer);
+  if(immediate){
+    saveCfg({silent:true});
+    return;
+  }
+  cfgSaveTimer=setTimeout(()=>saveCfg({silent:true}),500);
+}
+function saveCfg(opts={}){
+  const silent=!!opts.silent;
   if(!isAdmin()){ toast('Admin only','error'); return; }
   ensureShiftCfg();
-  S.cfg.annual=parseInt(document.getElementById('c-annual').value);
-  S.cfg.R=parseInt(document.getElementById('c-r').value);
-  S.cfg.S=parseInt(document.getElementById('c-s').value);
-  S.cfg.nocturnists=parseInt(document.getElementById('c-n')?.value)||0;
-  S.cfg.appRounders=parseInt(document.getElementById('c-app-r')?.value)||0;
-  S.cfg.appAdmitters=parseInt(document.getElementById('c-app-s')?.value)||0;
+  S.cfg.annual=cfgInputInt('c-annual',S.cfg.annual||182);
+  S.cfg.R=cfgInputInt('c-r',S.cfg.R||0);
+  S.cfg.S=cfgInputInt('c-s',S.cfg.S||0);
+  S.cfg.nocturnists=cfgInputInt('c-n',S.cfg.nocturnists||0);
+  S.cfg.appRounders=cfgInputInt('c-app-r',S.cfg.appRounders||0);
+  S.cfg.appAdmitters=cfgInputInt('c-app-s',S.cfg.appAdmitters||0);
   const labels={rounderLabels:[],swingLabels:[],nocturnistLabels:[],appRounderLabels:[],appAdmitterLabels:[]};
   document.querySelectorAll('.shift-label-input').forEach(inp=>{
     const key=inp.getAttribute('data-key');
@@ -5076,10 +5313,12 @@ function saveCfg(){
   Object.keys(labels).forEach(key=>{
     S.cfg[key]=labels[key].map((v,i)=>v||`${prefixes[key]} ${i+1}`).filter(Boolean);
   });
-  S.cfg.maxReq=parseInt(document.getElementById('c-max-req').value);
-  S.cfg.maxRequired=parseInt(document.getElementById('c-max-required')?.value)||5;
-  S.cfg.maxWeekendReq=parseInt(document.getElementById('c-max-wk').value);
-  saveData();toast('Settings saved','success');
+  S.cfg.maxReq=cfgInputInt('c-max-req',S.cfg.maxReq||15);
+  S.cfg.maxRequired=cfgInputInt('c-max-required',S.cfg.maxRequired||5);
+  S.cfg.maxWeekendReq=cfgInputInt('c-max-wk',S.cfg.maxWeekendReq||6);
+  renderFlexibleGuidance();
+  saveData(silent);
+  if(!silent)toast('Settings saved','success');
 }
 
 // ════════════════════════════════════════════════════════
@@ -5241,6 +5480,7 @@ S.ui.year=curYear; S.ui.quarter=curQ;
 // Set defaults
 syncCfgInputs();
 renderShiftParamFields();
+renderStaffingOverrides();
 
 // Default request quarter to next quarter
 let defReqQ=curQ+1; let defReqY=curYear;
@@ -5318,6 +5558,7 @@ async function finishInit(){
   renderSchedule();
   updateGenButton();
   renderShiftParamFields();
+  renderStaffingOverrides();
   renderFlexibleGuidance();
   renderRoster();
   renderDocList();
