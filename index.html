@@ -810,6 +810,25 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
         <div class="fg"><label>APP Admitters/Day</label><input type="number" id="c-app-s" value="0" min="0" style="width:100px" onchange="handleShiftCountChange()"></div>
       </div>
       <div id="shift-param-fields"></div>
+      <div class="dm-section">
+        <div class="dm-title">Temporary Staffing Changes</div>
+        <div class="dm-help" style="margin-bottom:8px">Use this for short seasons when this site needs extra coverage. These numbers are added to the normal daily counts only during the dates below.</div>
+        <div class="row">
+          <div class="fg"><label>Start Date</label><input type="date" id="tmp-start" style="width:140px"></div>
+          <div class="fg"><label>End Date</label><input type="date" id="tmp-end" style="width:140px"></div>
+        </div>
+        <div class="row">
+          <div class="fg"><label>Extra Rounders</label><input type="number" id="tmp-r" value="0" min="0" style="width:90px"></div>
+          <div class="fg"><label>Extra Admitters</label><input type="number" id="tmp-s" value="0" min="0" style="width:90px"></div>
+          <div class="fg"><label>Extra Nocturnists</label><input type="number" id="tmp-n" value="0" min="0" style="width:100px"></div>
+        </div>
+        <div class="row">
+          <div class="fg"><label>Extra APP Rounders</label><input type="number" id="tmp-app-r" value="0" min="0" style="width:110px"></div>
+          <div class="fg"><label>Extra APP Admitters</label><input type="number" id="tmp-app-s" value="0" min="0" style="width:110px"></div>
+          <button class="btn btn-sm" onclick="addStaffingOverride()">Add Temporary Change</button>
+        </div>
+        <div id="staffing-overrides-list"></div>
+      </div>
       <div style="font-weight:700;font-size:12px;color:var(--ink2);margin:14px 0 6px;padding-top:10px;border-top:1px solid var(--line)">Annual Target & Request Limits</div>
       <div class="row">
         <div class="fg"><label>Annual Shifts (1.0 FTE)</label><input type="number" id="c-annual" value="182" style="width:110px" onchange="autoSaveCfg()" oninput="autoSaveCfg()"></div>
@@ -2258,6 +2277,41 @@ function isStrictTeamEligible(d){return d&&d.type==='standard'&&!isMedicalDirect
 function isAppProvider(d){return d&&(d.role==='APP'||d.role==='NP')}
 function physicianRounderTarget(){return (S.cfg.R||0)+(S.cfg.appRounders||0)}
 function admitterTarget(){return (S.cfg.S||0)+(S.cfg.appAdmitters||0)}
+function baseStaffingCounts(){
+  ensureShiftCfg();
+  return {
+    R:S.cfg.R||0,
+    S:S.cfg.S||0,
+    nocturnists:S.cfg.nocturnists||0,
+    appRounders:S.cfg.appRounders||0,
+    appAdmitters:S.cfg.appAdmitters||0
+  };
+}
+function staffingOverridesForDate(ds){
+  ensureShiftCfg();
+  return (S.cfg.staffingOverrides||[]).filter(o=>o&&o.start&&o.end&&o.start<=ds&&ds<=o.end);
+}
+function staffingForDate(ds){
+  const counts=baseStaffingCounts();
+  staffingOverridesForDate(ds).forEach(o=>{
+    counts.R+=(o.R||0);
+    counts.S+=(o.S||0);
+    counts.nocturnists+=(o.nocturnists||0);
+    counts.appRounders+=(o.appRounders||0);
+    counts.appAdmitters+=(o.appAdmitters||0);
+  });
+  return counts;
+}
+function physicianRounderTargetForDate(ds){const c=staffingForDate(ds);return c.R+c.appRounders}
+function admitterTargetForDate(ds){const c=staffingForDate(ds);return c.S+c.appAdmitters}
+function avgPhysicianRounderTarget(days){
+  if(!days||!days.length)return physicianRounderTarget();
+  return days.reduce((sum,d)=>sum+physicianRounderTargetForDate(dstrD(d)),0)/days.length;
+}
+function avgAdmitterTarget(days){
+  if(!days||!days.length)return admitterTarget();
+  return days.reduce((sum,d)=>sum+admitterTargetForDate(dstrD(d)),0)/days.length;
+}
 function defaultPreferencesForType(type){
   return type==='standard'?{preferredR:7,maxWork:7,scheduleStyle:'strict-swing-block'}:{preferredR:5,maxWork:7,scheduleStyle:'variable'};
 }
@@ -2290,7 +2344,8 @@ function shiftCfgDefaults(){
     swingLabels:[],
     nocturnistLabels:[],
     appRounderLabels:[],
-    appAdmitterLabels:[]
+    appAdmitterLabels:[],
+    staffingOverrides:[]
   };
 }
 function ensureShiftCfg(){
@@ -2323,6 +2378,71 @@ function syncCfgInputs(){
     ['c-max-wk',S.cfg.maxWeekendReq]
   ];
   pairs.forEach(([id,val])=>{const el=document.getElementById(id);if(el)el.value=val;});
+}
+function staffingOverrideText(o){
+  const parts=[];
+  if(o.R)parts.push(`+${o.R} rounder${o.R===1?'':'s'}`);
+  if(o.S)parts.push(`+${o.S} admitter${o.S===1?'':'s'}`);
+  if(o.nocturnists)parts.push(`+${o.nocturnists} nocturnist${o.nocturnists===1?'':'s'}`);
+  if(o.appRounders)parts.push(`+${o.appRounders} APP rounder${o.appRounders===1?'':'s'}`);
+  if(o.appAdmitters)parts.push(`+${o.appAdmitters} APP admitter${o.appAdmitters===1?'':'s'}`);
+  return parts.join(', ')||'No extra staffing';
+}
+function renderStaffingOverrides(){
+  ensureShiftCfg();
+  const el=document.getElementById('staffing-overrides-list');
+  if(!el)return;
+  const items=(S.cfg.staffingOverrides||[]).slice().sort((a,b)=>(a.start||'').localeCompare(b.start||''));
+  if(!items.length){
+    el.innerHTML='<div class="tx-xs tx-mu" style="padding:8px 0">No temporary staffing changes set.</div>';
+    return;
+  }
+  el.innerHTML=`<table class="htbl" style="font-size:12px;margin-top:4px">
+    <thead><tr><th>Dates</th><th>Extra Coverage</th><th></th></tr></thead>
+    <tbody>${items.map(o=>`<tr>
+      <td style="font-family:'JetBrains Mono',monospace;font-size:11px">${qgEsc(o.start)} to ${qgEsc(o.end)}</td>
+      <td>${qgEsc(staffingOverrideText(o))}</td>
+      <td style="text-align:right"><button class="btn btn-xs btn-d" onclick="removeStaffingOverride('${o.id}')">Remove</button></td>
+    </tr>`).join('')}</tbody>
+  </table>`;
+}
+function addStaffingOverride(){
+  if(!isAdmin()){toast('Admin only','error');return;}
+  ensureShiftCfg();
+  const start=document.getElementById('tmp-start')?.value;
+  const end=document.getElementById('tmp-end')?.value;
+  if(!start||!end){toast('Choose start and end dates','error');return;}
+  if(end<start){toast('End date must be after start date','error');return;}
+  const entry={
+    id:'tmp-'+Date.now()+'-'+Math.random().toString(36).slice(2,6),
+    start,
+    end,
+    R:cfgInputInt('tmp-r',0),
+    S:cfgInputInt('tmp-s',0),
+    nocturnists:cfgInputInt('tmp-n',0),
+    appRounders:cfgInputInt('tmp-app-r',0),
+    appAdmitters:cfgInputInt('tmp-app-s',0)
+  };
+  if(!entry.R&&!entry.S&&!entry.nocturnists&&!entry.appRounders&&!entry.appAdmitters){
+    toast('Add at least one extra staffing count','error');
+    return;
+  }
+  S.cfg.staffingOverrides.push(entry);
+  ['tmp-r','tmp-s','tmp-n','tmp-app-r','tmp-app-s'].forEach(id=>{const el=document.getElementById(id);if(el)el.value=0;});
+  renderStaffingOverrides();
+  renderSchedule();
+  renderWeek();
+  saveData(true);
+  toast('Temporary staffing change added','success');
+}
+function removeStaffingOverride(id){
+  if(!isAdmin()){toast('Admin only','error');return;}
+  ensureShiftCfg();
+  S.cfg.staffingOverrides=(S.cfg.staffingOverrides||[]).filter(o=>o.id!==id);
+  renderStaffingOverrides();
+  renderSchedule();
+  renderWeek();
+  saveData(true);
 }
 function renderShiftParamFields(){
   ensureShiftCfg();
@@ -2599,8 +2719,8 @@ function _scoreScheduleCandidate(year,q){
       if(sh==='R'||sh==='H') r++;
       else if(sh==='S') s++;
     });
-    shortages+=Math.max(0,physicianRounderTarget()-r)+Math.max(0,admitterTarget()-s);
-    overages+=Math.max(0,r-physicianRounderTarget())+Math.max(0,s-admitterTarget());
+    shortages+=Math.max(0,physicianRounderTargetForDate(ds)-r)+Math.max(0,admitterTargetForDate(ds)-s);
+    overages+=Math.max(0,r-physicianRounderTargetForDate(ds))+Math.max(0,s-admitterTargetForDate(ds));
   });
 
   return requiredMisses*1000000000
@@ -2824,7 +2944,7 @@ function _generateQuarter(candidateSeed=0,finalize=true){
     // Pro-rated quarterly S target based on FTE
     const doc=byId(docId);
     const fte=doc?doc.fte:1.0;
-    const baseQTarget=Math.round(S.cfg.S * totalDays / (rotation.length + partTime.length + strictAll.length || 1));
+    const baseQTarget=Math.round(avgAdmitterTarget(quarterDays(year,q)) * totalDays / (rotation.length + partTime.length + strictAll.length || 1));
     return Math.max(1, Math.round(baseQTarget * fte));
   }
   function canBeS_normal(docId){
@@ -2916,7 +3036,7 @@ function _generateQuarter(candidateSeed=0,finalize=true){
   const qStartDay=Math.floor((startD-new Date(year,0,1))/(86400000)); // day of year
 
   // Target ~8 S per quarter total for strict providers (same as variable)
-  const strictSTarget = Math.round(S.cfg.S * totalDays / (rotation.length + partTime.length + strictAll.length || 1));
+  const strictSTarget = Math.round(avgAdmitterTarget(quarterDays(year,q)) * totalDays / (rotation.length + partTime.length + strictAll.length || 1));
 
   // ── STRICT-MIXED: 7on/7off, append 0-2 S days to each work week ──────────
   // Work week = days 0-6 of 14-day cycle, rest = days 7-13.
@@ -3006,7 +3126,15 @@ function _generateQuarter(candidateSeed=0,finalize=true){
       continue; // don't generate for this day
     }
 
+    const dayStaffing=staffingForDate(ds);
+    const availableNocturnists=nocturnists
+      .filter(doc=>!doc.startDate||doc.startDate<=ds)
+      .sort((a,b)=>providerSort(a,b));
     nocturnists.forEach(doc=>{S.sched[doc.id][ds]='OFF';});
+    for(let ni=0;ni<Math.min(dayStaffing.nocturnists,availableNocturnists.length);ni++){
+      const doc=availableNocturnists[(di+ni)%availableNocturnists.length];
+      S.sched[doc.id][ds]='N';
+    }
 
     let tahirR=0;
     weekdayOnly.forEach(doc=>{
@@ -3030,7 +3158,7 @@ function _generateQuarter(candidateSeed=0,finalize=true){
     // Part-time providers: 7on/7off cycle with FTE-adjusted S quota
     // Compute their quarterly S target same as qSTarget() but inline since we're pre-loop
     const ptSTarget=Math.max(1, Math.round(
-      Math.round(S.cfg.S * totalDays / (rotation.length + partTime.length + strictAll.length || 1))
+      Math.round(avgAdmitterTarget(quarterDays(year,q)) * totalDays / (rotation.length + partTime.length + strictAll.length || 1))
     ));
     partTime.forEach(doc=>{
       if(doc.startDate&&doc.startDate>ds){S.sched[doc.id][ds]='OFF';return;}
@@ -3049,8 +3177,8 @@ function _generateQuarter(candidateSeed=0,finalize=true){
       if(m==='S'){ marchS++; doc._ptQS=(doc._ptQS||0)+1; }
     });
 
-    let needR=physicianRounderTarget()-tahirR-marchR;
-    let needS=admitterTarget()-slavinaS-marchS;
+    let needR=physicianRounderTargetForDate(ds)-tahirR-marchR;
+    let needS=admitterTargetForDate(ds)-slavinaS-marchS;
 
     // Deduct strict pre-assigned shifts
     strictAll.forEach(doc=>{
@@ -3742,25 +3870,25 @@ function renderSchedule(){
 
   // Coverage footer
   html+='<tfoot>';
-  const targetR=physicianRounderTarget()+consultDocs.length;
   function coverageRow(label,target,countFn){
     html+=`<tr class="cov"><td class="name-col">${label}</td>`;
     days.forEach((d,i)=>{
       const ds=dstrD(d);
+      const dayTarget=typeof target==='function'?target(ds):target;
       const v=countFn(ds);
       let cls='cell';
-      if(v===target)cls+=' cov-ok';else if(v<Math.max(0,target-1))cls+=' cov-bad';else cls+=' cov-low';
+      if(v===dayTarget)cls+=' cov-ok';else if(v<Math.max(0,dayTarget-1))cls+=' cov-bad';else cls+=' cov-low';
       if(i>0&&d.getDate()===1)cls+=' month-sep';
       if(selCols.has(ds))cls+=' col-hl';
       html+=`<td class="${cls}">${v}</td>`;
     });
     html+='</tr>';
   }
-  coverageRow('ROUNDERS',targetR,ds=>allDocs.filter(doc=>S.sched[doc.id]&&S.sched[doc.id][ds]==='R').length);
-  coverageRow('SWING',admitterTarget(),ds=>allDocs.filter(doc=>S.sched[doc.id]&&(S.sched[doc.id][ds]==='S'||S.sched[doc.id][ds]==='H')).length);
-  coverageRow('NOCTURNISTS',S.cfg.nocturnists||0,ds=>allDocs.filter(doc=>S.sched[doc.id]&&S.sched[doc.id][ds]==='N'&&!isAppProvider(doc)).length);
-  coverageRow('APP ROUND',S.cfg.appRounders||0,ds=>allDocs.filter(doc=>S.sched[doc.id]&&S.sched[doc.id][ds]==='R'&&isAppProvider(doc)).length);
-  coverageRow('APP SWING',S.cfg.appAdmitters||0,ds=>allDocs.filter(doc=>S.sched[doc.id]&&(S.sched[doc.id][ds]==='S'||S.sched[doc.id][ds]==='H')&&isAppProvider(doc)).length);
+  coverageRow('ROUNDERS',ds=>physicianRounderTargetForDate(ds)+consultDocs.length,ds=>allDocs.filter(doc=>S.sched[doc.id]&&S.sched[doc.id][ds]==='R').length);
+  coverageRow('SWING',ds=>admitterTargetForDate(ds),ds=>allDocs.filter(doc=>S.sched[doc.id]&&(S.sched[doc.id][ds]==='S'||S.sched[doc.id][ds]==='H')).length);
+  coverageRow('NOCTURNISTS',ds=>staffingForDate(ds).nocturnists,ds=>allDocs.filter(doc=>S.sched[doc.id]&&S.sched[doc.id][ds]==='N'&&!isAppProvider(doc)).length);
+  coverageRow('APP ROUND',ds=>staffingForDate(ds).appRounders,ds=>allDocs.filter(doc=>S.sched[doc.id]&&S.sched[doc.id][ds]==='R'&&isAppProvider(doc)).length);
+  coverageRow('APP SWING',ds=>staffingForDate(ds).appAdmitters,ds=>allDocs.filter(doc=>S.sched[doc.id]&&(S.sched[doc.id][ds]==='S'||S.sched[doc.id][ds]==='H')&&isAppProvider(doc)).length);
   coverageRow('APP NIGHT',0,ds=>allDocs.filter(doc=>S.sched[doc.id]&&S.sched[doc.id][ds]==='N'&&isAppProvider(doc)).length);
   html+='</tfoot></table>';
 
@@ -3847,6 +3975,7 @@ function renderWeek(){
   for(let i=0;i<7;i++){
     const d=addD(ws,i);
     const ds=dstrD(d);
+    const staffing=staffingForDate(ds);
     const isT=ds===today;
     const isH=isHol(ds,d.getFullYear());
     const rs=docs.filter(doc=>S.sched[doc.id]&&S.sched[doc.id][ds]==='R'&&!isAppProvider(doc))
@@ -3868,15 +3997,15 @@ function renderWeek(){
       <div class="wd-hdr">${dayN(d)}</div>
       <div class="wd-date${isT?' today':''}">${d.getDate()}</div>
       ${isH?'<div style="font-size:10px;color:var(--H-tx);font-weight:600;margin-bottom:4px">Holiday</div>':''}
-      <div class="wd-section-tit r">Physician Rounders (${rs.length}/${S.cfg.R})</div>
+      <div class="wd-section-tit r">Physician Rounders (${rs.length}/${staffing.R})</div>
       ${rs.map(({doc,team},idx)=>`<div class="wd-name">${renderTeam(team)} <strong>${shiftLabelFor('rounderLabels',idx,'Rounder')}</strong> · ${dname(doc)}</div>`).join('')||'<div class="wd-name tx-mu">—</div>'}
-      <div class="wd-section-tit r">APP Rounders (${appRs.length}/${S.cfg.appRounders||0})</div>
+      <div class="wd-section-tit r">APP Rounders (${appRs.length}/${staffing.appRounders})</div>
       ${appRs.map(({doc,team},idx)=>`<div class="wd-name">${renderTeam(team)} <strong>${shiftLabelFor('appRounderLabels',idx,'APP Rounder')}</strong> · ${dname(doc)}</div>`).join('')||'<div class="wd-name tx-mu">—</div>'}
-      <div class="wd-section-tit s">Admitters / Swing (${ss.length}/${S.cfg.S})</div>
+      <div class="wd-section-tit s">Admitters / Swing (${ss.length}/${staffing.S})</div>
       ${ss.map((doc,idx)=>`<div class="wd-name"><strong>${shiftLabelFor('swingLabels',idx,'Admitter')}</strong> · ${dname(doc)}</div>`).join('')||'<div class="wd-name tx-mu">—</div>'}
-      <div class="wd-section-tit s">APP Admitters (${appSs.length}/${S.cfg.appAdmitters||0})</div>
+      <div class="wd-section-tit s">APP Admitters (${appSs.length}/${staffing.appAdmitters})</div>
       ${appSs.map((doc,idx)=>`<div class="wd-name"><strong>${shiftLabelFor('appAdmitterLabels',idx,'APP Admitter')}</strong> · ${dname(doc)}</div>`).join('')||'<div class="wd-name tx-mu">—</div>'}
-      <div class="wd-section-tit" style="color:#3a3a6e;margin-top:8px">Nocturnists (${ns.length}/${S.cfg.nocturnists||0})</div>
+      <div class="wd-section-tit" style="color:#3a3a6e;margin-top:8px">Nocturnists (${ns.length}/${staffing.nocturnists})</div>
       ${ns.map((doc,idx)=>`<div class="wd-name"><strong>${shiftLabelFor('nocturnistLabels',idx,'Nocturnist')}</strong> · ${dname(doc)}</div>`).join('')||'<div class="wd-name tx-mu">—</div>'}
     </div>`;
   }
@@ -5351,6 +5480,7 @@ S.ui.year=curYear; S.ui.quarter=curQ;
 // Set defaults
 syncCfgInputs();
 renderShiftParamFields();
+renderStaffingOverrides();
 
 // Default request quarter to next quarter
 let defReqQ=curQ+1; let defReqY=curYear;
@@ -5428,6 +5558,7 @@ async function finishInit(){
   renderSchedule();
   updateGenButton();
   renderShiftParamFields();
+  renderStaffingOverrides();
   renderFlexibleGuidance();
   renderRoster();
   renderDocList();
