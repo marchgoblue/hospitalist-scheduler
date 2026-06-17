@@ -801,24 +801,23 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
       <h3>Schedule Parameters</h3>
       <div style="font-weight:700;font-size:12px;color:var(--ink2);margin-bottom:6px">Daily Staffing Counts</div>
       <div class="row">
-        <div class="fg"><label>Rounders/Day</label><input type="number" id="c-r" value="13" min="0" style="width:80px" onchange="renderShiftParamFields()"></div>
-        <div class="fg"><label>Swing/Day</label><input type="number" id="c-s" value="3" min="0" style="width:80px" onchange="renderShiftParamFields()"></div>
+        <div class="fg"><label>Rounders/Day</label><input type="number" id="c-r" value="13" min="0" style="width:80px" onchange="handleShiftCountChange()"></div>
+        <div class="fg"><label>Swing/Day</label><input type="number" id="c-s" value="3" min="0" style="width:80px" onchange="handleShiftCountChange()"></div>
       </div>
       <div class="row">
-        <div class="fg"><label>Nocturnists/Day</label><input type="number" id="c-n" value="1" min="0" style="width:90px" onchange="renderShiftParamFields()"></div>
-        <div class="fg"><label>APP Rounders/Day</label><input type="number" id="c-app-r" value="0" min="0" style="width:100px" onchange="renderShiftParamFields()"></div>
-        <div class="fg"><label>APP Admitters/Day</label><input type="number" id="c-app-s" value="0" min="0" style="width:100px" onchange="renderShiftParamFields()"></div>
+        <div class="fg"><label>Nocturnists/Day</label><input type="number" id="c-n" value="1" min="0" style="width:90px" onchange="handleShiftCountChange()"></div>
+        <div class="fg"><label>APP Rounders/Day</label><input type="number" id="c-app-r" value="0" min="0" style="width:100px" onchange="handleShiftCountChange()"></div>
+        <div class="fg"><label>APP Admitters/Day</label><input type="number" id="c-app-s" value="0" min="0" style="width:100px" onchange="handleShiftCountChange()"></div>
       </div>
       <div id="shift-param-fields"></div>
       <div style="font-weight:700;font-size:12px;color:var(--ink2);margin:14px 0 6px;padding-top:10px;border-top:1px solid var(--line)">Annual Target & Request Limits</div>
       <div class="row">
-        <div class="fg"><label>Annual Shifts (1.0 FTE)</label><input type="number" id="c-annual" value="182" style="width:110px"></div>
-        <div class="fg"><label>Max Requests/Quarter</label><input type="number" id="c-max-req" value="15" style="width:90px"></div>
-        <div class="fg"><label>Max Required Requests</label><input type="number" id="c-max-required" value="5" style="width:90px"></div>
-        <div class="fg"><label>Max Weekend Requests</label><input type="number" id="c-max-wk" value="6" style="width:90px"></div>
+        <div class="fg"><label>Annual Shifts (1.0 FTE)</label><input type="number" id="c-annual" value="182" style="width:110px" onchange="autoSaveCfg()" oninput="autoSaveCfg()"></div>
+        <div class="fg"><label>Max Requests/Quarter</label><input type="number" id="c-max-req" value="15" style="width:90px" onchange="autoSaveCfg()" oninput="autoSaveCfg()"></div>
+        <div class="fg"><label>Max Required Requests</label><input type="number" id="c-max-required" value="5" style="width:90px" onchange="autoSaveCfg()" oninput="autoSaveCfg()"></div>
+        <div class="fg"><label>Max Weekend Requests</label><input type="number" id="c-max-wk" value="6" style="width:90px" onchange="autoSaveCfg()" oninput="autoSaveCfg()"></div>
       </div>
       <div id="flex-guidance" style="margin:10px 0;padding:10px;border:1px solid var(--line);border-radius:4px;background:#f8fafc;font-size:12px"></div>
-      <button class="btn btn-p btn-sm" onclick="saveCfg()">Save</button>
     </div>
     <div class="card">
       <h3>Add Provider</h3>
@@ -1101,16 +1100,16 @@ function updateHeaderForUser(){
   el.textContent=isAdmin()?`${currentUser.username} (Admin · ${currentGroupName()})`:`${currentUser.username} · ${currentGroupName()}`;
 }
 
-async function saveData(){
+async function saveData(silent=false){
   if(!currentUser){toast('Not logged in','error');return;}
   if(isSaving){pendingSave=true;return;}
   isSaving=true;setSyncStatus('saving');
   try{
     await _sbUpsert('schedule_data',{id:currentScheduleRowId(),data:JSON.stringify(S),updated_at:new Date().toISOString()});
     setSyncStatus('saved');
-    if(isAdmin())toast('Saved','success');
+    if(isAdmin()&&!silent)toast('Saved','success');
   }catch(e){console.error('saveData error:',errStr(e),e);setSyncStatus('error');toast('Save failed: '+errStr(e),'error');}
-  finally{isSaving=false;if(pendingSave){pendingSave=false;saveData();}}
+  finally{isSaving=false;if(pendingSave){pendingSave=false;saveData(silent);}}
 }
 
 async function loadData(){
@@ -2305,6 +2304,11 @@ function getShiftLabels(key,count,prefix){
   return arr.slice(0,count);
 }
 function shiftLabelFor(key,index,prefix){return getShiftLabels(key,index+1,prefix)[index]||`${prefix} ${index+1}`}
+function cfgInputInt(id,fallback=0){
+  const el=document.getElementById(id);
+  const val=parseInt(el&&el.value,10);
+  return Number.isFinite(val)?val:fallback;
+}
 function syncCfgInputs(){
   ensureShiftCfg();
   const pairs=[
@@ -2325,11 +2329,11 @@ function renderShiftParamFields(){
   const el=document.getElementById('shift-param-fields');
   if(!el)return;
   const counts={
-    rounderLabels:parseInt(document.getElementById('c-r')?.value)||S.cfg.R||0,
-    swingLabels:parseInt(document.getElementById('c-s')?.value)||S.cfg.S||0,
-    nocturnistLabels:parseInt(document.getElementById('c-n')?.value)||S.cfg.nocturnists||0,
-    appRounderLabels:parseInt(document.getElementById('c-app-r')?.value)||S.cfg.appRounders||0,
-    appAdmitterLabels:parseInt(document.getElementById('c-app-s')?.value)||S.cfg.appAdmitters||0
+    rounderLabels:cfgInputInt('c-r',S.cfg.R||0),
+    swingLabels:cfgInputInt('c-s',S.cfg.S||0),
+    nocturnistLabels:cfgInputInt('c-n',S.cfg.nocturnists||0),
+    appRounderLabels:cfgInputInt('c-app-r',S.cfg.appRounders||0),
+    appAdmitterLabels:cfgInputInt('c-app-s',S.cfg.appAdmitters||0)
   };
   const meta={
     rounderLabels:['Rounder Names','Rounder'],
@@ -2344,7 +2348,7 @@ function renderShiftParamFields(){
     const labels=getShiftLabels(key,count,prefix);
     html+=`<label>${label}</label><div class="tx-xs tx-mu">${count} slots</div><div class="fl" style="flex-wrap:wrap;gap:5px">`;
     labels.forEach((name,idx)=>{
-      html+=`<input class="shift-label-input" data-key="${key}" data-idx="${idx}" value="${qgEsc(name)}" style="width:135px;padding:4px 6px;border:1px solid var(--line);border-radius:3px">`;
+      html+=`<input class="shift-label-input" data-key="${key}" data-idx="${idx}" value="${qgEsc(name)}" style="width:135px;padding:4px 6px;border:1px solid var(--line);border-radius:3px" oninput="autoSaveCfg()" onchange="autoSaveCfg()">`;
     });
     html+='</div>';
   });
@@ -2409,7 +2413,8 @@ function applyFlexibleRecommendation(){
   if(maxReq)maxReq.value=r.maxReq;
   if(maxRequired)maxRequired.value=r.maxRequired;
   if(maxWeekend)maxWeekend.value=r.maxWeekend;
-  toast('Suggested request limits applied. Click Save to keep them.','info',3500);
+  autoSaveCfg(true);
+  toast('Suggested request limits applied and saved.','success',2500);
 }
 function isWeekend(date){return date.getDay()===0||date.getDay()===6}
 function quarterRange(year,q){
@@ -5145,15 +5150,29 @@ function addPhysician(){
   ['n-last','n-first','n-title'].forEach(i=>document.getElementById(i).value='');
   toast(`Added ${last}`,'success');
 }
-function saveCfg(){
+let cfgSaveTimer=null;
+function handleShiftCountChange(){
+  renderShiftParamFields();
+  autoSaveCfg(true);
+}
+function autoSaveCfg(immediate=false){
+  if(cfgSaveTimer)clearTimeout(cfgSaveTimer);
+  if(immediate){
+    saveCfg({silent:true});
+    return;
+  }
+  cfgSaveTimer=setTimeout(()=>saveCfg({silent:true}),500);
+}
+function saveCfg(opts={}){
+  const silent=!!opts.silent;
   if(!isAdmin()){ toast('Admin only','error'); return; }
   ensureShiftCfg();
-  S.cfg.annual=parseInt(document.getElementById('c-annual').value);
-  S.cfg.R=parseInt(document.getElementById('c-r').value);
-  S.cfg.S=parseInt(document.getElementById('c-s').value);
-  S.cfg.nocturnists=parseInt(document.getElementById('c-n')?.value)||0;
-  S.cfg.appRounders=parseInt(document.getElementById('c-app-r')?.value)||0;
-  S.cfg.appAdmitters=parseInt(document.getElementById('c-app-s')?.value)||0;
+  S.cfg.annual=cfgInputInt('c-annual',S.cfg.annual||182);
+  S.cfg.R=cfgInputInt('c-r',S.cfg.R||0);
+  S.cfg.S=cfgInputInt('c-s',S.cfg.S||0);
+  S.cfg.nocturnists=cfgInputInt('c-n',S.cfg.nocturnists||0);
+  S.cfg.appRounders=cfgInputInt('c-app-r',S.cfg.appRounders||0);
+  S.cfg.appAdmitters=cfgInputInt('c-app-s',S.cfg.appAdmitters||0);
   const labels={rounderLabels:[],swingLabels:[],nocturnistLabels:[],appRounderLabels:[],appAdmitterLabels:[]};
   document.querySelectorAll('.shift-label-input').forEach(inp=>{
     const key=inp.getAttribute('data-key');
@@ -5165,10 +5184,12 @@ function saveCfg(){
   Object.keys(labels).forEach(key=>{
     S.cfg[key]=labels[key].map((v,i)=>v||`${prefixes[key]} ${i+1}`).filter(Boolean);
   });
-  S.cfg.maxReq=parseInt(document.getElementById('c-max-req').value);
-  S.cfg.maxRequired=parseInt(document.getElementById('c-max-required')?.value)||5;
-  S.cfg.maxWeekendReq=parseInt(document.getElementById('c-max-wk').value);
-  saveData();toast('Settings saved','success');
+  S.cfg.maxReq=cfgInputInt('c-max-req',S.cfg.maxReq||15);
+  S.cfg.maxRequired=cfgInputInt('c-max-required',S.cfg.maxRequired||5);
+  S.cfg.maxWeekendReq=cfgInputInt('c-max-wk',S.cfg.maxWeekendReq||6);
+  renderFlexibleGuidance();
+  saveData(silent);
+  if(!silent)toast('Settings saved','success');
 }
 
 // ════════════════════════════════════════════════════════
