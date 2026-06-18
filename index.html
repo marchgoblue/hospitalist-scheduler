@@ -488,6 +488,8 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
 /* MODAL */
 .mbk{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:500}
 .mo{background:#fff;border-radius:6px;padding:24px;width:540px;max-width:95vw;box-shadow:0 12px 36px rgba(0,0,0,.3)}
+.mo.wide{width:min(1180px,96vw);min-width:min(860px,96vw);max-height:92vh;resize:both;overflow:auto}
+.mo.wide #mo-bod{max-height:calc(92vh - 130px);overflow:auto;padding-right:4px}
 .mo h3{font-size:16px;color:var(--ink);margin-bottom:12px}
 
 /* TOAST */
@@ -540,7 +542,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
 .qg-drop-zone:hover,.qg-drop-zone.drag{border-color:#111;background:#f4f4f4}
 .qg-drop-title{font-size:12px;font-weight:700;color:var(--ink)}
 .qg-drop-help{font-size:11px;color:var(--ink3);margin-top:3px;line-height:1.35}
-.qg-guide-layout{display:grid;grid-template-columns:minmax(0,1fr) 240px;gap:14px;align-items:start}
+.qg-guide-layout{display:grid;grid-template-columns:minmax(620px,1fr) 240px;gap:14px;align-items:start}
 .qg-guide-pane{border:1px solid var(--line);border-radius:6px;background:#fafafa;padding:12px;font-size:12px;color:var(--ink2);line-height:1.45}
 .qg-guide-pane h4{font-size:11px;text-transform:uppercase;letter-spacing:.7px;color:var(--ink);margin-bottom:6px}
 .qg-guide-pane p{margin:0 0 8px}
@@ -1704,7 +1706,8 @@ function showQgendaTaskMapModal(rawRecords, filename, totalParsed, totalIgnored)
   showModal(`Map qGenda Tasks - ${filename}`,
     qgGuideLayout(mainHtml,'tasks',firstTime),
     'Continue',
-    ()=>applyQgendaTaskMap(filename,totalParsed,totalIgnored)
+    ()=>applyQgendaTaskMap(filename,totalParsed,totalIgnored),
+    {wide:true}
   );
 }
 
@@ -1861,7 +1864,8 @@ function showQgendaMapModal(records, filename, totalParsed, totalIgnored, unknow
   showModal(`Import qGenda - ${filename}`,
     qgGuideLayout(mainHtml,'providers',onboardingEmptyRoster),
     onboardingEmptyRoster?'Import Roster':'Import Shifts',
-    ()=>runQgendaImport(window._qgRecords)
+    ()=>runQgendaImport(window._qgRecords),
+    {wide:true}
   );
 }
 
@@ -2571,7 +2575,9 @@ function toast(msg,kind='info',ms=2500){
   t.className='toast on '+(kind||'');
   setTimeout(()=>t.classList.remove('on'),ms);
 }
-function showModal(title,body,okLbl,okFn){
+function showModal(title,body,okLbl,okFn,opts={}){
+  const box=document.querySelector('#modal .mo');
+  if(box) box.className='mo'+(opts.wide?' wide':'');
   document.getElementById('mo-tit').textContent=title;
   document.getElementById('mo-bod').innerHTML=body;
   const b=document.getElementById('mo-ok');
