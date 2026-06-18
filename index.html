@@ -137,17 +137,17 @@ html{font-size:13px}
 body{font-family:'Source Sans 3',-apple-system,Helvetica,Arial,sans-serif;background:var(--paper);color:var(--ink);min-height:100vh}
 
 /* HEADER */
-#hdr{position:sticky;top:0;z-index:100;background:rgba(255,255,255,.96);border-bottom:1px solid #e6e6e6;display:flex;align-items:center;height:54px;padding:0 28px;gap:0;backdrop-filter:saturate(180%) blur(12px)}
+#hdr{position:sticky;top:0;z-index:100;background:#102a4c;border-bottom:1px solid #0b1d35;display:flex;align-items:center;height:54px;padding:0 28px;gap:0;backdrop-filter:saturate(180%) blur(12px)}
 .brand{display:flex;align-items:center;gap:9px;padding-right:28px;height:100%;min-width:220px}
 .brand-mark{display:none}
 .brand-text{display:flex;flex-direction:column;line-height:1.1}
-.brand-name{font-size:14px;font-weight:700;color:#111;letter-spacing:.1px}
-.brand-sub{font-size:10px;color:#666;font-family:'JetBrains Mono',monospace;letter-spacing:1px;text-transform:uppercase}
+.brand-name{font-size:14px;font-weight:700;color:#fff;letter-spacing:.1px}
+.brand-sub{font-size:10px;color:#b8c7d9;font-family:'JetBrains Mono',monospace;letter-spacing:1px;text-transform:uppercase}
 
 .tabs{display:flex;height:100%}
-.tab{display:flex;align-items:center;padding:0 13px;height:100%;background:none;border:none;border-bottom:2px solid transparent;color:#2f2f2f;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;transition:all .12s}
-.tab:hover{color:#000;background:#f5f5f5}
-.tab.on{color:#000;border-bottom-color:#111;background:transparent}
+.tab{display:flex;align-items:center;padding:0 13px;height:100%;background:none;border:none;border-bottom:2px solid transparent;color:#d6e2f0;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;transition:all .12s}
+.tab:hover{color:#fff;background:rgba(255,255,255,.1)}
+.tab.on{color:#fff;border-bottom-color:#7fb3ff;background:rgba(255,255,255,.06)}
 
 .hdr-r{margin-left:auto;display:flex;align-items:center;gap:8px}
 .role-switch{display:flex;background:var(--hdr);border:1px solid var(--line);border-radius:4px;padding:2px;font-size:11px}
@@ -525,7 +525,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
 .login-error{color:#a01918;font-size:12px;margin-bottom:10px;min-height:16px}
 .readonly-banner{background:#fff5dc;border-bottom:2px solid #f0c040;padding:6px 16px;font-size:12px;font-weight:600;color:#7a5000;text-align:center;display:none}
 .readonly-banner.on{display:block}
-#sync-status{font-size:11px;color:var(--ink3);font-family:'JetBrains Mono',monospace}
+#sync-status{font-size:11px;color:#c7d6e8;font-family:'JetBrains Mono',monospace}
 
 /* qGenda Import */
 .qg-match-row{display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--line);font-size:12px}
@@ -612,7 +612,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
     </div>
     <select id="phys-pick" style="display:none;width:160px" onchange="onPhysPick()"></select>
     <button class="btn btn-sm" onclick="window.print()">Print</button>
-    <span id="user-display" style="font-size:12px;color:var(--ink3);font-weight:600;margin-right:4px"></span>
+    <span id="user-display" style="font-size:12px;color:#d6e2f0;font-weight:600;margin-right:4px"></span>
     <span id="sync-status">loading</span>
     <button class="btn btn-p btn-sm" id="save-btn" onclick="saveData()" disabled>Save</button>
     <button class="btn btn-sm" onclick="showChangePasswordModal()" title="Change your password">Password</button>
