@@ -257,6 +257,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
 .col-hdr:hover{background:#c8d8ee!important}
 /* N (nocturnist shift) */
 .cell-N{background:#1a1a2e!important;color:#c9b8f5!important}
+.cell-X{background:#e8f0fe!important;color:#244b7a!important}
 /* Sticky quarter-total column — works with border-collapse:collapse */
 /* Quarter-total embedded in name cell — no separate column needed */
 .qtot-inline{
@@ -501,6 +502,9 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
 
 /* MISC */
 .row{display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:10px}
+.daily-count-row{gap:8px;flex-wrap:nowrap}
+.daily-count-row .fg{min-width:0}
+.daily-count-row input{width:64px}
 .fg{display:flex;flex-direction:column;gap:3px}
 .fg label{font-size:10px;color:var(--ink3);font-weight:700;text-transform:uppercase;letter-spacing:.5px}
 .fb{display:flex;justify-content:space-between;align-items:center}
@@ -802,14 +806,12 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
     <div class="card">
       <h3>Schedule Parameters</h3>
       <div style="font-weight:700;font-size:12px;color:var(--ink2);margin-bottom:6px">Daily Staffing Counts</div>
-      <div class="row">
-        <div class="fg"><label>Rounders/Day</label><input type="number" id="c-r" value="13" min="0" style="width:80px" onchange="handleShiftCountChange()"></div>
-        <div class="fg"><label>Swing/Day</label><input type="number" id="c-s" value="3" min="0" style="width:80px" onchange="handleShiftCountChange()"></div>
-      </div>
-      <div class="row">
-        <div class="fg"><label>Nocturnists/Day</label><input type="number" id="c-n" value="1" min="0" style="width:90px" onchange="handleShiftCountChange()"></div>
-        <div class="fg"><label>APP Rounders/Day</label><input type="number" id="c-app-r" value="0" min="0" style="width:100px" onchange="handleShiftCountChange()"></div>
-        <div class="fg"><label>APP Admitters/Day</label><input type="number" id="c-app-s" value="0" min="0" style="width:100px" onchange="handleShiftCountChange()"></div>
+      <div class="row daily-count-row">
+        <div class="fg"><label>Rounders</label><input type="number" id="c-r" value="13" min="0" onchange="handleShiftCountChange()"></div>
+        <div class="fg"><label>Swing</label><input type="number" id="c-s" value="3" min="0" onchange="handleShiftCountChange()"></div>
+        <div class="fg"><label>Nocturnists</label><input type="number" id="c-n" value="1" min="0" onchange="handleShiftCountChange()"></div>
+        <div class="fg"><label>APP Rounders</label><input type="number" id="c-app-r" value="0" min="0" onchange="handleShiftCountChange()"></div>
+        <div class="fg"><label>APP Admitters</label><input type="number" id="c-app-s" value="0" min="0" onchange="handleShiftCountChange()"></div>
       </div>
       <div id="shift-param-fields"></div>
       <div class="dm-section">
@@ -831,9 +833,8 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
         </div>
         <div id="staffing-overrides-list"></div>
       </div>
-      <div style="font-weight:700;font-size:12px;color:var(--ink2);margin:14px 0 6px;padding-top:10px;border-top:1px solid var(--line)">Annual Target & Request Limits</div>
+      <div style="font-weight:700;font-size:12px;color:var(--ink2);margin:14px 0 6px;padding-top:10px;border-top:1px solid var(--line)">Variable Scheduling Tools</div>
       <div class="row">
-        <div class="fg"><label>Annual Shifts (1.0 FTE)</label><input type="number" id="c-annual" value="182" style="width:110px" onchange="autoSaveCfg()" oninput="autoSaveCfg()"></div>
         <div class="fg"><label>Max Requests/Quarter</label><input type="number" id="c-max-req" value="15" style="width:90px" onchange="autoSaveCfg()" oninput="autoSaveCfg()"></div>
         <div class="fg"><label>Max Required Requests</label><input type="number" id="c-max-required" value="5" style="width:90px" onchange="autoSaveCfg()" oninput="autoSaveCfg()"></div>
         <div class="fg"><label>Max Weekend Requests</label><input type="number" id="c-max-wk" value="6" style="width:90px" onchange="autoSaveCfg()" oninput="autoSaveCfg()"></div>
@@ -855,9 +856,12 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
         <div class="fg"><label>Start Date</label><input type="date" id="n-start" style="width:140px"></div>
         <div class="fg"><label>Title</label><input type="text" id="n-title" placeholder="Medical Director..." style="width:180px"></div>
       </div>
+      <div class="row">
+        <div class="fg"><label>Annual Shifts (1.0 FTE)</label><input type="number" id="c-annual" value="182" style="width:110px" onchange="autoSaveCfg()" oninput="autoSaveCfg()"></div>
+      </div>
       <button class="btn btn-g btn-sm" onclick="addPhysician()">+ Add</button>
       <div class="dm-section">
-        <div class="dm-title">Data Management</div>
+        <h3>Data Management</h3>
       </div>
       <div class="dm-section">
         <div class="dm-title">qGenda Import</div>
@@ -1344,7 +1348,7 @@ async function adminResetPassword(docId){
 //  QGENDA EXCEL IMPORT
 // ════════════════════════════════════════════════════════
 
-const QGENDA_IGNORE = ['backup','cross cover','cross-cover'];
+const QGENDA_IGNORE = ['backup'];
 
 function qgEsc(s){
   return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -1378,6 +1382,7 @@ function qgIsAppTask(raw){
 }
 function qgIsNocturnistTask(raw){return /\b(nocturn|night)\b/i.test(String(raw||''));}
 function qgIsAdmitTask(raw){return /\b(admit|swing|evening|afternoon)\b/i.test(String(raw||''));}
+function qgIsCrossCoverageTask(raw){return /\b(cross[-\s]*cover|remote|coverage)\b/i.test(String(raw||''));}
 function qgIsMedicalDirectorTask(raw){return /\b(medical\s+director|director|dir\.?)\b/i.test(String(raw||''))&&!qgIsAppTask(raw);}
 function updateShiftCfgFromQgendaTaskMap(map){
   ensureShiftCfg();
@@ -1415,11 +1420,12 @@ function qgGuessShift(raw){
   if(/^(date|staff abbreviation|start time|end time)$/.test(s)) return 'IGNORE';
   if(qgLooksLikePersonName(s)||qgLooksLikeTimeOrDate(s)) return 'IGNORE';
 
+  if(qgIsCrossCoverageTask(s)) return 'X';
   if(/\bnocturn/.test(s)) return 'N';
   if(/\bnight\b/.test(s) && /\bapp\b/.test(s)) return 'N';
   if(/\bnight\b/.test(s) && /\b(md|physician|doc|doctor)\b/.test(s)) return 'N';
   if(/\bswing\b/.test(s)) return 'S';
-  if(/\b(remote|evening)\b/.test(s) && /\bapp\b/.test(s)) return 'S';
+  if(/\bevening\b/.test(s) && /\bapp\b/.test(s)) return 'S';
   if(/\b(afternoon|evening)\b/.test(s) && /\badmit/.test(s)) return 'S';
   if(/\bam\b/.test(s) && /\badmit/.test(s)) return 'R';
   if(/\bround(er|ing)?\b/.test(s)) return 'R';
@@ -1662,9 +1668,8 @@ function showQgendaTaskMapModal(rawRecords, filename, totalParsed, totalIgnored)
 
   const taskStats={};
   rawRecords.forEach(r=>{
-    if(!taskStats[r.task])taskStats[r.task]={count:0,samples:new Set()};
+    if(!taskStats[r.task])taskStats[r.task]={count:0};
     taskStats[r.task].count++;
-    if(taskStats[r.task].samples.size<3)taskStats[r.task].samples.add(r.rawName);
   });
   const tasks=Object.entries(taskStats)
     .sort((a,b)=>b[1].count-a[1].count||a[0].localeCompare(b[0]));
@@ -1672,18 +1677,17 @@ function showQgendaTaskMapModal(rawRecords, filename, totalParsed, totalIgnored)
   const rows=tasks.map(([task,info],idx)=>{
     const saved=S.qgendaShiftMap[task];
     const guess=saved||qgGuessShift(task)||'';
-    const sample=[...info.samples].join('; ');
     const opts=[
       ['','Review'],
       ['R','Rounding / Day'],
       ['S','Swing / Admit'],
       ['N','Nocturnist'],
+      ['X','Cross Coverage'],
       ['IGNORE','Ignore']
     ].map(([v,l])=>`<option value="${v}" ${guess===v?'selected':''}>${l}</option>`).join('');
     return `<tr>
       <td style="padding:5px 6px;font-family:'JetBrains Mono',monospace;font-size:11px">${qgEsc(task)}</td>
       <td style="padding:5px 6px;text-align:center">${info.count}</td>
-      <td style="padding:5px 6px;color:var(--ink3);font-size:11px">${qgEsc(sample)}</td>
       <td style="padding:5px 6px"><select class="qg-task-map" data-task="${qgEsc(task)}" style="width:130px">${opts}</select></td>
     </tr>`;
   }).join('');
@@ -1698,7 +1702,7 @@ function showQgendaTaskMapModal(rawRecords, filename, totalParsed, totalIgnored)
     </div>
     <div style="max-height:360px;overflow-y:auto;border:1px solid var(--line);border-radius:4px">
       <table class="htbl" style="font-size:12px;margin:0">
-        <thead><tr><th>qGenda Task</th><th>Rows</th><th>Sample Providers</th><th>Map To</th></tr></thead>
+        <thead><tr><th>qGenda Task</th><th>Rows</th><th>Map To</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
     </div>`;
@@ -1774,7 +1778,10 @@ function showQgendaMapModal(records, filename, totalParsed, totalIgnored, unknow
     const defLast=nameParts?nameParts[1].trim():'';
     const defFirst=nameParts?nameParts[2].trim():'';
     const defaultRole=records.some(r=>r.rawName===rawName&&qgIsAppTask(r.task))?'APP':'MD/DO';
-    const defaultType=records.some(r=>r.rawName===rawName&&qgIsMedicalDirectorTask(r.task))?'weekday-only':(onboardingEmptyRoster?'standard':'prn');
+    const providerShiftCount=records.filter(r=>r.rawName===rawName).length;
+    const defaultType=records.some(r=>r.rawName===rawName&&qgIsMedicalDirectorTask(r.task))
+      ?'weekday-only'
+      :(providerShiftCount<20?'prn':(onboardingEmptyRoster?'standard':'prn'));
     const defaultFte=defaultType==='prn'?'0.0':'1.0';
     const addOpt=(isUnmatched||onboardingEmptyRoster)?`<option value="__add__" ${onboardingEmptyRoster?'selected':''} style="color:#0a7044;font-weight:700">+ Add as new provider</option>`:'';
     const opts=addOpt+`<option value="">— skip —</option>`+
@@ -1816,6 +1823,7 @@ function showQgendaMapModal(records, filename, totalParsed, totalIgnored, unknow
   const rCount=displayRecords.filter(r=>r.shift==='R'&&(r.docId||onboardingEmptyRoster)).length;
   const sCount=displayRecords.filter(r=>r.shift==='S'&&(r.docId||onboardingEmptyRoster)).length;
   const nCount=displayRecords.filter(r=>r.shift==='N'&&(r.docId||onboardingEmptyRoster)).length;
+  const xCount=displayRecords.filter(r=>r.shift==='X'&&(r.docId||onboardingEmptyRoster)).length;
   const skipCount=onboardingEmptyRoster?0:pastRecords.filter(r=>!r.docId).length;
 
   const mainHtml=`<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;margin-bottom:14px">
@@ -1837,7 +1845,7 @@ function showQgendaMapModal(records, filename, totalParsed, totalIgnored, unknow
       </div>
     </div>
     <div style="font-size:11px;color:#555;margin-bottom:12px">
-      Breakdown: <strong>${rCount} R</strong> · <strong>${sCount} S</strong> · <strong>${nCount} N</strong> ${onboardingEmptyRoster?'recognized shifts in file':'matched past shifts'}
+      Breakdown: <strong>${rCount} R</strong> · <strong>${sCount} S</strong> · <strong>${nCount} N</strong> · <strong>${xCount} X</strong> ${onboardingEmptyRoster?'recognized shifts in file':'matched past shifts'}
     </div>
     <div style="font-weight:700;font-size:12px;margin-bottom:6px">
       All provider name matches - <span style="color:#0a7044">${matchedNames.length} matched</span>,
@@ -1910,7 +1918,7 @@ function previewQgendaImport(){
     // Check if this is a bonus shift (not in base schedule)
     const qKey2=`${rec.date.getFullYear()}-${Math.floor(rec.date.getMonth()/3)+1}`;
     const baseSh=S.baseSchedule&&S.baseSchedule[qKey2]&&S.baseSchedule[qKey2][docId]&&S.baseSchedule[qKey2][docId][ds];
-    const isBonus=(!baseSh || baseSh==='OFF') && (rec.shift==='R'||rec.shift==='S'||rec.shift==='N');
+    const isBonus=(!baseSh || baseSh==='OFF') && (rec.shift==='R'||rec.shift==='S'||rec.shift==='N'||rec.shift==='X');
     preview.push({date:ds, name:`${doc.last}, ${doc.first}${isAppProvider(doc)?' · APP':''}`, shift:rec.shift, existing, changed, docId:previewDocId, isBonus});
   });
 
@@ -1920,10 +1928,11 @@ function previewQgendaImport(){
   // Group by provider for a per-provider summary
   const byDoc={};
   preview.forEach(p=>{
-    if(!byDoc[p.docId]) byDoc[p.docId]={name:p.name,R:0,S:0,N:0,bonus:0,total:0,changes:0};
+    if(!byDoc[p.docId]) byDoc[p.docId]={name:p.name,R:0,S:0,N:0,X:0,bonus:0,total:0,changes:0};
     if(p.shift==='R') byDoc[p.docId].R++;
     else if(p.shift==='S') byDoc[p.docId].S++;
     else if(p.shift==='N') byDoc[p.docId].N++;
+    else if(p.shift==='X') byDoc[p.docId].X++;
     byDoc[p.docId].total++;
     if(p.isBonus) byDoc[p.docId].bonus++;
     if(p.changed) byDoc[p.docId].changes++;
@@ -1934,6 +1943,7 @@ function previewQgendaImport(){
      <td style="padding:2px 6px;text-align:center">${d.R}</td>
      <td style="padding:2px 6px;text-align:center">${d.S}</td>
      <td style="padding:2px 6px;text-align:center">${d.N}</td>
+     <td style="padding:2px 6px;text-align:center">${d.X}</td>
      <td style="padding:2px 6px;text-align:center;font-weight:700">${d.total}</td>
      <td style="padding:2px 6px;text-align:center;color:${d.bonus>0?'#a85800':'#888'}">${d.bonus>0?'+'+d.bonus:'—'}</td></tr>`
   ).join('');
@@ -1949,6 +1959,7 @@ function previewQgendaImport(){
           <th style="padding:2px 6px;text-align:center">R</th>
           <th style="padding:2px 6px;text-align:center">S</th>
           <th style="padding:2px 6px;text-align:center">N</th>
+          <th style="padding:2px 6px;text-align:center">X</th>
           <th style="padding:2px 6px;text-align:center">Total</th>
           <th style="padding:2px 6px;text-align:center">Bonus</th>
         </tr></thead>
@@ -3810,7 +3821,7 @@ function renderSchedule(){
   }
   function buildRow(doc,isConsult){
     const{all:docReqs,req:docRequired}=getDocReqs(doc.id);
-    let qTotalR=0,qTotalS=0,qTotalN=0;
+    let qTotalR=0,qTotalS=0,qTotalN=0,qTotalX=0;
     const mc={};
     monthCells.forEach(m=>{mc[m.month]={r:0,s:0,n:0};});
     days.forEach(d=>{
@@ -3818,8 +3829,9 @@ function renderSchedule(){
       if(sh==='R'){mc[d.getMonth()].r++;qTotalR++;}
       if(sh==='S'||sh==='H'){mc[d.getMonth()].s++;qTotalS++;}
       if(sh==='N'){mc[d.getMonth()].n++;qTotalN++;}
+      if(sh==='X')qTotalX++;
     });
-    const qTotal=qTotalR+qTotalS+qTotalN;
+    const qTotal=qTotalR+qTotalS+qTotalN+qTotalX;
     const target=Math.round(doc.fte*S.cfg.annual/4);
     const qColor=qTotal>target+3?'#a01918':qTotal<target-3?'#a85800':'#0a7044';
     const mTip=monthCells.map(m=>`${monAbbr(m.month)}:${mc[m.month].r}R${mc[m.month].s}S${mc[m.month].n?mc[m.month].n+'N':''}`).join(' | ');
@@ -3828,10 +3840,10 @@ function renderSchedule(){
 
     let row=`<tr class="${rowCls}" id="row-${doc.id}">`;
     // Single sticky name cell — Q∑ total embedded in bottom-right of the cell
-    row+=`<td class="name-col${isHighlighted?' name-col-hl':''}" onclick="toggleRowHighlight('${doc.id}')" ondblclick="navToDoc('${doc.id}')" title="Q${q} total: ${qTotalR}R+${qTotalS}S${qTotalN?'+'+qTotalN+'N':''}=${qTotal} (target ~${target})&#10;${mTip}&#10;Double-click to open detail">
+    row+=`<td class="name-col${isHighlighted?' name-col-hl':''}" onclick="toggleRowHighlight('${doc.id}')" ondblclick="navToDoc('${doc.id}')" title="Q${q} total: ${qTotalR}R+${qTotalS}S${qTotalN?'+'+qTotalN+'N':''}${qTotalX?'+'+qTotalX+'X':''}=${qTotal} (target ~${target})&#10;${mTip}&#10;Double-click to open detail">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:4px">
         <span>${isConsult?'<span class="consult-badge">MED DIR</span>':''}${dname(doc)}</span>
-        <span class="qtot-inline" style="color:${qColor}">${qTotal}<span style="font-size:8px;color:#999;display:block;line-height:1;text-align:right">${qTotalR}R ${qTotalS}S${qTotalN?' '+qTotalN+'N':''}</span></span>
+        <span class="qtot-inline" style="color:${qColor}">${qTotal}<span style="font-size:8px;color:#999;display:block;line-height:1;text-align:right">${qTotalR}R ${qTotalS}S${qTotalN?' '+qTotalN+'N':''}${qTotalX?' '+qTotalX+'X':''}</span></span>
       </div>
     </td>`;
     // Day cells
@@ -3944,7 +3956,7 @@ function setShiftMode(mode){
 }
 
 // ── Cell click: cycles R→S→N→OFF, or applies fill mode ─
-const SHIFT_CYCLE=['R','S','N','OFF'];
+const SHIFT_CYCLE=['R','S','N','X','OFF'];
 function cycleCell(docId,ds){
   if(!isAdmin()){ toast('View-only — sign in as admin to edit','error'); return; }
   if(S.ui.fillMode){
@@ -4452,8 +4464,8 @@ function renderMySchedule(){
   const sched=S.sched[docId]||{};
 
   // Year stats - total scheduled and completed YTD
-  let rCount=0,sCount=0,nCount=0,hCount=0;
-  let rDone=0,sDone=0,nDone=0,hDone=0;
+  let rCount=0,sCount=0,nCount=0,hCount=0,xCount=0;
+  let rDone=0,sDone=0,nDone=0,hDone=0,xDone=0;
   Object.entries(sched).forEach(([ds,sh])=>{
     if(!ds.startsWith(String(yr))) return;
     const d=parseD(ds);
@@ -4461,9 +4473,10 @@ function renderMySchedule(){
     else if(sh==='S'){sCount++; if(d<=today)sDone++;}
     else if(sh==='N'){nCount++; if(d<=today)nDone++;}
     else if(sh==='H'){hCount++; if(d<=today)hDone++;}
+    else if(sh==='X'){xCount++; if(d<=today)xDone++;}
   });
-  const total=rCount+sCount+nCount+hCount;
-  const totalDone=rDone+sDone+hDone;
+  const total=rCount+sCount+nCount+hCount+xCount;
+  const totalDone=rDone+sDone+nDone+hDone+xDone;
   const target=Math.round(doc.fte*S.cfg.annual);
   const pct=Math.min(Math.round(total/target*100),100);
 
@@ -4741,9 +4754,9 @@ function showDocDetail(docId){
   const sched=S.sched[docId]||{};
 
   // Year stats
-  let rCount=0,sCount=0,nCount=0,hCount=0;
+  let rCount=0,sCount=0,nCount=0,hCount=0,xCount=0;
   // Completed YTD vs total scheduled
-  let rDone=0,sDone=0,nDone=0,hDone=0;
+  let rDone=0,sDone=0,nDone=0,hDone=0,xDone=0;
   const today=new Date();today.setHours(0,0,0,0);
   Object.entries(sched).forEach(([ds,sh])=>{
     if(!ds.startsWith(String(year))) return;
@@ -4752,9 +4765,10 @@ function showDocDetail(docId){
     else if(sh==='S'){sCount++; if(d<=today)sDone++;}
     else if(sh==='N'){nCount++; if(d<=today)nDone++;}
     else if(sh==='H'){hCount++; if(d<=today)hDone++;}
+    else if(sh==='X'){xCount++; if(d<=today)xDone++;}
   });
-  const total=rCount+sCount+nCount+hCount;
-  const totalDone=rDone+sDone+hDone;
+  const total=rCount+sCount+nCount+hCount+xCount;
+  const totalDone=rDone+sDone+nDone+hDone+xDone;
   const target=Math.round(doc.fte*S.cfg.annual);
   const pct=Math.min(Math.round(total/target*100),100);
 
