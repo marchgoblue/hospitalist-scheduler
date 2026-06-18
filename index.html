@@ -148,6 +148,13 @@ body{font-family:'Source Sans 3',-apple-system,Helvetica,Arial,sans-serif;backgr
 .tab{display:flex;align-items:center;padding:0 13px;height:100%;background:none;border:none;border-bottom:2px solid transparent;color:#d6e2f0;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;transition:all .12s}
 .tab:hover{color:#fff;background:rgba(255,255,255,.1)}
 .tab.on{color:#fff;border-bottom-color:#7fb3ff;background:rgba(255,255,255,.06)}
+.tab-menu{position:relative;height:100%}
+.tab-menu .tab{width:100%}
+.tab-dd{display:none;position:absolute;top:100%;right:0;min-width:220px;background:#fff;border:1px solid var(--line);box-shadow:0 10px 24px rgba(0,0,0,.18);z-index:200;border-radius:0 0 6px 6px;overflow:hidden}
+.tab-menu:hover .tab-dd,.tab-menu:focus-within .tab-dd{display:block}
+.tab-dd button{display:block;width:100%;padding:10px 14px;background:#fff;border:none;border-bottom:1px solid var(--line);text-align:left;font-family:inherit;font-size:13px;font-weight:600;color:var(--ink);cursor:pointer}
+.tab-dd button:last-child{border-bottom:none}
+.tab-dd button:hover{background:#f2f6fb;color:#1b4d8f}
 
 .hdr-r{margin-left:auto;display:flex;align-items:center;gap:8px}
 .role-switch{display:flex;background:var(--hdr);border:1px solid var(--line);border-radius:4px;padding:2px;font-size:11px}
@@ -604,7 +611,15 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
     <button class="tab" id="t-requests" onclick="nav('requests')">Requests</button>
     <button class="tab" id="t-docs" onclick="nav('docs')">Providers</button>
     <button class="tab" id="t-hol" onclick="nav('hol')">Holidays</button>
-    <button class="tab" id="t-cfg" onclick="nav('cfg')">Settings</button>
+    <div class="tab-menu" id="settings-menu" style="display:none">
+      <button class="tab" id="t-cfg" onclick="nav('cfg-params')">Settings</button>
+      <div class="tab-dd">
+        <button onclick="nav('cfg-params')">Schedule Parameters</button>
+        <button onclick="nav('cfg-data')">Data Management</button>
+        <button onclick="nav('cfg-roster')">Provider Roster</button>
+        <button onclick="nav('cfg-groups')">Group Onboarding</button>
+      </div>
+    </div>
   </div>
   <div class="tabs" id="tabs-phys" style="display:none">
     <!-- Physician navigation now in the page header, not the tab bar -->
@@ -800,47 +815,107 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
 <!-- ════════════════════════════════════════════════════ -->
 <!-- SETTINGS                                             -->
 <!-- ════════════════════════════════════════════════════ -->
-<div class="pg" id="pg-cfg">
-  <h1 class="mb">Settings</h1>
-  <div class="g2">
-    <div class="card">
-      <h3>Schedule Parameters</h3>
-      <div style="font-weight:700;font-size:12px;color:var(--ink2);margin-bottom:6px">Daily Staffing Counts</div>
-      <div class="row daily-count-row">
-        <div class="fg"><label>Rounders</label><input type="number" id="c-r" value="13" min="0" onchange="handleShiftCountChange()"></div>
-        <div class="fg"><label>Swing</label><input type="number" id="c-s" value="3" min="0" onchange="handleShiftCountChange()"></div>
-        <div class="fg"><label>Nocturnists</label><input type="number" id="c-n" value="1" min="0" onchange="handleShiftCountChange()"></div>
-        <div class="fg"><label>APP Rounders</label><input type="number" id="c-app-r" value="0" min="0" onchange="handleShiftCountChange()"></div>
-        <div class="fg"><label>APP Admitters</label><input type="number" id="c-app-s" value="0" min="0" onchange="handleShiftCountChange()"></div>
-      </div>
-      <div id="shift-param-fields"></div>
-      <div class="dm-section">
-        <div class="dm-title">Temporary Staffing Changes</div>
-        <div class="dm-help" style="margin-bottom:8px">Use this for short seasons when this site needs extra coverage. These numbers are added to the normal daily counts only during the dates below.</div>
-        <div class="row">
-          <div class="fg"><label>Start Date</label><input type="date" id="tmp-start" style="width:140px"></div>
-          <div class="fg"><label>End Date</label><input type="date" id="tmp-end" style="width:140px"></div>
-        </div>
-        <div class="row">
-          <div class="fg"><label>Extra Rounders</label><input type="number" id="tmp-r" value="0" min="0" style="width:90px"></div>
-          <div class="fg"><label>Extra Admitters</label><input type="number" id="tmp-s" value="0" min="0" style="width:90px"></div>
-          <div class="fg"><label>Extra Nocturnists</label><input type="number" id="tmp-n" value="0" min="0" style="width:100px"></div>
-        </div>
-        <div class="row">
-          <div class="fg"><label>Extra APP Rounders</label><input type="number" id="tmp-app-r" value="0" min="0" style="width:110px"></div>
-          <div class="fg"><label>Extra APP Admitters</label><input type="number" id="tmp-app-s" value="0" min="0" style="width:110px"></div>
-          <button class="btn btn-sm" onclick="addStaffingOverride()">Add Temporary Change</button>
-        </div>
-        <div id="staffing-overrides-list"></div>
-      </div>
-      <div style="font-weight:700;font-size:12px;color:var(--ink2);margin:14px 0 6px;padding-top:10px;border-top:1px solid var(--line)">Variable Scheduling Tools</div>
-      <div class="row">
-        <div class="fg"><label>Max Requests/Quarter</label><input type="number" id="c-max-req" value="15" style="width:90px" onchange="autoSaveCfg()" oninput="autoSaveCfg()"></div>
-        <div class="fg"><label>Max Required Requests</label><input type="number" id="c-max-required" value="5" style="width:90px" onchange="autoSaveCfg()" oninput="autoSaveCfg()"></div>
-        <div class="fg"><label>Max Weekend Requests</label><input type="number" id="c-max-wk" value="6" style="width:90px" onchange="autoSaveCfg()" oninput="autoSaveCfg()"></div>
-      </div>
-      <div id="flex-guidance" style="margin:10px 0;padding:10px;border:1px solid var(--line);border-radius:4px;background:#f8fafc;font-size:12px"></div>
+<div class="pg" id="pg-cfg-params">
+  <h1 class="mb">Schedule Parameters</h1>
+  <div class="card">
+    <h3>Daily Staffing Counts</h3>
+    <div class="row daily-count-row">
+      <div class="fg"><label>Rounders</label><input type="number" id="c-r" value="13" min="0" onchange="handleShiftCountChange()"></div>
+      <div class="fg"><label>Swing</label><input type="number" id="c-s" value="3" min="0" onchange="handleShiftCountChange()"></div>
+      <div class="fg"><label>Nocturnists</label><input type="number" id="c-n" value="1" min="0" onchange="handleShiftCountChange()"></div>
+      <div class="fg"><label>APP Rounders</label><input type="number" id="c-app-r" value="0" min="0" onchange="handleShiftCountChange()"></div>
+      <div class="fg"><label>APP Admitters</label><input type="number" id="c-app-s" value="0" min="0" onchange="handleShiftCountChange()"></div>
     </div>
+    <div id="shift-param-fields"></div>
+    <div class="dm-section">
+      <div class="dm-title">Temporary Staffing Changes</div>
+      <div class="dm-help" style="margin-bottom:8px">Use this for short seasons when this site needs extra coverage. These numbers are added to the normal daily counts only during the dates below.</div>
+      <div class="row">
+        <div class="fg"><label>Start Date</label><input type="date" id="tmp-start" style="width:140px"></div>
+        <div class="fg"><label>End Date</label><input type="date" id="tmp-end" style="width:140px"></div>
+      </div>
+      <div class="row">
+        <div class="fg"><label>Extra Rounders</label><input type="number" id="tmp-r" value="0" min="0" style="width:90px"></div>
+        <div class="fg"><label>Extra Admitters</label><input type="number" id="tmp-s" value="0" min="0" style="width:90px"></div>
+        <div class="fg"><label>Extra Nocturnists</label><input type="number" id="tmp-n" value="0" min="0" style="width:100px"></div>
+      </div>
+      <div class="row">
+        <div class="fg"><label>Extra APP Rounders</label><input type="number" id="tmp-app-r" value="0" min="0" style="width:110px"></div>
+        <div class="fg"><label>Extra APP Admitters</label><input type="number" id="tmp-app-s" value="0" min="0" style="width:110px"></div>
+        <button class="btn btn-sm" onclick="addStaffingOverride()">Add Temporary Change</button>
+      </div>
+      <div id="staffing-overrides-list"></div>
+    </div>
+    <div style="font-weight:700;font-size:12px;color:var(--ink2);margin:14px 0 6px;padding-top:10px;border-top:1px solid var(--line)">Variable Scheduling Tools</div>
+    <div class="row">
+      <div class="fg"><label>Max Requests/Quarter</label><input type="number" id="c-max-req" value="15" style="width:90px" onchange="autoSaveCfg()" oninput="autoSaveCfg()"></div>
+      <div class="fg"><label>Max Required Requests</label><input type="number" id="c-max-required" value="5" style="width:90px" onchange="autoSaveCfg()" oninput="autoSaveCfg()"></div>
+      <div class="fg"><label>Max Weekend Requests</label><input type="number" id="c-max-wk" value="6" style="width:90px" onchange="autoSaveCfg()" oninput="autoSaveCfg()"></div>
+    </div>
+    <div id="flex-guidance" style="margin:10px 0;padding:10px;border:1px solid var(--line);border-radius:4px;background:#f8fafc;font-size:12px"></div>
+  </div>
+</div>
+
+<div class="pg" id="pg-cfg-data">
+  <h1 class="mb">Data Management</h1>
+  <div class="card">
+    <div class="dm-section">
+      <div class="dm-title">qGenda Import</div>
+      <div class="qg-import-grid">
+        <div>
+          <button class="btn btn-p btn-lg" onclick="importQgenda()">Import qGenda Excel</button>
+          <div id="qg-drop-zone" class="qg-drop-zone" onclick="importQgenda()" ondragover="setQgendaDropState(event,true)" ondragleave="setQgendaDropState(event,false)" ondrop="handleQgendaDrop(event)">
+            <div class="qg-drop-title">Choose or drop qGenda Excel file</div>
+            <div class="qg-drop-help">Use .xlsx or .xls from qGenda Calendar by Task.</div>
+          </div>
+          <div class="dm-help">
+            Use this to build a new site from a qGenda Calendar by Task file. The import creates providers, detects shift names, and maps those shifts into the scheduler. Use it again after each quarter to account for the shifts actually worked and correct the historical schedule from qGenda.
+          </div>
+        </div>
+        <aside class="qg-guide-pane">
+          <h4>Before You Start</h4>
+          <p><strong>New site:</strong> this builds the provider list and shift names.</p>
+          <p><strong>After a quarter:</strong> this fixes past days and counts what people worked.</p>
+          <ol>
+            <li>In qGenda, choose Calendar by Task.</li>
+            <li>Use the last quarter.</li>
+            <li>Show names as Last Name, First Name.</li>
+            <li>Export to Excel.</li>
+            <li>Drop the file here or click Import.</li>
+          </ol>
+        </aside>
+      </div>
+    </div>
+    <div class="dm-section">
+      <div class="dm-title">Versions</div>
+      <div class="fl" style="flex-wrap:wrap;gap:6px">
+        <button class="btn btn-quiet btn-sm" onclick="saveVersion()">Save Version</button>
+        <button class="btn btn-quiet btn-sm" onclick="showVersions()">Restore Version</button>
+      </div>
+      <div class="dm-help">Versions are saved for the current group only and let you return to a known-good schedule before major edits.</div>
+    </div>
+    <div class="dm-section">
+      <div class="dm-title">Schedule Maintenance</div>
+      <div class="fl" style="flex-wrap:wrap;gap:6px">
+        <button class="btn btn-d btn-sm" onclick="confirmClearSchedule()">Clear Schedule</button>
+        <button class="btn btn-d btn-sm" onclick="confirmResetGroup()">Reset Group</button>
+      </div>
+      <div class="dm-help">Clear Schedule keeps the roster and settings. Reset Group returns this site to a blank roster and schedule.</div>
+    </div>
+    <div class="dm-section">
+      <div class="dm-title">JSON Utilities</div>
+      <div class="fl" style="flex-wrap:wrap;gap:6px">
+        <button class="btn btn-sm" onclick="exportData()">Export JSON</button>
+        <button class="btn btn-sm" onclick="importData()">Import JSON</button>
+      </div>
+      <div class="dm-help">Low-frequency backup tools for moving raw app data manually.</div>
+    </div>
+  </div>
+</div>
+
+<div class="pg" id="pg-cfg-roster">
+  <h1 class="mb">Provider Roster</h1>
+  <div class="g2">
     <div class="card">
       <h3>Add Provider</h3>
       <div class="row">
@@ -860,79 +935,29 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
         <div class="fg"><label>Annual Shifts (1.0 FTE)</label><input type="number" id="c-annual" value="182" style="width:110px" onchange="autoSaveCfg()" oninput="autoSaveCfg()"></div>
       </div>
       <button class="btn btn-g btn-sm" onclick="addPhysician()">+ Add</button>
-      <div class="dm-section">
-        <h3>Data Management</h3>
-      </div>
-      <div class="dm-section">
-        <div class="dm-title">qGenda Import</div>
-        <div class="qg-import-grid">
-          <div>
-            <button class="btn btn-p btn-lg" onclick="importQgenda()">Import qGenda Excel</button>
-            <div id="qg-drop-zone" class="qg-drop-zone" onclick="importQgenda()" ondragover="setQgendaDropState(event,true)" ondragleave="setQgendaDropState(event,false)" ondrop="handleQgendaDrop(event)">
-              <div class="qg-drop-title">Choose or drop qGenda Excel file</div>
-              <div class="qg-drop-help">Use .xlsx or .xls from qGenda Calendar by Task.</div>
-            </div>
-            <div class="dm-help">
-              Use this to build a new site from a qGenda Calendar by Task file. The import creates providers, detects shift names, and maps those shifts into the scheduler. Use it again after each quarter to account for the shifts actually worked and correct the historical schedule from qGenda.
-            </div>
-          </div>
-          <aside class="qg-guide-pane">
-            <h4>Before You Start</h4>
-            <p><strong>New site:</strong> this builds the provider list and shift names.</p>
-            <p><strong>After a quarter:</strong> this fixes past days and counts what people worked.</p>
-            <ol>
-              <li>In qGenda, choose Calendar by Task.</li>
-              <li>Use the last quarter.</li>
-              <li>Show names as Last Name, First Name.</li>
-              <li>Export to Excel.</li>
-              <li>Drop the file here or click Import.</li>
-            </ol>
-          </aside>
-        </div>
-      </div>
-      <div class="dm-section">
-        <div class="dm-title">Versions</div>
-        <div class="fl" style="flex-wrap:wrap;gap:6px">
-          <button class="btn btn-quiet btn-sm" onclick="saveVersion()">Save Version</button>
-          <button class="btn btn-quiet btn-sm" onclick="showVersions()">Restore Version</button>
-        </div>
-        <div class="dm-help">Versions are saved for the current group only and let you return to a known-good schedule before major edits.</div>
-      </div>
-      <div class="dm-section">
-        <div class="dm-title">Schedule Maintenance</div>
-        <div class="fl" style="flex-wrap:wrap;gap:6px">
-          <button class="btn btn-d btn-sm" onclick="confirmClearSchedule()">Clear Schedule</button>
-          <button class="btn btn-d btn-sm" onclick="confirmResetGroup()">Reset Group</button>
-        </div>
-        <div class="dm-help">Clear Schedule keeps the roster and settings. Reset Group returns this site to a blank roster and schedule.</div>
-      </div>
-      <div class="dm-section">
-        <div class="dm-title">JSON Utilities</div>
-        <div class="fl" style="flex-wrap:wrap;gap:6px">
-          <button class="btn btn-sm" onclick="exportData()">Export JSON</button>
-          <button class="btn btn-sm" onclick="importData()">Import JSON</button>
-        </div>
-        <div class="dm-help">Low-frequency backup tools for moving raw app data manually.</div>
-      </div>
     </div>
     <div class="card" style="grid-column:1/-1">
       <h3>Provider Roster (<span id="roster-count">0</span>)</h3>
-      <div style="max-height:380px;overflow-y:auto" id="roster-list"></div>
+      <div style="max-height:520px;overflow-y:auto" id="roster-list"></div>
     </div>
-    <div class="card">
-      <h3>Group Onboarding</h3>
-      <div class="row">
-        <div class="fg"><label>Group Name</label><input type="text" id="g-name" placeholder="Athens Hospitalists" style="width:190px" oninput="suggestGroupId()"></div>
-        <div class="fg"><label>Group ID</label><input type="text" id="g-id" placeholder="athens-hospitalists" style="width:180px" oninput="this.dataset.touched='1'"></div>
-      </div>
-      <div class="row">
-        <div class="fg"><label>Admin Username</label><input type="text" id="g-admin" placeholder="athens.admin" style="width:160px" autocapitalize="none" spellcheck="false"></div>
-        <div class="fg"><label>Temporary Password</label><input type="password" id="g-pass" placeholder="Min 6 chars" style="width:140px"></div>
-      </div>
-      <button class="btn btn-g btn-sm" onclick="createGroupAdmin()">Create Group Admin</button>
-      <div id="group-onboard-status" class="tx-xs tx-mu" style="margin-top:8px">
-        Creates a separate storage lane for a new hospitalist site.
-      </div>
+  </div>
+</div>
+
+<div class="pg" id="pg-cfg-groups">
+  <h1 class="mb">Group Onboarding</h1>
+  <div class="card">
+    <h3>Create New Site</h3>
+    <div class="row">
+      <div class="fg"><label>Group Name</label><input type="text" id="g-name" placeholder="Athens Hospitalists" style="width:190px" oninput="suggestGroupId()"></div>
+      <div class="fg"><label>Group ID</label><input type="text" id="g-id" placeholder="athens-hospitalists" style="width:180px" oninput="this.dataset.touched='1'"></div>
+    </div>
+    <div class="row">
+      <div class="fg"><label>Admin Username</label><input type="text" id="g-admin" placeholder="athens.admin" style="width:160px" autocapitalize="none" spellcheck="false"></div>
+      <div class="fg"><label>Temporary Password</label><input type="password" id="g-pass" placeholder="Min 6 chars" style="width:140px"></div>
+    </div>
+    <button class="btn btn-g btn-sm" onclick="createGroupAdmin()">Create Group Admin</button>
+    <div id="group-onboard-status" class="tx-xs tx-mu" style="margin-top:8px">
+      Creates a separate storage lane for a new hospitalist site.
     </div>
   </div>
 </div>
@@ -1115,14 +1140,22 @@ function isPhysician(){return currentUser&&currentUser.role==='physician';}
 function currentGroupId(){return (currentUser&&currentUser.groupId)||DEFAULT_GROUP_ID;}
 function currentGroupName(){return (currentUser&&currentUser.groupName)||currentGroupId();}
 function currentScheduleRowId(){return currentGroupId()||DATA_ROW_ID;}
+const SETTINGS_PAGES=new Set(['cfg-params','cfg-data','cfg-roster','cfg-groups']);
+
+function updateSettingsMenuVisibility(){
+  const sm=document.getElementById('settings-menu');
+  if(sm)sm.style.display=(isAdmin()&&S.ui.role==='admin')?'block':'none';
+}
 
 function setReadOnly(ro){
   const b=document.getElementById('readonly-banner');if(b)b.classList.toggle('on',ro);
   ['gen-btn','save-btn','m-fill-r','m-fill-s','m-fill-off','m-fill-none'].forEach(id=>{const el=document.getElementById(id);if(el)el.disabled=ro;});
+  updateSettingsMenuVisibility();
 }
 function updateHeaderForUser(){
   const el=document.getElementById('user-display');if(!el||!currentUser)return;
   el.textContent=isAdmin()?`${currentUser.username} (Admin · ${currentGroupName()})`:`${currentUser.username} · ${currentGroupName()}`;
+  updateSettingsMenuVisibility();
 }
 
 async function saveData(silent=false){
@@ -5349,6 +5382,7 @@ function switchRole(role){
   document.getElementById('r-admin').classList.toggle('on',role==='admin');
   document.getElementById('r-phys').classList.toggle('on',role==='phys');
   document.getElementById('tabs-admin').style.display=role==='admin'?'flex':'none';
+  updateSettingsMenuVisibility();
   // Old phys tab bar always hidden (navigation is now in page header)
   document.getElementById('tabs-phys').style.display='none';
   // Legacy phys-pick (keep for backward compat but hide)
@@ -5432,10 +5466,16 @@ function onPhysPick(){
 //  NAV
 // ════════════════════════════════════════════════════════
 function nav(p){
+  if(SETTINGS_PAGES.has(p)&&!isAdmin()){
+    toast('Admin only','error');
+    p=S.ui.role==='phys'?'myreq':'sched';
+  }
+  const page=document.getElementById('pg-'+p);
+  if(!page)return;
   document.querySelectorAll('.pg').forEach(x=>x.classList.remove('on'));
   document.querySelectorAll('.tab').forEach(x=>x.classList.remove('on'));
-  document.getElementById('pg-'+p).classList.add('on');
-  const tab=document.getElementById('t-'+p);
+  page.classList.add('on');
+  const tab=document.getElementById(SETTINGS_PAGES.has(p)?'t-cfg':'t-'+p);
   if(tab) tab.classList.add('on');
 
   // Update active state on physician nav buttons
@@ -5465,7 +5505,7 @@ function nav(p){
   if(p==='requests') renderRequestsAdmin();
   if(p==='docs'){backToDocList();renderDocList()}
   if(p==='hol') renderHolidayTable();
-  if(p==='cfg'){ renderShiftParamFields(); renderRoster(); renderFlexibleGuidance(); }
+  if(SETTINGS_PAGES.has(p)){ renderShiftParamFields(); renderStaffingOverrides(); renderFlexibleGuidance(); renderRoster(); }
   if(p==='myreq'){ populatePhysPicker(); renderMyRequestCal(); }
   if(p==='myschd'){ populatePhysPicker(); renderMySchedule(); }
 }
