@@ -516,6 +516,13 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
 .daily-count-row{gap:8px;flex-wrap:nowrap}
 .daily-count-row .fg{min-width:0}
 .daily-count-row input{width:64px}
+.daily-count-row .annual-target{margin-left:auto}
+.daily-count-row .annual-target input{width:110px}
+.provider-entry-row{display:flex;align-items:flex-end;gap:14px;flex-wrap:nowrap}
+.provider-entry-row .fg{min-width:0}
+.provider-entry-row #n-type{width:170px}
+.provider-entry-row #n-title{width:260px}
+@media(max-width:900px){.daily-count-row,.provider-entry-row{flex-wrap:wrap}.daily-count-row .annual-target{margin-left:0}}
 .fg{display:flex;flex-direction:column;gap:3px}
 .fg label{font-size:10px;color:var(--ink3);font-weight:700;text-transform:uppercase;letter-spacing:.5px}
 .fb{display:flex;justify-content:space-between;align-items:center}
@@ -829,6 +836,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
       <div class="fg"><label>Nocturnists</label><input type="number" id="c-n" value="1" min="0" onchange="handleShiftCountChange()"></div>
       <div class="fg"><label>APP Rounders</label><input type="number" id="c-app-r" value="0" min="0" onchange="handleShiftCountChange()"></div>
       <div class="fg"><label>APP Admitters</label><input type="number" id="c-app-s" value="0" min="0" onchange="handleShiftCountChange()"></div>
+      <div class="fg annual-target"><label>Annual Shifts (1.0 FTE)</label><input type="number" id="c-annual" value="182" onchange="autoSaveCfg()" oninput="autoSaveCfg()"></div>
     </div>
     <div id="shift-param-fields"></div>
     <div class="settings-split">
@@ -930,17 +938,12 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
         <div class="fg"><label>Last Name</label><input type="text" id="n-last" style="width:130px"></div>
         <div class="fg"><label>First Name</label><input type="text" id="n-first" style="width:120px"></div>
       </div>
-      <div class="row">
+      <div class="provider-entry-row">
         <div class="fg"><label>Role</label><select id="n-role" style="width:90px"><option value="MD/DO">MD/DO</option><option value="APP">APP</option></select></div>
         <div class="fg"><label>FTE</label><select id="n-fte" style="width:80px"><option>1.0</option><option>0.75</option><option>0.5</option><option>0.0</option></select></div>
-        <div class="fg"><label>Type</label><select id="n-type" style="width:150px" onchange="var f=document.getElementById('n-fte');var t=document.getElementById('n-title');if(f&&this.value==='prn')f.value='0.0';else if(f&&parseFloat(f.value)===0)f.value='1.0';if(t&&this.value==='weekday-only'&&!t.value.trim())t.value='Medical Director';"><option value="standard">Standard</option><option value="prn">PRN / Track Only</option><option value="weekday-only">Medical Director</option><option value="swing-only">Swing Only</option><option value="nocturnist">Nocturnist</option></select></div>
-      </div>
-      <div class="row">
+        <div class="fg"><label>Type</label><select id="n-type" onchange="var f=document.getElementById('n-fte');var t=document.getElementById('n-title');if(f&&this.value==='prn')f.value='0.0';else if(f&&parseFloat(f.value)===0)f.value='1.0';if(t&&this.value==='weekday-only'&&!t.value.trim())t.value='Medical Director';"><option value="standard">Standard</option><option value="prn">PRN / Track Only</option><option value="weekday-only">Medical Director</option><option value="swing-only">Swing Only</option><option value="nocturnist">Nocturnist</option></select></div>
         <div class="fg"><label>Start Date</label><input type="date" id="n-start" style="width:140px"></div>
-        <div class="fg"><label>Title</label><input type="text" id="n-title" placeholder="Medical Director..." style="width:180px"></div>
-      </div>
-      <div class="row">
-        <div class="fg"><label>Annual Shifts (1.0 FTE)</label><input type="number" id="c-annual" value="182" style="width:110px" onchange="autoSaveCfg()" oninput="autoSaveCfg()"></div>
+        <div class="fg"><label>Title</label><input type="text" id="n-title" placeholder="Medical Director..."></div>
       </div>
       <button class="btn btn-g btn-sm" onclick="addPhysician()">+ Add</button>
     </div>
