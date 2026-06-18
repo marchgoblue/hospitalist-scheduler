@@ -363,7 +363,10 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
 .wd-section-tit{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--ink3);margin:6px 0 3px 0;padding-top:5px;border-top:1px solid var(--line)}
 .wd-section-tit.r{color:var(--R-tx)}
 .wd-section-tit.s{color:var(--S-tx)}
-.wd-name{font-size:11px;color:var(--ink);padding:1px 0}
+.wd-name{font-size:11px;color:var(--ink);padding:3px 0 4px;border-bottom:1px solid #eef1f4}
+.wd-name:last-child{border-bottom:none}
+.wd-shift{display:block;font-size:10px;font-weight:700;color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.15}
+.wd-provider{display:block;font-size:11px;color:var(--ink);line-height:1.2;margin-top:2px}
 .team-num{display:inline-block;background:#1b4d8f;color:#fff;font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:700;padding:1px 5px;border-radius:2px;min-width:18px;text-align:center;margin-right:3px}
 .team-num.green{background:#0a7044}
 .team-num.white{background:#fff;color:#1b4d8f;border:1px solid #b8d4f0}
@@ -804,7 +807,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
     <h1>Holiday Assignments</h1>
     <div class="fl">
       <select id="hol-yr" onchange="renderHolidayTable()">
-        <option>2025</option><option>2026</option><option>2027</option>
+        <option selected>2026</option><option>2027</option><option>2028</option>
       </select>
       <button class="btn btn-p btn-sm" onclick="autoAssignHolidays()">Auto-Assign</button>
     </div>
@@ -4085,22 +4088,23 @@ function renderWeek(){
     const ns=docs.filter(doc=>S.sched[doc.id]&&S.sched[doc.id][ds]==='N')
       .sort(providerSort);
     const renderTeam=team=>team==='green'||team==='white'
-      ?`<span class="team-num ${team}">${teamLabel(team)}</span>`
-      :`<span class="team-num">${team||'—'}</span>`;
+      ?`<span class="team-num ${team}">${teamLabel(team)}</span> `
+      :'';
+    const renderWeekShift=(label,doc,team='')=>`<div class="wd-name"><span class="wd-shift">${renderTeam(team)}${label}</span><span class="wd-provider">${dname(doc)}</span></div>`;
     html+=`<div class="week-day"${isH?' style="background:#f8f3fe"':''}>
       <div class="wd-hdr">${dayN(d)}</div>
       <div class="wd-date${isT?' today':''}">${d.getDate()}</div>
       ${isH?'<div style="font-size:10px;color:var(--H-tx);font-weight:600;margin-bottom:4px">Holiday</div>':''}
       <div class="wd-section-tit r">Physician Rounders (${rs.length}/${staffing.R})</div>
-      ${rs.map(({doc,team},idx)=>`<div class="wd-name">${renderTeam(team)} <strong>${shiftLabelFor('rounderLabels',idx,'Rounder')}</strong> · ${dname(doc)}</div>`).join('')||'<div class="wd-name tx-mu">—</div>'}
+      ${rs.map(({doc,team},idx)=>renderWeekShift(shiftLabelFor('rounderLabels',idx,'Rounder'),doc,team)).join('')||'<div class="wd-name tx-mu">—</div>'}
       <div class="wd-section-tit r">APP Rounders (${appRs.length}/${staffing.appRounders})</div>
-      ${appRs.map(({doc,team},idx)=>`<div class="wd-name">${renderTeam(team)} <strong>${shiftLabelFor('appRounderLabels',idx,'APP Rounder')}</strong> · ${dname(doc)}</div>`).join('')||'<div class="wd-name tx-mu">—</div>'}
+      ${appRs.map(({doc,team},idx)=>renderWeekShift(shiftLabelFor('appRounderLabels',idx,'APP Rounder'),doc,team)).join('')||'<div class="wd-name tx-mu">—</div>'}
       <div class="wd-section-tit s">Admitters / Swing (${ss.length}/${staffing.S})</div>
-      ${ss.map((doc,idx)=>`<div class="wd-name"><strong>${shiftLabelFor('swingLabels',idx,'Admitter')}</strong> · ${dname(doc)}</div>`).join('')||'<div class="wd-name tx-mu">—</div>'}
+      ${ss.map((doc,idx)=>renderWeekShift(shiftLabelFor('swingLabels',idx,'Admitter'),doc)).join('')||'<div class="wd-name tx-mu">—</div>'}
       <div class="wd-section-tit s">APP Admitters (${appSs.length}/${staffing.appAdmitters})</div>
-      ${appSs.map((doc,idx)=>`<div class="wd-name"><strong>${shiftLabelFor('appAdmitterLabels',idx,'APP Admitter')}</strong> · ${dname(doc)}</div>`).join('')||'<div class="wd-name tx-mu">—</div>'}
+      ${appSs.map((doc,idx)=>renderWeekShift(shiftLabelFor('appAdmitterLabels',idx,'APP Admitter'),doc)).join('')||'<div class="wd-name tx-mu">—</div>'}
       <div class="wd-section-tit" style="color:#3a3a6e;margin-top:8px">Nocturnists (${ns.length}/${staffing.nocturnists})</div>
-      ${ns.map((doc,idx)=>`<div class="wd-name"><strong>${shiftLabelFor('nocturnistLabels',idx,'Nocturnist')}</strong> · ${dname(doc)}</div>`).join('')||'<div class="wd-name tx-mu">—</div>'}
+      ${ns.map((doc,idx)=>renderWeekShift(shiftLabelFor('nocturnistLabels',idx,'Nocturnist'),doc)).join('')||'<div class="wd-name tx-mu">—</div>'}
     </div>`;
   }
   html+='</div>';
@@ -5079,13 +5083,34 @@ function autoAssignHolidays(){
   renderHolidayTable();
   toast('Holidays assigned','success');
 }
-function renderHolidayTable(){
+function holidayWorkedFromSchedule(docId,ds){
+  const sh=S.sched[docId]&&S.sched[docId][ds];
+  return !!(sh&&sh!=='OFF');
+}
+function holidayCellValue(y,docId,key){
+  const hd=holDates(y);
+  const h=(S.hols[y]&&S.hols[y][docId])||{};
+  return Object.prototype.hasOwnProperty.call(h,key)?!!h[key]:holidayWorkedFromSchedule(docId,hd[key]);
+}
+function toggleHolidayCell(docId,key){
+  if(!isAdmin()){ toast('View-only — admin access required','error'); return; }
   const y=parseInt(document.getElementById('hol-yr').value);
+  if(!S.hols[y])S.hols[y]={};
+  if(!S.hols[y][docId])S.hols[y][docId]={};
+  S.hols[y][docId][key]=!holidayCellValue(y,docId,key);
+  saveData();
+  renderHolidayTable();
+}
+function renderHolidayTable(){
+  let y=parseInt(document.getElementById('hol-yr').value);
+  if(!y||y<2026)y=2026;
+  const sel=document.getElementById('hol-yr');
+  if(sel&&sel.value!==String(y))sel.value=String(y);
   S.ui.holYear=y;
   document.getElementById('hol-yr-lbl').textContent=y;
   const hd=holDates(y);
-  const hols=S.hols[y]||{};
   const prev=S.hols[y-1]||{};
+  const canEdit=isAdmin();
   const docs=activeDocs(y)
     .filter(d=>d.type!=='swing-only' && d.type!=='nocturnist')
     .sort((a,b)=>a.last.localeCompare(b.last));
@@ -5096,9 +5121,7 @@ function renderHolidayTable(){
   docs.forEach(doc=>{
     holWorked[doc.id]={};
     holKeys.forEach(key=>{
-      const ds=hd[key];
-      const sh=(S.sched[doc.id]&&S.sched[doc.id][ds]);
-      holWorked[doc.id][key]=sh&&sh!=='OFF';
+      holWorked[doc.id][key]=holidayWorkedFromSchedule(doc.id,hd[key]);
     });
   });
 
@@ -5114,25 +5137,25 @@ function renderHolidayTable(){
     <th>Rule</th>
   </tr></thead><tbody>`;
   docs.forEach(doc=>{
-    const h=hols[doc.id]||{};
     const prevXm=!!(prev[doc.id]&&prev[doc.id].xm);
+    const tg=holidayCellValue(y,doc.id,'tg');
+    const xm=holidayCellValue(y,doc.id,'xm');
     // T&C rule: assigned Thanksgiving means they should not also get Christmas
-    const violated=h.xm&&prevXm;
-    const tgXmBoth=h.tg&&h.xm;
+    const violated=xm&&prevXm;
+    const tgXmBoth=tg&&xm;
     const cells=holKeys.map(key=>{
       const strictKey=key==='tg'||key==='xm';
       const worked=holWorked[doc.id][key];
-      const assigned=h[key];
-      if(strictKey){
-        return assigned
-          ? `<td style="background:#e6dffb"><span class="sh sh-H">Assigned</span></td>`
-          : `<td><span class="tx-mu">—</span></td>`;
-      } else {
-        // Tracked-only holidays: just show if they worked that day
-        return worked
-          ? `<td style="background:#fff5dc"><span style="font-size:11px;font-weight:700;color:#a85800">Worked</span></td>`
-          : `<td><span class="tx-mu">—</span></td>`;
-      }
+      const assigned=holidayCellValue(y,doc.id,key);
+      const label=strictKey?(assigned?'Assigned':'—'):(assigned?'Worked':'—');
+      const bg=assigned?(strictKey?'#e6dffb':'#fff5dc'):'#fff';
+      const badge=assigned
+        ? (strictKey?'<span class="sh sh-H">Assigned</span>':'<span style="font-size:11px;font-weight:700;color:#a85800">Worked</span>')
+        : '<span class="tx-mu">—</span>';
+      const scheduleHint=worked?' title="Schedule shows this provider worked this holiday"':'';
+      return canEdit
+        ? `<td style="background:${bg}"><button class="btn btn-xs" onclick="toggleHolidayCell('${doc.id}','${key}')"${scheduleHint}>${label}</button></td>`
+        : `<td style="background:${bg}"${scheduleHint}>${badge}</td>`;
     }).join('');
     const ruleCell=tgXmBoth
       ? '<td><span style="color:#a01918;font-weight:700">⚠ Both T+C</span></td>'
