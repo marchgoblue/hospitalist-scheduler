@@ -151,10 +151,14 @@ body{font-family:'Source Sans 3',-apple-system,Helvetica,Arial,sans-serif;backgr
 .tab-menu{position:relative;height:100%}
 .tab-menu .tab{width:100%}
 .tab-dd{display:none;position:absolute;top:100%;right:0;min-width:220px;background:#fff;border:1px solid var(--line);box-shadow:0 10px 24px rgba(0,0,0,.18);z-index:200;border-radius:0 0 6px 6px;overflow:hidden}
-.tab-menu:hover .tab-dd,.tab-menu:focus-within .tab-dd{display:block}
+.tab-menu.open .tab-dd{display:block}
 .tab-dd button{display:block;width:100%;padding:10px 14px;background:#fff;border:none;border-bottom:1px solid var(--line);text-align:left;font-family:inherit;font-size:13px;font-weight:600;color:var(--ink);cursor:pointer}
 .tab-dd button:last-child{border-bottom:none}
 .tab-dd button:hover{background:#f2f6fb;color:#1b4d8f}
+.settings-split{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-top:14px}
+.settings-panel{border-top:1px solid var(--line);padding-top:12px}
+.settings-panel-title{font-size:11px;font-weight:700;color:var(--ink2);letter-spacing:.7px;text-transform:uppercase;margin-bottom:6px}
+@media(max-width:900px){.settings-split{grid-template-columns:1fr}}
 
 .hdr-r{margin-left:auto;display:flex;align-items:center;gap:8px}
 .role-switch{display:flex;background:var(--hdr);border:1px solid var(--line);border-radius:4px;padding:2px;font-size:11px}
@@ -611,13 +615,13 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
     <button class="tab" id="t-requests" onclick="nav('requests')">Requests</button>
     <button class="tab" id="t-docs" onclick="nav('docs')">Providers</button>
     <button class="tab" id="t-hol" onclick="nav('hol')">Holidays</button>
-    <div class="tab-menu" id="settings-menu" style="display:none">
-      <button class="tab" id="t-cfg" onclick="nav('cfg-params')">Settings</button>
+    <div class="tab-menu" id="settings-menu" style="display:none" onmouseleave="closeSettingsMenu()">
+      <button class="tab" id="t-cfg" onclick="toggleSettingsMenu(event)">Settings</button>
       <div class="tab-dd">
-        <button onclick="nav('cfg-params')">Schedule Parameters</button>
-        <button onclick="nav('cfg-data')">Data Management</button>
-        <button onclick="nav('cfg-roster')">Provider Roster</button>
-        <button onclick="nav('cfg-groups')">Group Onboarding</button>
+        <button onclick="navSettings('cfg-params')">Schedule Parameters</button>
+        <button onclick="navSettings('cfg-data')">Data Management</button>
+        <button onclick="navSettings('cfg-roster')">Provider Roster</button>
+        <button onclick="navSettings('cfg-groups')">Group Onboarding</button>
       </div>
     </div>
   </div>
@@ -827,32 +831,36 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
       <div class="fg"><label>APP Admitters</label><input type="number" id="c-app-s" value="0" min="0" onchange="handleShiftCountChange()"></div>
     </div>
     <div id="shift-param-fields"></div>
-    <div class="dm-section">
-      <div class="dm-title">Temporary Staffing Changes</div>
-      <div class="dm-help" style="margin-bottom:8px">Use this for short seasons when this site needs extra coverage. These numbers are added to the normal daily counts only during the dates below.</div>
-      <div class="row">
-        <div class="fg"><label>Start Date</label><input type="date" id="tmp-start" style="width:140px"></div>
-        <div class="fg"><label>End Date</label><input type="date" id="tmp-end" style="width:140px"></div>
+    <div class="settings-split">
+      <div class="settings-panel">
+        <div class="settings-panel-title">Temporary Staffing Changes</div>
+        <div class="dm-help" style="margin-bottom:8px">Use this for short seasons when this site needs extra coverage. These numbers are added to the normal daily counts only during the dates below.</div>
+        <div class="row">
+          <div class="fg"><label>Start Date</label><input type="date" id="tmp-start" style="width:140px"></div>
+          <div class="fg"><label>End Date</label><input type="date" id="tmp-end" style="width:140px"></div>
+        </div>
+        <div class="row">
+          <div class="fg"><label>Extra Rounders</label><input type="number" id="tmp-r" value="0" min="0" style="width:90px"></div>
+          <div class="fg"><label>Extra Admitters</label><input type="number" id="tmp-s" value="0" min="0" style="width:90px"></div>
+          <div class="fg"><label>Extra Nocturnists</label><input type="number" id="tmp-n" value="0" min="0" style="width:100px"></div>
+        </div>
+        <div class="row">
+          <div class="fg"><label>Extra APP Rounders</label><input type="number" id="tmp-app-r" value="0" min="0" style="width:110px"></div>
+          <div class="fg"><label>Extra APP Admitters</label><input type="number" id="tmp-app-s" value="0" min="0" style="width:110px"></div>
+          <button class="btn btn-sm" onclick="addStaffingOverride()">Add Temporary Change</button>
+        </div>
+        <div id="staffing-overrides-list"></div>
       </div>
-      <div class="row">
-        <div class="fg"><label>Extra Rounders</label><input type="number" id="tmp-r" value="0" min="0" style="width:90px"></div>
-        <div class="fg"><label>Extra Admitters</label><input type="number" id="tmp-s" value="0" min="0" style="width:90px"></div>
-        <div class="fg"><label>Extra Nocturnists</label><input type="number" id="tmp-n" value="0" min="0" style="width:100px"></div>
+      <div class="settings-panel">
+        <div class="settings-panel-title">Variable Scheduling Tools</div>
+        <div class="row">
+          <div class="fg"><label>Max Requests/Quarter</label><input type="number" id="c-max-req" value="15" style="width:90px" onchange="autoSaveCfg()" oninput="autoSaveCfg()"></div>
+          <div class="fg"><label>Max Required Requests</label><input type="number" id="c-max-required" value="5" style="width:90px" onchange="autoSaveCfg()" oninput="autoSaveCfg()"></div>
+          <div class="fg"><label>Max Weekend Requests</label><input type="number" id="c-max-wk" value="6" style="width:90px" onchange="autoSaveCfg()" oninput="autoSaveCfg()"></div>
+        </div>
+        <div id="flex-guidance" style="margin:10px 0;padding:10px;border:1px solid var(--line);border-radius:4px;background:#f8fafc;font-size:12px"></div>
       </div>
-      <div class="row">
-        <div class="fg"><label>Extra APP Rounders</label><input type="number" id="tmp-app-r" value="0" min="0" style="width:110px"></div>
-        <div class="fg"><label>Extra APP Admitters</label><input type="number" id="tmp-app-s" value="0" min="0" style="width:110px"></div>
-        <button class="btn btn-sm" onclick="addStaffingOverride()">Add Temporary Change</button>
-      </div>
-      <div id="staffing-overrides-list"></div>
     </div>
-    <div style="font-weight:700;font-size:12px;color:var(--ink2);margin:14px 0 6px;padding-top:10px;border-top:1px solid var(--line)">Variable Scheduling Tools</div>
-    <div class="row">
-      <div class="fg"><label>Max Requests/Quarter</label><input type="number" id="c-max-req" value="15" style="width:90px" onchange="autoSaveCfg()" oninput="autoSaveCfg()"></div>
-      <div class="fg"><label>Max Required Requests</label><input type="number" id="c-max-required" value="5" style="width:90px" onchange="autoSaveCfg()" oninput="autoSaveCfg()"></div>
-      <div class="fg"><label>Max Weekend Requests</label><input type="number" id="c-max-wk" value="6" style="width:90px" onchange="autoSaveCfg()" oninput="autoSaveCfg()"></div>
-    </div>
-    <div id="flex-guidance" style="margin:10px 0;padding:10px;border:1px solid var(--line);border-radius:4px;background:#f8fafc;font-size:12px"></div>
   </div>
 </div>
 
@@ -874,8 +882,8 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
         </div>
         <aside class="qg-guide-pane">
           <h4>Before You Start</h4>
-          <p><strong>New site:</strong> this builds the provider list and shift names.</p>
-          <p><strong>After a quarter:</strong> this fixes past days and counts what people worked.</p>
+          <p id="qg-new-site-help"><strong>New site:</strong> this builds the provider list and shift names.</p>
+          <p id="qg-quarter-help"><strong>After a quarter:</strong> this fixes past days and counts what people worked.</p>
           <ol>
             <li>In qGenda, choose Calendar by Task.</li>
             <li>Use the last quarter.</li>
@@ -916,7 +924,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
 <div class="pg" id="pg-cfg-roster">
   <h1 class="mb">Provider Roster</h1>
   <div class="g2">
-    <div class="card">
+    <div class="card" style="grid-column:1/-1">
       <h3>Add Provider</h3>
       <div class="row">
         <div class="fg"><label>Last Name</label><input type="text" id="n-last" style="width:130px"></div>
@@ -1145,6 +1153,38 @@ const SETTINGS_PAGES=new Set(['cfg-params','cfg-data','cfg-roster','cfg-groups']
 function updateSettingsMenuVisibility(){
   const sm=document.getElementById('settings-menu');
   if(sm)sm.style.display=(isAdmin()&&S.ui.role==='admin')?'block':'none';
+}
+
+function toggleSettingsMenu(ev){
+  if(ev)ev.stopPropagation();
+  const sm=document.getElementById('settings-menu');
+  if(sm)sm.classList.toggle('open');
+}
+
+function closeSettingsMenu(){
+  const sm=document.getElementById('settings-menu');
+  if(sm)sm.classList.remove('open');
+}
+
+document.addEventListener('click',ev=>{
+  const sm=document.getElementById('settings-menu');
+  if(sm&&!sm.contains(ev.target))closeSettingsMenu();
+});
+
+function navSettings(p){
+  closeSettingsMenu();
+  nav(p);
+}
+
+function hasStoredScheduleData(){
+  return Object.values(S.sched||{}).some(days=>days&&Object.keys(days).length>0);
+}
+
+function updateQgendaImportGuidance(){
+  const newSite=document.getElementById('qg-new-site-help');
+  const quarter=document.getElementById('qg-quarter-help');
+  if(newSite)newSite.style.display=(S.docs||[]).length?'none':'block';
+  if(quarter)quarter.style.display=hasStoredScheduleData()?'block':'none';
 }
 
 function setReadOnly(ro){
@@ -5111,6 +5151,7 @@ function renderHolidayTable(){
 //  SETTINGS / ROSTER
 // ════════════════════════════════════════════════════════
 function renderRoster(){
+  updateQgendaImportGuidance();
   const docs=[...S.docs].sort((a,b)=>providerGridRank(a)-providerGridRank(b)||teamSortValue(a)-teamSortValue(b)||providerSort(a,b));
   document.getElementById('roster-count').textContent=docs.filter(d=>d.active).length;
   if(!docs.length){
@@ -5147,6 +5188,7 @@ function renderRoster(){
   });
   html+='</tbody></table>';
   document.getElementById('roster-list').innerHTML=html;
+  updateQgendaImportGuidance();
 }
 function toggleDoc(id){if(!isAdmin()){toast('Admin only','error');return;}const d=byId(id);if(d){d.active=!d.active;saveData();renderRoster();renderDocList();populatePhysPicker()}}
 function setProviderTeam(id,color){
