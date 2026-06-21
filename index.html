@@ -1120,6 +1120,7 @@ let S = {
   docs: JSON.parse(JSON.stringify(INIT_DOCS)),
   sched: {},               // {docId: {dateStr: 'R'|'S'|'OFF'|'H'}}
   teams: {},               // {docId: {dateStr: 1..13}} - team number for R shifts
+  qgendaShiftDetails: {},   // {docId: {dateStr: {task, shift, rawName}}} exact imported qGenda task labels
   requests: {},            // {quarterKey: {docId: {required:[], optional:[]}}}
   cycleStarts: {},         // {quarterKey: {docId: dateStr}}  -- their cycle start day for that quarter
   hols: {},                // {year: {docId: {tg:bool, xm:bool}}}
@@ -1249,6 +1250,7 @@ function applyMigrations(){
   if(!Array.isArray(S.docs))S.docs=[];
   if(!S.teams)S.teams={};if(!S.announcement)S.announcement='';
   if(!S.qgendaShiftMap)S.qgendaShiftMap={};
+  if(!S.qgendaShiftDetails)S.qgendaShiftDetails={};
   ensureShiftCfg();
   if(!S.ui)S.ui={};
   if(S.ui.currentPhysId&&!S.docs.find(d=>d.id===S.ui.currentPhysId))S.ui.currentPhysId=null;
@@ -1938,6 +1940,9 @@ function showQgendaMapModal(records, filename, totalParsed, totalIgnored, unknow
     <div style="font-size:11px;color:#555;margin-bottom:12px">
       Breakdown: <strong>${rCount} R</strong> · <strong>${sCount} S</strong> · <strong>${nCount} N</strong> · <strong>${xCount} X</strong> ${onboardingEmptyRoster?'recognized shifts in file':'matched past shifts'}
     </div>
+    <div style="font-size:11px;color:#555;margin-bottom:12px">
+      Original qGenda task names will be saved for each imported worked shift, so schedule hover text can show the exact historical shift label.
+    </div>
     <div style="font-weight:700;font-size:12px;margin-bottom:6px">
       All provider name matches - <span style="color:#0a7044">${matchedNames.length} matched</span>,
       <span style="color:#a85800">${unmatchedNames.length} unmatched</span>
@@ -2140,6 +2145,13 @@ async function runQgendaImport(records){
       S.bonusShifts[rec.docId][ds]=rec.shift;
     }
     S.sched[rec.docId][ds]=rec.shift;
+    if(!S.qgendaShiftDetails) S.qgendaShiftDetails={};
+    if(!S.qgendaShiftDetails[rec.docId]) S.qgendaShiftDetails[rec.docId]={};
+    S.qgendaShiftDetails[rec.docId][ds]={
+      task:rec.task,
+      shift:rec.shift,
+      rawName:rec.rawName
+    };
     imported++;
   }
 
@@ -2284,6 +2296,7 @@ function confirmClearSchedule(){
       S.requests={};
       S.bonusShifts={};
       S.baseSchedule={};
+      S.qgendaShiftDetails={};
       S.cycleStarts={};
       S.hols={};
       S.teams={};
@@ -2306,6 +2319,7 @@ function freshGroupState(){
     hols: {},
     announcement: '',
     qgendaShiftMap: {},
+    qgendaShiftDetails: {},
     cfg: {...{annual:182, R:13, S:3, maxReq:15, maxWeekendReq:6, maxRequired:5}, ...shiftCfgDefaults()},
     ui: {
       role:'admin',
@@ -3914,6 +3928,11 @@ function renderSchedule(){
   }
   function dailyShiftLabel(doc,ds,sh){
     if(sh==='OFF') return 'Off';
+    const imported=S.qgendaShiftDetails&&S.qgendaShiftDetails[doc.id]&&S.qgendaShiftDetails[doc.id][ds];
+    if(imported&&imported.task){
+      const suffix=imported.shift&&imported.shift!==sh?` (${imported.shift})`:'';
+      return `${imported.task}${suffix}`;
+    }
     if(sh==='X') return 'Cross Coverage';
     if(sh==='N'){
       const docsForShift=allDocs.filter(d=>S.sched[d.id]&&S.sched[d.id][ds]==='N').sort(providerSort);
