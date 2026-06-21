@@ -3912,6 +3912,33 @@ function renderSchedule(){
     if(Array.isArray(r))return{all:new Set(r),req:new Set()};
     return{all:new Set([...(r.required||[]),...(r.optional||[])]),req:new Set(r.required||[])};
   }
+  function dailyShiftLabel(doc,ds,sh){
+    if(sh==='OFF') return 'Off';
+    if(sh==='X') return 'Cross Coverage';
+    if(sh==='N'){
+      const docsForShift=allDocs.filter(d=>S.sched[d.id]&&S.sched[d.id][ds]==='N').sort(providerSort);
+      const idx=Math.max(0,docsForShift.findIndex(d=>d.id===doc.id));
+      return shiftLabelFor('nocturnistLabels',idx,'Nocturnist');
+    }
+    if(sh==='S'||sh==='H'){
+      const app=isAppProvider(doc);
+      const docsForShift=allDocs.filter(d=>S.sched[d.id]&&(S.sched[d.id][ds]==='S'||S.sched[d.id][ds]==='H')&&isAppProvider(d)===app).sort(providerSort);
+      const idx=Math.max(0,docsForShift.findIndex(d=>d.id===doc.id));
+      const label=app?shiftLabelFor('appAdmitterLabels',idx,'APP Admitter'):shiftLabelFor('swingLabels',idx,'Admitter');
+      return sh==='H'?`Holiday · ${label}`:label;
+    }
+    if(sh==='R'){
+      const app=isAppProvider(doc);
+      const docsForShift=allDocs.filter(d=>S.sched[d.id]&&S.sched[d.id][ds]==='R'&&isAppProvider(d)===app)
+        .sort((a,b)=>teamSortValue(a)-teamSortValue(b)||providerSort(a,b));
+      const idx=Math.max(0,docsForShift.findIndex(d=>d.id===doc.id));
+      const label=app?shiftLabelFor('appRounderLabels',idx,'APP Rounder'):shiftLabelFor('rounderLabels',idx,'Rounder');
+      const team=S.teams&&S.teams[doc.id]&&S.teams[doc.id][ds];
+      const teamText=team==='green'||team==='white'?`${teamLabel(team)} team`:team?`Team ${team}`:'';
+      return teamText?`${teamText} · ${label}`:label;
+    }
+    return sh;
+  }
   function buildRow(doc,isConsult){
     const{all:docReqs,req:docRequired}=getDocReqs(doc.id);
     let qTotalR=0,qTotalS=0,qTotalN=0,qTotalX=0;
@@ -3954,8 +3981,12 @@ function renderSchedule(){
       if(i>0&&d.getDate()===1)cls.push('month-sep');
       if(isHighlighted)cls.push('row-hl-cell');if(isColHl)cls.push('col-hl');
       const label=sh==='OFF'?'':sh;
-      const tip=(isReqRequired&&conflict?'⚠ REQUIRED OFF! ':isReq?'Requested OFF · ':'')+( sh==='OFF'?'off':sh);
-      row+=`<td class="${cls.join(' ')}" data-doc="${doc.id}" data-date="${ds}" onclick="cycleCell('${doc.id}','${ds}')" title="${tip}">${label}</td>`;
+      const tipParts=[];
+      if(isReqRequired&&conflict) tipParts.push('REQUIRED OFF CONFLICT');
+      else if(isReq) tipParts.push('Requested off');
+      tipParts.push(dailyShiftLabel(doc,ds,sh));
+      tipParts.push(`${dname(doc)} · ${ds}`);
+      row+=`<td class="${cls.join(' ')}" data-doc="${doc.id}" data-date="${ds}" onclick="cycleCell('${doc.id}','${ds}')" title="${qgEsc(tipParts.join('\n'))}">${label}</td>`;
     });
     row+='</tr>';
     return row;
