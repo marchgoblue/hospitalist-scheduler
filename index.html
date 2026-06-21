@@ -138,11 +138,11 @@ body{font-family:'Source Sans 3',-apple-system,Helvetica,Arial,sans-serif;backgr
 
 /* HEADER */
 #hdr{position:sticky;top:0;z-index:100;background:#102a4c;border-bottom:1px solid #0b1d35;display:flex;align-items:center;height:54px;padding:0 28px;gap:0;backdrop-filter:saturate(180%) blur(12px)}
-.brand{display:flex;align-items:center;gap:9px;padding-right:28px;height:100%;min-width:220px}
-.brand-mark{display:none}
+.brand{display:flex;align-items:center;gap:10px;padding-right:28px;height:100%;min-width:250px}
+.brand-mark{display:flex;align-items:center;justify-content:center;width:34px;height:34px;border:1px solid rgba(255,255,255,.3);border-radius:4px;color:#fff;font-size:11px;font-weight:800;letter-spacing:.8px;background:rgba(255,255,255,.08)}
 .brand-text{display:flex;flex-direction:column;line-height:1.1}
-.brand-name{font-size:14px;font-weight:700;color:#fff;letter-spacing:.1px}
-.brand-sub{font-size:10px;color:#b8c7d9;font-family:'JetBrains Mono',monospace;letter-spacing:1px;text-transform:uppercase}
+.brand-name{font-size:18px;font-weight:800;color:#fff;letter-spacing:.1px;max-width:230px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.brand-sub{font-size:9px;color:#b8c7d9;font-family:'JetBrains Mono',monospace;letter-spacing:1px;text-transform:uppercase}
 
 .tabs{display:flex;height:100%}
 .tab{display:flex;align-items:center;padding:0 13px;height:100%;background:none;border:none;border-bottom:2px solid transparent;color:#d6e2f0;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;transition:all .12s}
@@ -613,10 +613,10 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
 
 <div id="hdr">
   <div class="brand">
-    <div class="brand-mark">HS</div>
+    <div class="brand-mark" id="brand-mark">HS</div>
     <div class="brand-text">
-      <span class="brand-name">Hospitalist Schedule</span>
-      <span class="brand-sub">Quarterly Planner</span>
+      <span class="brand-name" id="brand-name">Hospitalist Schedule</span>
+      <span class="brand-sub">Hospitalist Scheduler</span>
     </div>
   </div>
   <div class="tabs" id="tabs-admin">
@@ -695,6 +695,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
       <span class="sh sh-R">R</span><span class="tx-xs tx-mu">Rounding 7a–5p</span>
       <span class="sh sh-S">S</span><span class="tx-xs tx-mu">Swing 3p–1a</span>
       <span class="sh sh-H">H</span><span class="tx-xs tx-mu">Holiday</span>
+      <span class="sh" style="background:#e8f0fe;color:#244b7a;border:1px solid #b8c8e8">X</span><span class="tx-xs tx-mu">Cross Coverage</span>
     </div>
     <div class="tb-group" style="margin-left:auto">
       <span class="tb-label" id="fill-mode-label">Click cell to cycle R→S→N→OFF · Double-click name to open</span>
@@ -1156,6 +1157,12 @@ function currentGroupName(){return (currentUser&&currentUser.groupName)||current
 function currentScheduleRowId(){return currentGroupId()||DATA_ROW_ID;}
 const SETTINGS_PAGES=new Set(['cfg-params','cfg-data','cfg-roster','cfg-groups']);
 
+function groupInitials(name){
+  const parts=String(name||'Hospitalist Schedule').replace(/hospitalists?/ig,'').trim().split(/\s+/).filter(Boolean);
+  const src=parts.length?parts:String(name||'HS').split(/\s+/).filter(Boolean);
+  return src.slice(0,2).map(p=>p[0]).join('').toUpperCase()||'HS';
+}
+
 function updateSettingsMenuVisibility(){
   const sm=document.getElementById('settings-menu');
   if(sm)sm.style.display=(isAdmin()&&S.ui.role==='admin')?'block':'none';
@@ -1200,7 +1207,12 @@ function setReadOnly(ro){
 }
 function updateHeaderForUser(){
   const el=document.getElementById('user-display');if(!el||!currentUser)return;
-  el.textContent=isAdmin()?`${currentUser.username} (Admin · ${currentGroupName()})`:`${currentUser.username} · ${currentGroupName()}`;
+  const group=currentGroupName();
+  const brand=document.getElementById('brand-name');
+  const mark=document.getElementById('brand-mark');
+  if(brand)brand.textContent=group;
+  if(mark)mark.textContent=groupInitials(group);
+  el.textContent=isAdmin()?`${currentUser.username} (Admin)`:`${currentUser.username}`;
   updateSettingsMenuVisibility();
 }
 
@@ -2367,7 +2379,7 @@ function providerTypeLabel(d){
 function providerExtraTitle(d){return d&&d.title&&d.title.toLowerCase()!=='medical director'?d.title:''}
 function normalizeRole(role){return role==='NP'?'APP':(role==='MD'?'MD/DO':(role||'MD/DO'))}
 function providerRoleLabel(d){return normalizeRole(d&&d.role)}
-function isStrictTeamEligible(d){return d&&d.type==='standard'&&!isMedicalDirectorDoc(d)&&d.type!=='nocturnist'&&d.type!=='prn'}
+function isStrictTeamEligible(d){return d&&d.type==='standard'&&!isMedicalDirectorDoc(d)&&isStrictStyle(d)}
 function isAppProvider(d){return d&&(d.role==='APP'||d.role==='NP')}
 function physicianRounderTarget(){return (S.cfg.R||0)+(S.cfg.appRounders||0)}
 function admitterTarget(){return (S.cfg.S||0)+(S.cfg.appAdmitters||0)}
@@ -2426,6 +2438,8 @@ function normalizeProviderDefaults(doc){
   if(isStrictTeamEligible(doc)){
     if(!doc.preferences.scheduleStyle) doc.preferences=defaultPreferencesForType(doc.type);
     if(!doc.teamColor) doc.teamColor=nextTeamColor();
+  }else{
+    doc.teamColor='';
   }
   return doc;
 }
@@ -4769,7 +4783,7 @@ function renderMySchedule(){
 function renderDocList(){
   const q=(document.getElementById('doc-search')?.value||'').toLowerCase();
   const year=S.ui.year;
-  const allDocs=activeDocs(year).filter(d=>!q||dname(d).toLowerCase().includes(q)).sort((a,b)=>providerGridRank(a)-providerGridRank(b)||teamSortValue(a)-teamSortValue(b)||providerSort(a,b));
+  const allDocs=activeDocs(year).filter(d=>d.type!=='prn'&&(!q||dname(d).toLowerCase().includes(q))).sort((a,b)=>providerGridRank(a)-providerGridRank(b)||teamSortValue(a)-teamSortValue(b)||providerSort(a,b));
 
   // Split nocturnists from rotation
   const rotDocs=allDocs.filter(d=>d.type!=='nocturnist');
@@ -5356,7 +5370,6 @@ function saveEditDoc(id){
   doc.startDate=document.getElementById('ed-start').value||null;
   doc.title=document.getElementById('ed-title').value.trim();
   if(doc.type==='weekday-only'&&!doc.title) doc.title='Medical Director';
-  if(isStrictTeamEligible(doc)&&!doc.teamColor) doc.teamColor=nextTeamColor();
   // Preferences
   const styleEl=document.querySelector('input[name="ed-style"]:checked');
   const scheduleStyle=styleEl?styleEl.value:'variable';
@@ -5367,6 +5380,8 @@ function saveEditDoc(id){
   doc.preferences.preferredR=prefR;
   doc.preferences.maxWork=safeMaxW;
   doc.preferences.scheduleStyle=scheduleStyle;
+  if(isStrictTeamEligible(doc)&&!doc.teamColor) doc.teamColor=nextTeamColor();
+  if(!isStrictTeamEligible(doc)) doc.teamColor='';
   saveData();
   document.getElementById('modal').style.display='none';
   renderRoster();
