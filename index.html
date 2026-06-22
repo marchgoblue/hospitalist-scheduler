@@ -259,14 +259,11 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
 }
 .sheet tbody tr.row-hl>td:first-child{border-left:2px solid #1b4d8f!important}
 .sheet tbody tr.row-hl>td:last-child{border-right:2px solid #1b4d8f!important}
-.sheet tbody tr.staffing-candidate>td{
-  border-top:3px solid #c5221f!important;
-  border-bottom:3px solid #c5221f!important;
-  box-shadow:inset 0 3px 0 #c5221f,inset 0 -3px 0 #c5221f!important;
+.sheet tbody tr.staffing-candidate td.name-col{
+  background:#fde2e2!important;color:#a01918;font-weight:800!important;
+  border:2px solid #c5221f!important;
+  box-shadow:inset 4px 0 0 #c5221f!important;
 }
-.sheet tbody tr.staffing-candidate>td:first-child{border-left:4px solid #c5221f!important}
-.sheet tbody tr.staffing-candidate>td:last-child{border-right:4px solid #c5221f!important}
-.sheet tbody tr.staffing-candidate td.name-col{background:#fde2e2!important;color:#a01918;font-weight:800!important}
 .name-col-hl{font-weight:700!important}
 .sheet .col-hl{
   border-left:2px solid #1b4d8f!important;
@@ -646,6 +643,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
         <button onclick="navSettings('cfg-params')">Schedule Parameters</button>
         <button onclick="navSettings('cfg-data')">Data Management</button>
         <button onclick="navSettings('cfg-roster')">Provider Roster</button>
+        <button onclick="navSettings('cfg-stress')">Stress Test</button>
         <button onclick="navSettings('cfg-groups')">Group Onboarding</button>
       </div>
     </div>
@@ -992,6 +990,37 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
   </div>
 </div>
 
+<div class="pg" id="pg-cfg-stress">
+  <h1 class="mb">Stress Test</h1>
+  <div class="settings-split">
+    <div class="card">
+      <h3>Build a Test Run</h3>
+      <div class="dm-help" style="margin-bottom:10px">
+        This tries many fake request lists against the schedule builder. It does not save or change the real schedule.
+      </div>
+      <div class="row">
+        <div class="fg"><label>Year</label><input type="number" id="stress-year" style="width:90px" min="2025" max="2035"></div>
+        <div class="fg"><label>Quarter</label><select id="stress-quarter" style="width:120px"><option value="1">Q1</option><option value="2">Q2</option><option value="3">Q3</option><option value="4">Q4</option></select></div>
+        <div class="fg"><label>Trials</label><input type="number" id="stress-runs" value="20" min="1" max="100" style="width:90px"></div>
+      </div>
+      <div class="row">
+        <div class="fg"><label>Variable Providers</label><input type="number" id="stress-variable-count" min="0" style="width:120px"></div>
+        <div class="fg"><label>Required Off Each</label><input type="number" id="stress-required" value="2" min="0" max="20" style="width:120px"></div>
+        <div class="fg"><label>Optional Off Each</label><input type="number" id="stress-optional" value="6" min="0" max="40" style="width:120px"></div>
+      </div>
+      <div class="row">
+        <div class="fg"><label>Weekend Request Bias</label><input type="number" id="stress-weekend" value="35" min="0" max="100" style="width:130px"></div>
+        <button class="btn btn-p" id="stress-run-btn" onclick="runStressTest()">Run Stress Test</button>
+      </div>
+      <div id="stress-summary" class="dm-help" style="margin-top:8px"></div>
+    </div>
+    <div class="card">
+      <h3>Results</h3>
+      <div id="stress-results" class="tx-sm tx-mu">Run a test to see how the scheduler handles fake requests.</div>
+    </div>
+  </div>
+</div>
+
 <!-- ════════════════════════════════════════════════════ -->
 <!-- PHYSICIAN: MY REQUESTS                               -->
 <!-- ════════════════════════════════════════════════════ -->
@@ -1173,7 +1202,7 @@ function isPhysician(){return currentUser&&currentUser.role==='physician';}
 function currentGroupId(){return (currentUser&&currentUser.groupId)||DEFAULT_GROUP_ID;}
 function currentGroupName(){return (currentUser&&currentUser.groupName)||currentGroupId();}
 function currentScheduleRowId(){return currentGroupId()||DATA_ROW_ID;}
-const SETTINGS_PAGES=new Set(['cfg-params','cfg-data','cfg-roster','cfg-groups']);
+const SETTINGS_PAGES=new Set(['cfg-params','cfg-data','cfg-roster','cfg-stress','cfg-groups']);
 
 function groupInitials(name){
   const parts=String(name||'Hospitalist Schedule').replace(/hospitalists?/ig,'').trim().split(/\s+/).filter(Boolean);
@@ -2938,6 +2967,209 @@ function generateQuarter(){
   } catch(e) {
     console.error('generateQuarter error:', errStr(e), e);
     toast('Schedule generation error: ' + errStr(e), 'error');
+  }
+}
+
+function nextStressQuarter(){
+  const now=new Date();
+  let year=now.getFullYear();
+  let q=Math.floor(now.getMonth()/3)+1;
+  const start=quarterRange(year,q).start;
+  if(start<new Date(now.getFullYear(),now.getMonth(),now.getDate())){
+    q++;
+    if(q>4){q=1;year++;}
+  }
+  return {year,q};
+}
+function stressVariableCandidates(year){
+  return activeDocs(year).filter(d=>d.type==='standard'&&!isMedicalDirectorDoc(d)&&d.type!=='prn'&&d.type!=='nocturnist').sort(providerSort);
+}
+function renderStressSummary(){
+  const yEl=document.getElementById('stress-year');
+  const qEl=document.getElementById('stress-quarter');
+  if(!yEl||!qEl)return;
+  if(!yEl.value){
+    const n=nextStressQuarter();
+    yEl.value=n.year;
+    qEl.value=String(n.q);
+  }
+  const year=parseInt(yEl.value,10)||S.ui.year||new Date().getFullYear();
+  const candidates=stressVariableCandidates(year);
+  const currentVariable=candidates.filter(d=>!isStrictStyle(d)).length;
+  const countEl=document.getElementById('stress-variable-count');
+  if(countEl&&!countEl.value) countEl.value=currentVariable||Math.min(8,candidates.length);
+  const summary=document.getElementById('stress-summary');
+  if(summary){
+    summary.innerHTML=`Current active pool: <strong>${candidates.length}</strong> standard providers. Current variable providers: <strong>${currentVariable}</strong>. Try changing the variable provider count and request numbers to see when the schedule starts to strain.`;
+  }
+}
+function configureStressVariablePool(year,count){
+  const pool=stressVariableCandidates(year);
+  const variableIds=new Set(pool.slice(0,Math.max(0,Math.min(count,pool.length))).map(d=>d.id));
+  pool.forEach(doc=>{
+    if(!doc.preferences)doc.preferences=defaultPreferencesForType(doc.type);
+    if(variableIds.has(doc.id)){
+      doc.preferences.scheduleStyle='variable';
+      doc.preferences.preferredR=doc.preferences.preferredR||5;
+      doc.preferences.maxWork=doc.preferences.maxWork||7;
+      doc.teamColor='';
+    }else{
+      doc.preferences.scheduleStyle='strict-swing-block';
+      doc.preferences.preferredR=7;
+      doc.preferences.maxWork=7;
+      if(!doc.teamColor)doc.teamColor=nextTeamColor();
+    }
+  });
+  return pool.filter(d=>variableIds.has(d.id));
+}
+function stressDatePickScore(seed,docId,ds,kind,weekendBias){
+  const d=parseD(ds);
+  const weekendBoost=isWeekend(d)?Math.max(0,weekendBias)/100:0;
+  return _candidateUnit(seed,docId+'|'+ds+'|'+kind)+weekendBoost;
+}
+function buildStressRequests(year,q,docs,requiredCount,optionalCount,weekendBias,seed){
+  const dayStrs=quarterDays(year,q).map(dstrD);
+  const requests={};
+  docs.forEach(doc=>{
+    const picked=new Set();
+    const sortedRequired=dayStrs.slice().sort((a,b)=>stressDatePickScore(seed,doc.id,b,'required',weekendBias)-stressDatePickScore(seed,doc.id,a,'required',weekendBias));
+    const required=sortedRequired.slice(0,requiredCount);
+    required.forEach(ds=>picked.add(ds));
+    const sortedOptional=dayStrs.slice().filter(ds=>!picked.has(ds)).sort((a,b)=>stressDatePickScore(seed,doc.id,b,'optional',weekendBias)-stressDatePickScore(seed,doc.id,a,'optional',weekendBias));
+    const optional=sortedOptional.slice(0,optionalCount);
+    requests[doc.id]={required,optional};
+  });
+  return requests;
+}
+function stressScheduleMetrics(year,q,stressDocs){
+  const days=quarterDays(year,q);
+  const quarterKey=`${year}-${q}`;
+  const reqs=S.requests[quarterKey]||{};
+  let requiredMisses=0,optionalMisses=0,shortageDays=0,overageDays=0,shortageSlots=0,overageSlots=0;
+  stressDocs.forEach(doc=>{
+    const r=reqs[doc.id]||{};
+    (r.required||[]).forEach(ds=>{
+      const sh=S.sched[doc.id]&&S.sched[doc.id][ds];
+      if(sh==='R'||sh==='S'||sh==='H')requiredMisses++;
+    });
+    (r.optional||[]).forEach(ds=>{
+      const sh=S.sched[doc.id]&&S.sched[doc.id][ds];
+      if(sh==='R'||sh==='S'||sh==='H')optionalMisses++;
+    });
+  });
+  days.forEach(date=>{
+    const ds=dstrD(date);
+    const issues=staffingIssueDefinitions(ds,activeDocs(year,date.getMonth()));
+    const shortage=issues.filter(x=>x.diff<0).reduce((sum,x)=>sum+Math.abs(x.diff),0);
+    const overage=issues.filter(x=>x.diff>0).reduce((sum,x)=>sum+x.diff,0);
+    if(shortage){shortageDays++;shortageSlots+=shortage;}
+    if(overage){overageDays++;overageSlots+=overage;}
+  });
+  return {requiredMisses,optionalMisses,shortageDays,overageDays,shortageSlots,overageSlots,score:_scoreScheduleCandidate(year,q)};
+}
+function avgStress(rows,key){return rows.length?rows.reduce((sum,r)=>sum+r[key],0)/rows.length:0}
+function stressRecommendation(rows,variableCount,requiredCount,optionalCount){
+  if(!rows.length)return '';
+  const passRate=rows.filter(r=>r.requiredMisses===0&&r.shortageSlots===0).length/rows.length;
+  const avgRequired=avgStress(rows,'requiredMisses');
+  const avgShort=avgStress(rows,'shortageSlots');
+  if(passRate>=0.8)return 'This looks strong. The variable pool handled this request load in most trials.';
+  if(avgShort>0)return `Coverage is strained. Add more variable providers, lower required requests below ${requiredCount}, or add temporary staffing before using this request load.`;
+  if(avgRequired>0)return `Required days off are the main problem. Try fewer required requests, more optional requests, or a larger variable pool than ${variableCount}.`;
+  return `This is borderline. Try another run with ${optionalCount+2} optional requests or one fewer variable provider to see how much buffer remains.`;
+}
+function renderStressResults(rows,elapsed,inputs){
+  const el=document.getElementById('stress-results');
+  if(!el)return;
+  if(!rows.length){el.innerHTML='<div class="tx-mu">No trials ran.</div>';return;}
+  const clean=rows.filter(r=>r.requiredMisses===0&&r.shortageSlots===0).length;
+  const worstReq=Math.max(...rows.map(r=>r.requiredMisses));
+  const worstShort=Math.max(...rows.map(r=>r.shortageSlots));
+  const avgScore=avgStress(rows,'score');
+  el.innerHTML=`
+    <div style="font-size:13px;line-height:1.55;margin-bottom:10px">
+      <strong>${clean}/${rows.length}</strong> clean trial${rows.length===1?'':'s'} for ${inputs.year} Q${inputs.q}.
+      ${qgEsc(stressRecommendation(rows,inputs.variableCount,inputs.requiredCount,inputs.optionalCount))}
+    </div>
+    <table class="htbl" style="font-size:12px">
+      <tbody>
+        <tr><th>Variable providers</th><td>${inputs.variableCount}</td></tr>
+        <tr><th>Requests per provider</th><td>${inputs.requiredCount} required, ${inputs.optionalCount} optional</td></tr>
+        <tr><th>Average required misses</th><td>${avgStress(rows,'requiredMisses').toFixed(1)} (worst ${worstReq})</td></tr>
+        <tr><th>Average optional misses</th><td>${avgStress(rows,'optionalMisses').toFixed(1)}</td></tr>
+        <tr><th>Average shortage slots</th><td>${avgStress(rows,'shortageSlots').toFixed(1)} (worst ${worstShort})</td></tr>
+        <tr><th>Average overstaffed slots</th><td>${avgStress(rows,'overageSlots').toFixed(1)}</td></tr>
+        <tr><th>Average score</th><td>${Math.round(avgScore).toLocaleString()}</td></tr>
+        <tr><th>Run time</th><td>${(elapsed/1000).toFixed(1)} seconds</td></tr>
+      </tbody>
+    </table>`;
+}
+async function runStressTest(){
+  if(!isAdmin()){toast('Admin only','error');return;}
+  const inputs={
+    year:parseInt(document.getElementById('stress-year')?.value,10)||nextStressQuarter().year,
+    q:parseInt(document.getElementById('stress-quarter')?.value,10)||nextStressQuarter().q,
+    runs:Math.max(1,Math.min(100,parseInt(document.getElementById('stress-runs')?.value,10)||20)),
+    variableCount:Math.max(0,parseInt(document.getElementById('stress-variable-count')?.value,10)||0),
+    requiredCount:Math.max(0,parseInt(document.getElementById('stress-required')?.value,10)||0),
+    optionalCount:Math.max(0,parseInt(document.getElementById('stress-optional')?.value,10)||0),
+    weekendBias:Math.max(0,Math.min(100,parseInt(document.getElementById('stress-weekend')?.value,10)||0))
+  };
+  const today=new Date();today.setHours(0,0,0,0);
+  if(quarterRange(inputs.year,inputs.q).end<today){
+    toast('Choose a future quarter for stress testing. Past quarters are protected from generation.','error',4000);
+    return;
+  }
+  const btn=document.getElementById('stress-run-btn');
+  const out=document.getElementById('stress-results');
+  const originalState=JSON.stringify(S);
+  const oldYear=document.getElementById('yr-sel')?.value;
+  const oldQ=document.getElementById('q-sel')?.value;
+  const started=Date.now();
+  const rows=[];
+  try{
+    if(btn){btn.disabled=true;btn.textContent='Running...';}
+    if(out)out.innerHTML='<div class="tx-mu">Testing schedules...</div>';
+    const ySel=document.getElementById('yr-sel');
+    const qSel=document.getElementById('q-sel');
+    if(ySel)ySel.value=String(inputs.year);
+    if(qSel)qSel.value=String(inputs.q);
+    for(let run=0;run<inputs.runs;run++){
+      S=JSON.parse(originalState);
+      const stressDocs=configureStressVariablePool(inputs.year,inputs.variableCount);
+      if(!stressDocs.length)throw new Error('No variable providers are available for this test.');
+      const quarterKey=`${inputs.year}-${inputs.q}`;
+      S.requests[quarterKey]=buildStressRequests(inputs.year,inputs.q,stressDocs,inputs.requiredCount,inputs.optionalCount,inputs.weekendBias,5000+run);
+      let best=null;
+      const candidateCount=12;
+      for(let seed=0;seed<candidateCount;seed++){
+        _generateQuarter(run*candidateCount+seed,false);
+        const score=_scoreScheduleCandidate(inputs.year,inputs.q);
+        if(!best||score<best.score){
+          best={score,sched:JSON.parse(JSON.stringify(S.sched)),teams:JSON.parse(JSON.stringify(S.teams))};
+        }
+      }
+      S.sched=best.sched;
+      S.teams=best.teams;
+      rows.push(stressScheduleMetrics(inputs.year,inputs.q,stressDocs));
+      if(run%3===2){
+        if(out)out.innerHTML=`<div class="tx-mu">Testing schedules... ${run+1}/${inputs.runs}</div>`;
+        await new Promise(resolve=>setTimeout(resolve,0));
+      }
+    }
+    renderStressResults(rows,Date.now()-started,inputs);
+  }catch(e){
+    console.error('stress test error:',errStr(e),e);
+    if(out)out.innerHTML=`<div style="color:#a01918;font-weight:700">Stress test failed: ${qgEsc(errStr(e))}</div>`;
+  }finally{
+    S=JSON.parse(originalState);
+    if(oldYear&&document.getElementById('yr-sel'))document.getElementById('yr-sel').value=oldYear;
+    if(oldQ&&document.getElementById('q-sel'))document.getElementById('q-sel').value=oldQ;
+    syncCfgInputs();
+    renderStressSummary();
+    renderSchedule();
+    updateQuarterInfo();
+    if(btn){btn.disabled=false;btn.textContent='Run Stress Test';}
   }
 }
 function _generateQuarter(candidateSeed=0,finalize=true){
@@ -5764,7 +5996,7 @@ function nav(p){
   if(p==='requests') renderRequestsAdmin();
   if(p==='docs'){backToDocList();renderDocList()}
   if(p==='hol') renderHolidayTable();
-  if(SETTINGS_PAGES.has(p)){ renderShiftParamFields(); renderStaffingOverrides(); renderFlexibleGuidance(); renderRoster(); }
+  if(SETTINGS_PAGES.has(p)){ renderShiftParamFields(); renderStaffingOverrides(); renderFlexibleGuidance(); renderRoster(); renderStressSummary(); }
   if(p==='myreq'){ populatePhysPicker(); renderMyRequestCal(); }
   if(p==='myschd'){ populatePhysPicker(); renderMySchedule(); }
 }
