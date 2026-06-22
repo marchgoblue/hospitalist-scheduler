@@ -693,11 +693,19 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
       <button class="btn btn-sm" onclick="recheckFairness()" title="Check shift distribution fairness">Fairness Check</button>
     </div>
   </div>
+  <div id="gen-progress" class="card" style="display:none;margin-bottom:12px;padding:10px 12px">
+    <div class="fb" style="align-items:center;margin-bottom:7px">
+      <div id="gen-progress-label" class="tx-sm" style="font-weight:700;color:var(--ink2)">Generating schedule...</div>
+      <div id="gen-progress-pct" class="tx-xs tx-mu">0%</div>
+    </div>
+    <div class="qg-progress"><div class="qg-progress-bar" id="gen-progress-bar" style="width:0%"></div></div>
+  </div>
 
   <!-- Excel-style toolbar -->
   <div class="toolbar">
     <div class="tb-group">
       <span class="tb-label">View</span>
+      <button class="btn btn-sm" id="undo-btn" onclick="undoLastScheduleEdit()" disabled>Undo</button>
       <button class="btn btn-sm" onclick="setShiftMode('R')" id="m-fill-r">Fill R</button>
       <button class="btn btn-sm" onclick="setShiftMode('S')" id="m-fill-s">Fill S</button>
       <button class="btn btn-sm" onclick="setShiftMode('OFF')" id="m-fill-off">Fill OFF</button>
@@ -1016,6 +1024,14 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
         <div class="fg"><label>Weekend Request Bias</label><input type="number" id="stress-weekend" value="35" min="0" max="100" style="width:130px"></div>
         <button class="btn btn-p" id="stress-run-btn" onclick="runStressTest()">Run Stress Test</button>
       </div>
+      <div id="stress-progress" style="display:none;margin-top:10px">
+        <div class="fb" style="align-items:center;margin-bottom:6px">
+          <div id="stress-progress-label" class="tx-xs" style="font-weight:700;color:var(--ink2)">Preparing test...</div>
+          <div id="stress-progress-pct" class="tx-xs tx-mu">0%</div>
+        </div>
+        <div class="qg-progress"><div class="qg-progress-bar" id="stress-progress-bar" style="width:0%"></div></div>
+        <div id="stress-progress-time" class="tx-xs tx-mu" style="margin-top:5px">Estimated time will update after the first few candidates.</div>
+      </div>
       <div id="stress-summary" class="dm-help" style="margin-top:8px"></div>
     </div>
     <div class="card">
@@ -1259,7 +1275,7 @@ function updateQgendaImportGuidance(){
 
 function setReadOnly(ro){
   const b=document.getElementById('readonly-banner');if(b)b.classList.toggle('on',ro);
-  ['gen-btn','save-btn','m-fill-r','m-fill-s','m-fill-off','m-fill-none'].forEach(id=>{const el=document.getElementById(id);if(el)el.disabled=ro;});
+  ['gen-btn','save-btn','m-fill-r','m-fill-s','m-fill-off','m-fill-none','undo-btn'].forEach(id=>{const el=document.getElementById(id);if(el)el.disabled=ro||(id==='undo-btn'&&!scheduleUndoStack.length);});
   updateSettingsMenuVisibility();
 }
 function updateHeaderForUser(){
@@ -2948,7 +2964,23 @@ function _scoreScheduleCandidate(year,q){
     +longDays*5
     +restMismatch;
 }
-function generateQuarter(){
+function generationSleep(){return new Promise(resolve=>setTimeout(resolve,0))}
+function setGenerationProgress(done,total,label='Generating schedule...'){
+  const box=document.getElementById('gen-progress');
+  const bar=document.getElementById('gen-progress-bar');
+  const pct=document.getElementById('gen-progress-pct');
+  const lbl=document.getElementById('gen-progress-label');
+  const percent=total?Math.round(done*100/total):0;
+  if(box)box.style.display='block';
+  if(bar)bar.style.width=Math.max(0,Math.min(100,percent))+'%';
+  if(pct)pct.textContent=percent+'%';
+  if(lbl)lbl.textContent=label;
+}
+function hideGenerationProgress(){
+  const box=document.getElementById('gen-progress');
+  if(box)box.style.display='none';
+}
+async function generateQuarter(){
   try {
     const year=parseInt(document.getElementById('yr-sel').value);
     const q=parseInt(document.getElementById('q-sel').value);
@@ -2958,6 +2990,10 @@ function generateQuarter(){
     }
     let best=null;
     const CANDIDATE_COUNT=48;
+    const btn=document.getElementById('gen-btn');
+    if(btn){btn.disabled=true;btn.textContent='Generating...';}
+    setGenerationProgress(0,CANDIDATE_COUNT,`Generating Q${q} ${year} schedule...`);
+    await generationSleep();
     for(let seed=0;seed<CANDIDATE_COUNT;seed++){
       _generateQuarter(seed,false);
       const score=_scoreScheduleCandidate(year,q);
@@ -2969,14 +3005,23 @@ function generateQuarter(){
           teams:JSON.parse(JSON.stringify(S.teams))
         };
       }
+      if(seed===0||seed%2===1||seed===CANDIDATE_COUNT-1){
+        setGenerationProgress(seed+1,CANDIDATE_COUNT,`Testing schedule candidate ${seed+1} of ${CANDIDATE_COUNT}...`);
+        await generationSleep();
+      }
     }
     if(!best) throw new Error('No schedule candidate was produced.');
     S.sched=best.sched;
     S.teams=best.teams;
+    setGenerationProgress(CANDIDATE_COUNT,CANDIDATE_COUNT,'Saving best schedule...');
+    await generationSleep();
     _finalizeGeneratedQuarter(year,q,best);
   } catch(e) {
     console.error('generateQuarter error:', errStr(e), e);
     toast('Schedule generation error: ' + errStr(e), 'error');
+  } finally {
+    hideGenerationProgress();
+    updateGenButton();
   }
 }
 
@@ -3069,7 +3114,11 @@ function strictWorkBlocksForDoc(doc,days,startD,phase){
 function chooseStrictSwingBlocks(pool,days,startD,phaseById,targetSwingForDay,candidateSeed){
   const swingCounts=days.map(()=>0);
   const selected=new Set();
+  const selectedByDoc={};
   const blocks=[];
+  const totalTarget=days.reduce((sum,d,idx)=>sum+targetSwingForDay(dstrD(d),idx),0);
+  const totalFte=pool.reduce((sum,d)=>sum+(parseFloat(d.fte)||1),0)||1;
+  const targetPerFte=totalTarget/totalFte;
   pool.forEach(doc=>{
     const phase=phaseById[doc.id];
     if(phase===undefined)return;
@@ -3084,6 +3133,7 @@ function chooseStrictSwingBlocks(pool,days,startD,phaseById,targetSwingForDay,ca
   blocks.forEach(block=>{
     if(!block.forced)return;
     selected.add(block.id);
+    selectedByDoc[block.doc.id]=(selectedByDoc[block.doc.id]||0)+block.days.length;
     block.days.forEach(x=>{swingCounts[x.idx]++;});
   });
   function errorWith(block=null){
@@ -3101,12 +3151,19 @@ function chooseStrictSwingBlocks(pool,days,startD,phaseById,targetSwingForDay,ca
     blocks.forEach(block=>{
       if(selected.has(block.id)||block.lockR)return;
       if(!block.days.length)return;
-      const score=errorWith(block)+_candidateUnit(candidateSeed,block.id+'|swing')*0.01;
+      const doc=block.doc;
+      const target=Math.max(1,Math.round((parseFloat(doc.fte)||1)*targetPerFte));
+      const current=selectedByDoc[doc.id]||0;
+      const blockDays=block.days.length;
+      const after=current+blockDays;
+      const fairnessPenalty=Math.max(0,after-target)*Math.max(0,after-target)*3;
+      const score=errorWith(block)+fairnessPenalty+current*0.5+_candidateUnit(candidateSeed,block.id+'|swing')*0.01;
       const gain=base-score;
       if(gain>0&&(!best||gain>best.gain))best={block,gain,score};
     });
     if(best){
       selected.add(best.block.id);
+      selectedByDoc[best.block.doc.id]=(selectedByDoc[best.block.doc.id]||0)+best.block.days.length;
       best.block.days.forEach(x=>{swingCounts[x.idx]++;});
       improved=true;
     }
@@ -3331,6 +3388,41 @@ function renderStressResults(rows,elapsed,inputs){
       </tbody>
     </table>`;
 }
+function fmtDuration(ms){
+  if(!Number.isFinite(ms)||ms<0)return 'calculating...';
+  const sec=Math.max(1,Math.round(ms/1000));
+  if(sec<60)return `${sec} sec`;
+  const min=Math.floor(sec/60),rem=sec%60;
+  return rem?`${min} min ${rem} sec`:`${min} min`;
+}
+function estimateStressRuntimeText(runs,variableCount){
+  const base=runs*12;
+  const providerFactor=Math.max(1,variableCount/25);
+  const low=base*180*providerFactor;
+  const high=base*420*providerFactor;
+  return `Expected time: roughly ${fmtDuration(low)} to ${fmtDuration(high)}. Larger rosters and more strict providers can take longer.`;
+}
+function setStressProgress(done,total,label,startedAt){
+  const box=document.getElementById('stress-progress');
+  const bar=document.getElementById('stress-progress-bar');
+  const pct=document.getElementById('stress-progress-pct');
+  const lbl=document.getElementById('stress-progress-label');
+  const time=document.getElementById('stress-progress-time');
+  const percent=total?Math.round(done*100/total):0;
+  if(box)box.style.display='block';
+  if(bar)bar.style.width=Math.max(0,Math.min(100,percent))+'%';
+  if(pct)pct.textContent=percent+'%';
+  if(lbl)lbl.textContent=label;
+  if(time){
+    const elapsed=Date.now()-startedAt;
+    const eta=done>0?(elapsed/done)*(total-done):NaN;
+    time.textContent=`Elapsed ${fmtDuration(elapsed)} · Remaining ${fmtDuration(eta)}`;
+  }
+}
+function hideStressProgress(){
+  const box=document.getElementById('stress-progress');
+  if(box)box.style.display='none';
+}
 async function runStressTest(){
   if(!isAdmin()){toast('Admin only','error');return;}
   const inputs={
@@ -3354,9 +3446,14 @@ async function runStressTest(){
   const oldQ=document.getElementById('q-sel')?.value;
   const started=Date.now();
   const rows=[];
+  const candidateCount=12;
+  const totalWork=inputs.runs*candidateCount;
+  let workDone=0;
   try{
     if(btn){btn.disabled=true;btn.textContent='Running...';}
-    if(out)out.innerHTML='<div class="tx-mu">Testing schedules...</div>';
+    if(out)out.innerHTML=`<div class="tx-mu">Testing schedules... ${qgEsc(estimateStressRuntimeText(inputs.runs,inputs.variableCount))}</div>`;
+    setStressProgress(0,totalWork,`Preparing ${inputs.runs} stress trial${inputs.runs===1?'':'s'}...`,started);
+    await generationSleep();
     const ySel=document.getElementById('yr-sel');
     const qSel=document.getElementById('q-sel');
     if(ySel)ySel.value=String(inputs.year);
@@ -3368,22 +3465,23 @@ async function runStressTest(){
       const quarterKey=`${inputs.year}-${inputs.q}`;
       S.requests[quarterKey]=buildStressRequests(inputs.year,inputs.q,stressDocs,inputs.requiredCount,inputs.optionalCount,inputs.weekendBias,5000+run);
       let best=null;
-      const candidateCount=12;
       for(let seed=0;seed<candidateCount;seed++){
         _generateQuarter(run*candidateCount+seed,false);
         const score=_scoreScheduleCandidate(inputs.year,inputs.q);
         if(!best||score<best.score){
           best={score,sched:JSON.parse(JSON.stringify(S.sched)),teams:JSON.parse(JSON.stringify(S.teams))};
         }
+        workDone++;
+        setStressProgress(workDone,totalWork,`Trial ${run+1} of ${inputs.runs} · candidate ${seed+1} of ${candidateCount}`,started);
+        await generationSleep();
       }
       S.sched=best.sched;
       S.teams=best.teams;
       rows.push(stressScheduleMetrics(inputs.year,inputs.q,stressDocs));
-      if(run%3===2){
-        if(out)out.innerHTML=`<div class="tx-mu">Testing schedules... ${run+1}/${inputs.runs}</div>`;
-        await new Promise(resolve=>setTimeout(resolve,0));
-      }
+      if(out)out.innerHTML=`<div class="tx-mu">Completed ${run+1}/${inputs.runs} stress trial${inputs.runs===1?'':'s'}...</div>`;
+      await generationSleep();
     }
+    setStressProgress(totalWork,totalWork,'Stress test complete. Building report...',started);
     renderStressResults(rows,Date.now()-started,inputs);
   }catch(e){
     console.error('stress test error:',errStr(e),e);
@@ -3396,6 +3494,7 @@ async function runStressTest(){
     renderStressSummary();
     renderSchedule();
     updateQuarterInfo();
+    hideStressProgress();
     if(btn){btn.disabled=false;btn.textContent='Run Stress Test';}
   }
 }
@@ -4077,7 +4176,7 @@ function updateGenButton(){
   }
 }
 
-function tryGenerateQuarter(){
+async function tryGenerateQuarter(){
   if(!isAdmin()){ toast('View-only — admin access required','error'); return; }
   const year=parseInt(document.getElementById('yr-sel').value)||S.ui.year;
   const q=parseInt(document.getElementById('q-sel').value)||S.ui.quarter;
@@ -4096,13 +4195,13 @@ function tryGenerateQuarter(){
         <p style="color:#a85800;font-weight:600">This cannot be undone.</p>
       </div>`,
       'Yes, Regenerate',
-      ()=>{
+      async ()=>{
         document.getElementById('modal').style.display='none';
-        generateQuarter();
+        await generateQuarter();
       }
     );
   } else {
-    generateQuarter();
+    await generateQuarter();
   }
 }
 function updateQuarterInfo(){
@@ -4525,6 +4624,7 @@ function renderSchedule(){
   html+='</tfoot></table>';
 
   document.getElementById('sheet-outer').innerHTML='<div class="sheet-wrap" id="sheet-wrap">'+html+'</div>';
+  updateUndoButton();
 }
 
 
@@ -4532,6 +4632,30 @@ function renderSchedule(){
 // ════════════════════════════════════════════════════════
 //  CELL INTERACTION — click cycles, fill mode, row/col highlight
 // ════════════════════════════════════════════════════════
+const scheduleUndoStack=[];
+function updateUndoButton(){
+  const btn=document.getElementById('undo-btn');
+  if(btn)btn.disabled=!isAdmin()||!scheduleUndoStack.length;
+}
+function pushScheduleUndo(docId,ds,oldValue,newValue){
+  if(oldValue===newValue)return;
+  scheduleUndoStack.push({docId,ds,oldValue,hadValue:!!(S.sched[docId]&&S.sched[docId][ds]!==undefined)});
+  if(scheduleUndoStack.length>50)scheduleUndoStack.shift();
+  updateUndoButton();
+}
+function undoLastScheduleEdit(){
+  if(!isAdmin()){toast('Admin only','error');return;}
+  const item=scheduleUndoStack.pop();
+  if(!item){updateUndoButton();toast('Nothing to undo','info');return;}
+  if(!S.sched[item.docId])S.sched[item.docId]={};
+  if(item.hadValue)S.sched[item.docId][item.ds]=item.oldValue;
+  else delete S.sched[item.docId][item.ds];
+  if(S.teams&&S.teams[item.docId])delete S.teams[item.docId][item.ds];
+  updateUndoButton();
+  saveData(true);
+  renderSchedule();
+  toast('Last schedule edit undone','success');
+}
 
 function toggleRowHighlight(docId){
   S.ui.selectedRow = (S.ui.selectedRow===docId) ? null : docId;
@@ -4657,6 +4781,8 @@ function cycleCell(docId,ds){
   if(!isAdmin()){ toast('View-only — sign in as admin to edit','error'); return; }
   if(S.ui.fillMode){
     if(!S.sched[docId]) S.sched[docId]={};
+    const old=S.sched[docId][ds];
+    pushScheduleUndo(docId,ds,old,S.ui.fillMode);
     S.sched[docId][ds]=S.ui.fillMode;
     saveData();
     renderSchedule();
@@ -4666,6 +4792,8 @@ function cycleCell(docId,ds){
   const idx=SHIFT_CYCLE.indexOf(cur);
   const next=SHIFT_CYCLE[(idx+1)%SHIFT_CYCLE.length];
   if(!S.sched[docId]) S.sched[docId]={};
+  const old=S.sched[docId][ds];
+  pushScheduleUndo(docId,ds,old,next);
   S.sched[docId][ds]=next;
   saveData();
   renderSchedule();
