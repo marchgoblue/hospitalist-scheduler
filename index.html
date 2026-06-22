@@ -2933,15 +2933,10 @@ function _scoreScheduleCandidate(year,q){
 
   days.forEach(date=>{
     const ds=dstrD(date);
-    let r=0,s=0;
-    activeDocs(year,date.getMonth()).forEach(doc=>{
-      const sh=S.sched[doc.id]&&S.sched[doc.id][ds];
-      if(isAppProvider(doc)||isMedicalDirectorDoc(doc))return;
-      if(sh==='R') r++;
-      else if(sh==='S'||sh==='H') s++;
+    staffingIssueDefinitions(ds,activeDocs(year,date.getMonth())).forEach(issue=>{
+      if(issue.diff<0)shortages+=Math.abs(issue.diff);
+      else overages+=issue.diff;
     });
-    shortages+=Math.max(0,physicianRounderTargetForDate(ds)-r)+Math.max(0,admitterTargetForDate(ds)-s);
-    overages+=Math.max(0,r-physicianRounderTargetForDate(ds))+Math.max(0,s-admitterTargetForDate(ds));
   });
 
   return requiredMisses*1000000000
@@ -2983,6 +2978,183 @@ function generateQuarter(){
     console.error('generateQuarter error:', errStr(e), e);
     toast('Schedule generation error: ' + errStr(e), 'error');
   }
+}
+
+function strictIsWorkingOffset(offset,phase){
+  const pos=((offset+phase)%14+14)%14;
+  return pos<7;
+}
+function strictWorkPos(offset,phase){
+  return ((offset+phase)%14+14)%14;
+}
+function strictPriorPhasePenalty(doc,startD,phase){
+  let penalty=0,seen=0;
+  for(let lb=14;lb>=1;lb--){
+    const d=addD(startD,-lb);
+    const ds=dstrD(d);
+    const sh=S.sched[doc.id]&&S.sched[doc.id][ds];
+    if(!sh)continue;
+    seen++;
+    const actualWork=sh==='R'||sh==='S'||sh==='H'||sh==='N';
+    const predictedWork=strictIsWorkingOffset(-lb,phase);
+    if(actualWork!==predictedWork)penalty+=10;
+  }
+  return seen?penalty:0;
+}
+function strictContinuingShift(doc,startD,phase){
+  const priorDs=dstrD(addD(startD,-1));
+  const prior=S.sched[doc.id]&&S.sched[doc.id][priorDs];
+  if(!(prior==='R'||prior==='S'||prior==='H'))return null;
+  if(!strictIsWorkingOffset(-1,phase)||!strictIsWorkingOffset(0,phase))return null;
+  return prior==='S'||prior==='H'?'S':'R';
+}
+function strictSwingOnlyCountForOffset(swingOnly,startD,di,ds){
+  return swingOnly.filter(doc=>{
+    if(doc.startDate&&doc.startDate>ds)return false;
+    const phase=swingOnly.indexOf(doc)*7;
+    const pos=((di-phase)%14+14)%14;
+    return pos<7;
+  }).length;
+}
+function chooseStrictPhases(pool,days,startD,targetWorkForDay,candidateSeed){
+  const sorted=pool.slice().sort((a,b)=>providerSort(a,b));
+  const order=sorted.slice().sort((a,b)=>_candidateUnit(candidateSeed,a.id+'|strict-order')-_candidateUnit(candidateSeed,b.id+'|strict-order'));
+  const counts=days.map(()=>0);
+  const phaseById={};
+  function squaredError(extraCounts=null){
+    return days.reduce((sum,d,idx)=>{
+      const v=counts[idx]+(extraCounts?extraCounts[idx]:0);
+      const target=targetWorkForDay(dstrD(d),idx);
+      const diff=v-target;
+      return sum+diff*diff;
+    },0);
+  }
+  order.forEach(doc=>{
+    let best=null;
+    for(let phase=0;phase<14;phase++){
+      const extra=days.map((d,idx)=>{
+        const ds=dstrD(d);
+        if(doc.startDate&&doc.startDate>ds)return 0;
+        return strictIsWorkingOffset(idx,phase)?1:0;
+      });
+      const continuity=strictPriorPhasePenalty(doc,startD,phase);
+      const score=squaredError(extra)+continuity+_candidateUnit(candidateSeed,doc.id+'|phase|'+phase)*0.01;
+      if(!best||score<best.score)best={phase,extra,score};
+    }
+    phaseById[doc.id]=best.phase;
+    best.extra.forEach((v,idx)=>{counts[idx]+=v;});
+  });
+  return phaseById;
+}
+function strictWorkBlocksForDoc(doc,days,startD,phase){
+  const blocks=[];
+  let current=null;
+  days.forEach((d,idx)=>{
+    const ds=dstrD(d);
+    const working=(!doc.startDate||doc.startDate<=ds)&&strictIsWorkingOffset(idx,phase);
+    if(!working){
+      if(current){blocks.push(current);current=null;}
+      return;
+    }
+    const pos=strictWorkPos(idx,phase);
+    if(!current||pos===0){
+      if(current)blocks.push(current);
+      current={doc,phase,startIdx:idx,days:[]};
+    }
+    current.days.push({idx,ds,pos});
+  });
+  if(current)blocks.push(current);
+  return blocks;
+}
+function chooseStrictSwingBlocks(pool,days,startD,phaseById,targetSwingForDay,candidateSeed){
+  const swingCounts=days.map(()=>0);
+  const selected=new Set();
+  const blocks=[];
+  pool.forEach(doc=>{
+    const phase=phaseById[doc.id];
+    if(phase===undefined)return;
+    const continuing=strictContinuingShift(doc,startD,phase);
+    strictWorkBlocksForDoc(doc,days,startD,phase).forEach((block,blockIdx)=>{
+      block.id=doc.id+'|'+block.startIdx+'|'+blockIdx;
+      block.forced=continuing==='S'&&block.days.some(x=>x.idx===0);
+      block.lockR=continuing==='R'&&block.days.some(x=>x.idx===0);
+      blocks.push(block);
+    });
+  });
+  blocks.forEach(block=>{
+    if(!block.forced)return;
+    selected.add(block.id);
+    block.days.forEach(x=>{swingCounts[x.idx]++;});
+  });
+  function errorWith(block=null){
+    return days.reduce((sum,d,idx)=>{
+      const add=block&&block.days.some(x=>x.idx===idx)?1:0;
+      const diff=(swingCounts[idx]+add)-targetSwingForDay(dstrD(d),idx);
+      return sum+diff*diff;
+    },0);
+  }
+  let improved=true;
+  while(improved){
+    improved=false;
+    const base=errorWith();
+    let best=null;
+    blocks.forEach(block=>{
+      if(selected.has(block.id)||block.lockR)return;
+      if(!block.days.length)return;
+      const score=errorWith(block)+_candidateUnit(candidateSeed,block.id+'|swing')*0.01;
+      const gain=base-score;
+      if(gain>0&&(!best||gain>best.gain))best={block,gain,score};
+    });
+    if(best){
+      selected.add(best.block.id);
+      best.block.days.forEach(x=>{swingCounts[x.idx]++;});
+      improved=true;
+    }
+  }
+  return selected;
+}
+function assignStrictBaseline({strictAll,swingOnly,days,startD,candidateSeed}){
+  const mdStrict=strictAll.filter(d=>!isAppProvider(d)).sort(providerSort);
+  const appStrict=strictAll.filter(isAppProvider).sort(providerSort);
+  const mdPhase=chooseStrictPhases(mdStrict,days,startD,(ds,idx)=>{
+    const st=staffingForDate(ds);
+    const swingOnlyCount=strictSwingOnlyCountForOffset(swingOnly,startD,idx,ds);
+    return Math.max(0,(st.R||0)+(st.S||0)-swingOnlyCount);
+  },candidateSeed);
+  const appPhase=chooseStrictPhases(appStrict,days,startD,(ds)=>{
+    const st=staffingForDate(ds);
+    return Math.max(0,(st.appRounders||0)+(st.appAdmitters||0));
+  },candidateSeed+1000);
+  const mdSwingBlocks=chooseStrictSwingBlocks(mdStrict,days,startD,mdPhase,(ds,idx)=>{
+    const st=staffingForDate(ds);
+    const swingOnlyCount=strictSwingOnlyCountForOffset(swingOnly,startD,idx,ds);
+    return Math.max(0,(st.S||0)-swingOnlyCount);
+  },candidateSeed);
+  const appSwingBlocks=chooseStrictSwingBlocks(appStrict,days,startD,appPhase,(ds)=>{
+    const st=staffingForDate(ds);
+    return Math.max(0,st.appAdmitters||0);
+  },candidateSeed+1000);
+  function applyPool(pool,phaseById,swingBlocks){
+    pool.forEach(doc=>{
+      const phase=phaseById[doc.id];
+      if(phase===undefined)return;
+      strictWorkBlocksForDoc(doc,days,startD,phase).forEach((block,blockIdx)=>{
+        const blockId=doc.id+'|'+block.startIdx+'|'+blockIdx;
+        const shift=swingBlocks.has(blockId)?'S':'R';
+        block.days.forEach(x=>{
+          if(!S.sched[doc.id])S.sched[doc.id]={};
+          S.sched[doc.id][x.ds]=shift;
+        });
+      });
+      days.forEach((d,idx)=>{
+        const ds=dstrD(d);
+        if(!S.sched[doc.id])S.sched[doc.id]={};
+        if(S.sched[doc.id][ds]===undefined)S.sched[doc.id][ds]='OFF';
+      });
+    });
+  }
+  applyPool(mdStrict,mdPhase,mdSwingBlocks);
+  applyPool(appStrict,appPhase,appSwingBlocks);
 }
 
 function nextStressQuarter(){
@@ -3236,6 +3408,7 @@ function _generateQuarter(candidateSeed=0,finalize=true){
   const range=quarterRange(year,q);
   const startD=range.start;
   const totalDays=Math.floor((range.end-startD)/86400000)+1;
+  const days=quarterDays(year,q);
 
   const allActive=activeDocs(year,range.months[0]);
   const swingOnly=allActive.filter(d=>d.type==='swing-only');
@@ -3491,73 +3664,10 @@ function _generateQuarter(candidateSeed=0,finalize=true){
     return Array.isArray(r.optional)&&r.optional.indexOf(ds)>=0;
   }
 
-  // ── PRE-ASSIGN STRICT PROVIDERS ─────────────────────────────────────────
-  // Phase is determined by roster position so it's consistent every quarter.
-  // strict-mixed: 14-day cycle (5R + 2S on, 7 off), staggered across providers
-  // strict-swing-block: 28-day cycle (7R on, 7 off, 7S on, 7 off), staggered
-  // The starting day of the quarter relative to the cycle is fixed by the year
-  // so schedules repeat identically quarter over quarter.
-  const qStartDay=Math.floor((startD-new Date(year,0,1))/(86400000)); // day of year
-
-  // Target ~8 S per quarter total for strict providers (same as variable)
-  const strictSTarget = Math.round(avgAdmitterTarget(quarterDays(year,q)) * totalDays / (rotation.length + partTime.length + strictAll.length || 1));
-
-  // ── STRICT-MIXED: 7on/7off, append 0-2 S days to each work week ──────────
-  // Work week = days 0-6 of 14-day cycle, rest = days 7-13.
-  // S days are appended at end of work week (positions 5-6) only when
-  // the provider is below their quarterly S target.
-  // Stagger phases so work weeks are spread across the group.
-  strictMixed.forEach((doc,idx)=>{
-    const phase=strictTeamPhase(doc,idx,strictMixed.length);
-    let qS=0; // running quarterly S count for this provider
-    for(let di=0;di<totalDays;di++){
-      const ds=dstrD(addD(startD,di));
-      if(doc.startDate&&doc.startDate>ds){S.sched[doc.id][ds]='OFF';continue;}
-      const pos=((di+phase)%14+14)%14;
-      if(pos<5){
-        S.sched[doc.id][ds]='R';
-      } else if(pos<7){
-        const remainingS=Math.max(0,strictSTarget-qS);
-        const tailDays=Math.min(2,remainingS);
-        if(pos>=7-tailDays){
-          S.sched[doc.id][ds]='S'; qS++;
-        } else {
-          S.sched[doc.id][ds]='R';
-        }
-      } else {
-        S.sched[doc.id][ds]='OFF';
-      }
-    }
-  });
-
-  // ── STRICT SWING-BLOCK: 7on/7off, one full 7S week per quarter ───────────
-  // All work weeks are pure 7R EXCEPT one dedicated swing week per quarter.
-  // The swing week is placed at a fixed position in the quarter (week 4 of ~6.5 cycles)
-  // and staggered between providers so their swing weeks don't overlap.
-  // Pattern per quarter: 7R+7off, 7R+7off, 7R+7off, 7S+7off, 7R+7off, 7R+7off...
-  // The swing week index (which 14-day cycle gets the S week) is fixed per provider.
-  strictSwing.forEach((doc,idx)=>{
-    const phase=strictTeamPhase(doc,idx,strictSwing.length);
-    // Swing week placement: roughly week 4 of the quarter, staggered by provider.
-    // Each provider's swing week is 14 days apart from the next.
-    // With ~6.5 cycles per quarter, placing at cycle 3,4,5... gives mid-quarter swing weeks.
-    const totalCycles=Math.round(totalDays/14); // ~6-7 cycles per quarter
-    const swingCycle=(3+idx)%totalCycles;       // which 14-day cycle is the swing week
-    for(let di=0;di<totalDays;di++){
-      const ds=dstrD(addD(startD,di));
-      if(doc.startDate&&doc.startDate>ds){S.sched[doc.id][ds]='OFF';continue;}
-      // Position within the 14-day cycle (phase-adjusted for staggering)
-      const pos=((di+phase)%14+14)%14;
-      // Which cycle are we in (based on raw quarter day, not phase-adjusted)
-      const cycleIdx=Math.floor(di/14)%totalCycles;
-      const isSwingWeek=(cycleIdx===swingCycle);
-      if(pos<7){
-        S.sched[doc.id][ds]=isSwingWeek?'S':'R';
-      } else {
-        S.sched[doc.id][ds]='OFF';
-      }
-    }
-  });
+  // Strict providers are solved as a coverage baseline before variable fill.
+  // The solver chooses 7-on/7-off phases using the 14-day prior-quarter tail
+  // as a continuity constraint, then selects full 7-day work blocks for swing.
+  assignStrictBaseline({strictAll,swingOnly,days,startD,candidateSeed});
 
     // ──────── DAILY LOOP ────────
   // Reset per-quarter S counters for part-time providers
