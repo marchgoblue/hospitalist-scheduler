@@ -231,6 +231,8 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
 .sheet thead th.weekend{background:#e8e8e8;color:var(--ink3)}
 .sheet thead th.today{background:#f9e08e;color:var(--ink);font-weight:700}
 .sheet thead th.holiday{background:var(--H);color:var(--H-tx)}
+.sheet thead th.staffing-issue{outline:2px solid #c5221f;outline-offset:-2px;color:#a01918}
+.sheet thead th.staffing-issue.col-hl{outline:3px solid #c5221f;outline-offset:-3px}
 
 /* Row labels (physician names) */
 .sheet tbody td.name-col{
@@ -257,6 +259,13 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
 }
 .sheet tbody tr.row-hl>td:first-child{border-left:2px solid #1b4d8f!important}
 .sheet tbody tr.row-hl>td:last-child{border-right:2px solid #1b4d8f!important}
+.sheet tbody tr.staffing-candidate>td{
+  border-top:2px solid #c5221f!important;
+  border-bottom:2px solid #c5221f!important;
+}
+.sheet tbody tr.staffing-candidate>td:first-child{border-left:2px solid #c5221f!important}
+.sheet tbody tr.staffing-candidate>td:last-child{border-right:2px solid #c5221f!important}
+.sheet tbody tr.staffing-candidate td.name-col{background:#fff5f5!important;color:#a01918}
 .name-col-hl{font-weight:700!important}
 .sheet .col-hl{
   border-left:2px solid #1b4d8f!important;
@@ -1137,6 +1146,7 @@ let S = {
     calYear:new Date().getFullYear(), // physician calendar view year
     selectedRow:null,  // docId of highlighted row
     selectedCols:new Set(), // set of date strings with highlighted cols
+    staffingFocus:null, // {dateStr, key} selected staffing problem to solve
     requestQuarter:'2025-1',
     adminReqQuarter:'2025-1',
     holYear:2025,
@@ -1259,6 +1269,7 @@ function applyMigrations(){
   Object.entries(u).forEach(([id,p])=>{const d=S.docs.find(d=>d.id===id);if(d)Object.assign(d,p);});
   S.docs.forEach(d=>{d.role=normalizeRole(d.role);});
   S.docs.forEach(normalizeProviderDefaults);
+  S.ui.staffingFocus=null;
 }
 
 function setSyncStatus(state){
@@ -2332,6 +2343,7 @@ function freshGroupState(){
       calYear:now.getFullYear(),
       selectedRow:null,
       selectedCols:new Set(),
+      staffingFocus:null,
       requestQuarter:S.ui?.requestQuarter||'',
       adminReqQuarter:S.ui?.adminReqQuarter||'',
       holYear:S.ui?.holYear||now.getFullYear(),
@@ -2431,6 +2443,35 @@ function avgPhysicianRounderTarget(days){
 function avgAdmitterTarget(days){
   if(!days||!days.length)return admitterTarget();
   return days.reduce((sum,d)=>sum+admitterTargetForDate(dstrD(d)),0)/days.length;
+}
+function staffingIssueDefinitions(ds,docs=activeDocs(parseInt(ds.slice(0,4),10))){
+  const st=staffingForDate(ds);
+  const count=fn=>docs.filter(fn).length;
+  const items=[
+    {key:'R',label:'Rounding',target:st.R+st.appRounders,count:count(d=>S.sched[d.id]&&S.sched[d.id][ds]==='R')},
+    {key:'S',label:'Swing / Admit',target:st.S+st.appAdmitters,count:count(d=>S.sched[d.id]&&(S.sched[d.id][ds]==='S'||S.sched[d.id][ds]==='H'))},
+    {key:'N',label:'Nocturnists',target:st.nocturnists,count:count(d=>S.sched[d.id]&&S.sched[d.id][ds]==='N'&&!isAppProvider(d))},
+    {key:'APP_R',label:'APP Rounders',target:st.appRounders,count:count(d=>S.sched[d.id]&&S.sched[d.id][ds]==='R'&&isAppProvider(d))},
+    {key:'APP_S',label:'APP Admitters',target:st.appAdmitters,count:count(d=>S.sched[d.id]&&(S.sched[d.id][ds]==='S'||S.sched[d.id][ds]==='H')&&isAppProvider(d))}
+  ];
+  return items.map(x=>({...x,diff:x.count-x.target})).filter(x=>x.diff!==0);
+}
+function shiftMatchesStaffingKey(doc,ds,key){
+  const sh=S.sched[doc.id]&&S.sched[doc.id][ds];
+  if(key==='R')return sh==='R';
+  if(key==='S')return sh==='S'||sh==='H';
+  if(key==='N')return sh==='N'&&!isAppProvider(doc);
+  if(key==='APP_R')return sh==='R'&&isAppProvider(doc);
+  if(key==='APP_S')return (sh==='S'||sh==='H')&&isAppProvider(doc);
+  return false;
+}
+function eligibleDocsForStaffingKey(docs,key){
+  if(key==='N')return docs.filter(d=>d.type==='nocturnist');
+  if(key==='APP_R'||key==='APP_S')return docs.filter(d=>isAppProvider(d)&&d.type!=='prn');
+  return docs.filter(d=>!isAppProvider(d)&&d.type!=='prn'&&d.type!=='nocturnist'&&!isMedicalDirectorDoc(d));
+}
+function quarterShiftCount(doc,days,key){
+  return days.reduce((sum,d)=>sum+(shiftMatchesStaffingKey(doc,dstrD(d),key)?1:0),0);
 }
 function defaultPreferencesForType(type){
   return type==='standard'?{preferredR:7,maxWork:7,scheduleStyle:'strict-swing-block'}:{preferredR:5,maxWork:7,scheduleStyle:'variable'};
@@ -3879,7 +3920,7 @@ function renderSchedule(){
   const nocturnistDocs=allDocs.filter(d=>d.type==='nocturnist').sort(providerSort);
   const prnDocs=allDocs.filter(d=>d.type==='prn').sort(providerSort);
   const rotationDocs=allDocs.filter(d=>!isMedicalDirectorDoc(d)&&d.type!=='nocturnist'&&d.type!=='prn')
-    .sort((a,b)=>teamSortValue(a)-teamSortValue(b)||providerSort(a,b));
+    .sort(providerSort);
   const fConsult=filterText?consultDocs.filter(d=>dname(d).toLowerCase().includes(filterText)):consultDocs;
   const fRotation=filterText?rotationDocs.filter(d=>dname(d).toLowerCase().includes(filterText)):rotationDocs;
   const fNocturnist=filterText?nocturnistDocs.filter(d=>dname(d).toLowerCase().includes(filterText)):nocturnistDocs;
@@ -3913,8 +3954,11 @@ function renderSchedule(){
     const cls=[];
     if(isWeekend(d))cls.push('weekend');if(ds===today)cls.push('today');
     if(isHol(ds,year))cls.push('holiday');if(i>0&&d.getDate()===1)cls.push('month-sep');
+    const staffingIssues=staffingIssueDefinitions(ds,allDocs);
+    if(staffingIssues.length)cls.push('staffing-issue');
     if(selCols.has(ds))cls.push('col-hl');
-    html+=`<th class="${cls.join(' ')} col-hdr" data-date="${ds}" onclick="toggleColHighlight('${ds}')" title="${d.toDateString()}">${d.getDate()}<br><span style="font-weight:400;font-size:9px;color:var(--ink3)">${['S','M','T','W','T','F','S'][d.getDay()]}</span></th>`;
+    const issueTip=staffingIssues.length?'\nStaffing: '+staffingIssues.map(x=>`${x.label} ${x.count}/${x.target}`).join(' · '):'';
+    html+=`<th class="${cls.join(' ')} col-hdr" data-date="${ds}" onclick="handleDateHeaderClick('${ds}')" title="${qgEsc(d.toDateString()+issueTip)}">${d.getDate()}<br><span style="font-weight:400;font-size:9px;color:var(--ink3)">${['S','M','T','W','T','F','S'][d.getDay()]}</span></th>`;
   });
   html+='</tr></thead><tbody>';
 
@@ -3958,6 +4002,19 @@ function renderSchedule(){
     }
     return sh;
   }
+  function staffingFocusMatchesDoc(doc){
+    const focus=S.ui.staffingFocus;
+    if(!focus||!focus.dateStr||!focus.key)return false;
+    const issue=staffingIssueDefinitions(focus.dateStr,allDocs).find(x=>x.key===focus.key);
+    if(!issue)return false;
+    const eligible=eligibleDocsForStaffingKey(allDocs,focus.key);
+    if(!eligible.some(d=>d.id===doc.id))return false;
+    const counts=eligible.map(d=>quarterShiftCount(d,days,focus.key));
+    const avg=counts.reduce((sum,v)=>sum+v,0)/Math.max(1,counts.length);
+    const myCount=quarterShiftCount(doc,days,focus.key);
+    if(issue.diff>0)return shiftMatchesStaffingKey(doc,focus.dateStr,focus.key)&&myCount>avg;
+    return myCount<avg;
+  }
   function buildRow(doc,isConsult){
     const{all:docReqs,req:docRequired}=getDocReqs(doc.id);
     let qTotalR=0,qTotalS=0,qTotalN=0,qTotalX=0;
@@ -3975,11 +4032,12 @@ function renderSchedule(){
     const qColor=qTotal>target+3?'#a01918':qTotal<target-3?'#a85800':'#0a7044';
     const mTip=monthCells.map(m=>`${monAbbr(m.month)}:${mc[m.month].r}R${mc[m.month].s}S${mc[m.month].n?mc[m.month].n+'N':''}`).join(' | ');
     const isHighlighted=selRow===doc.id;
-    const rowCls=isHighlighted?'row-hl':'';
+    const isStaffingCandidate=staffingFocusMatchesDoc(doc);
+    const rowCls=[isHighlighted?'row-hl':'',isStaffingCandidate?'staffing-candidate':''].filter(Boolean).join(' ');
 
     let row=`<tr class="${rowCls}" id="row-${doc.id}">`;
     // Single sticky name cell — Q∑ total embedded in bottom-right of the cell
-    row+=`<td class="name-col${isHighlighted?' name-col-hl':''}" onclick="toggleRowHighlight('${doc.id}')" ondblclick="navToDoc('${doc.id}')" title="Q${q} total: ${qTotalR}R+${qTotalS}S${qTotalN?'+'+qTotalN+'N':''}${qTotalX?'+'+qTotalX+'X':''}=${qTotal} (target ~${target})&#10;${mTip}&#10;Double-click to open detail">
+    row+=`<td class="name-col${isHighlighted?' name-col-hl':''}" onclick="toggleRowHighlight('${doc.id}')" ondblclick="handleProviderNameDblClick('${doc.id}')" title="Q${q} total: ${qTotalR}R+${qTotalS}S${qTotalN?'+'+qTotalN+'N':''}${qTotalX?'+'+qTotalX+'X':''}=${qTotal} (target ~${target})&#10;${mTip}&#10;Double-click to open detail">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:4px">
         <span>${isConsult?'<span class="consult-badge">MED DIR</span>':''}${dname(doc)}</span>
         <span class="qtot-inline" style="color:${qColor}">${qTotal}<span style="font-size:8px;color:#999;display:block;line-height:1;text-align:right">${qTotalR}R ${qTotalS}S${qTotalN?' '+qTotalN+'N':''}${qTotalX?' '+qTotalX+'X':''}</span></span>
@@ -4068,6 +4126,7 @@ function toggleRowHighlight(docId){
 }
 function toggleColHighlight(ds){
   if(!(S.ui.selectedCols instanceof Set)) S.ui.selectedCols=new Set();
+  S.ui.staffingFocus=null;
   // Single-select: clicking a new column clears the previous one
   if(S.ui.selectedCols.has(ds)){
     // Clicking the already-selected column deselects it
@@ -4077,6 +4136,36 @@ function toggleColHighlight(ds){
     S.ui.selectedCols.clear();
     S.ui.selectedCols.add(ds);
   }
+  renderSchedule();
+}
+function handleDateHeaderClick(ds){
+  if(!(S.ui.selectedCols instanceof Set)) S.ui.selectedCols=new Set();
+  S.ui.selectedCols.clear();
+  S.ui.selectedCols.add(ds);
+  S.ui.staffingFocus=null;
+  const issues=staffingIssueDefinitions(ds,activeDocs(parseInt(ds.slice(0,4),10)));
+  if(!issues.length||!isAdmin()){renderSchedule();return;}
+  const body=`<div style="font-size:13px;margin-bottom:10px">Choose which staffing problem to work on first for <strong>${qgEsc(ds)}</strong>.</div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      ${issues.map(x=>{
+        const direction=x.diff<0?'short':'over';
+        const amount=Math.abs(x.diff);
+        return `<button class="btn" style="justify-content:space-between;width:100%;padding:8px 10px" onclick="selectStaffingIssue('${ds}','${x.key}')">
+          <span>${qgEsc(x.label)}</span>
+          <strong style="color:${x.diff<0?'#a01918':'#1b4d8f'}">${x.count}/${x.target} · ${direction} ${amount}</strong>
+        </button>`;
+      }).join('')}
+    </div>
+    <div class="tx-xs tx-mu" style="margin-top:10px">For shortages, rows outlined in red are providers below the quarter average for that shift type. For overstaffing, rows outlined are providers currently working that shift that day.</div>`;
+  showModal('Staffing Issue',body,null,null);
+  renderSchedule();
+}
+function selectStaffingIssue(ds,key){
+  S.ui.staffingFocus={dateStr:ds,key};
+  if(!(S.ui.selectedCols instanceof Set))S.ui.selectedCols=new Set();
+  S.ui.selectedCols.clear();
+  S.ui.selectedCols.add(ds);
+  document.getElementById('modal').style.display='none';
   renderSchedule();
 }
 
@@ -5655,6 +5744,10 @@ function navToDoc(docId){
   nav('docs');
   // Defer so the page is rendered before opening detail
   setTimeout(()=>showDocDetail(docId), 30);
+}
+function handleProviderNameDblClick(docId){
+  if(isAdmin())openEditDoc(docId);
+  else navToDoc(docId);
 }
 
 // ════════════════════════════════════════════════════════
