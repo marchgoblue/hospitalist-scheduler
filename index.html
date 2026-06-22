@@ -260,12 +260,13 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
 .sheet tbody tr.row-hl>td:first-child{border-left:2px solid #1b4d8f!important}
 .sheet tbody tr.row-hl>td:last-child{border-right:2px solid #1b4d8f!important}
 .sheet tbody tr.staffing-candidate>td{
-  border-top:2px solid #c5221f!important;
-  border-bottom:2px solid #c5221f!important;
+  border-top:3px solid #c5221f!important;
+  border-bottom:3px solid #c5221f!important;
+  box-shadow:inset 0 3px 0 #c5221f,inset 0 -3px 0 #c5221f!important;
 }
-.sheet tbody tr.staffing-candidate>td:first-child{border-left:2px solid #c5221f!important}
-.sheet tbody tr.staffing-candidate>td:last-child{border-right:2px solid #c5221f!important}
-.sheet tbody tr.staffing-candidate td.name-col{background:#fff5f5!important;color:#a01918}
+.sheet tbody tr.staffing-candidate>td:first-child{border-left:4px solid #c5221f!important}
+.sheet tbody tr.staffing-candidate>td:last-child{border-right:4px solid #c5221f!important}
+.sheet tbody tr.staffing-candidate td.name-col{background:#fde2e2!important;color:#a01918;font-weight:800!important}
 .name-col-hl{font-weight:700!important}
 .sheet .col-hl{
   border-left:2px solid #1b4d8f!important;
@@ -275,6 +276,11 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
 .sheet tfoot tr:last-child td.col-hl{border-bottom:2px solid #1b4d8f!important}
 .col-hdr{cursor:pointer}
 .col-hdr:hover{background:#c8d8ee!important}
+.staffing-popover{position:fixed;z-index:900;background:#fff;border:1px solid #c5221f;border-radius:4px;box-shadow:0 12px 28px rgba(0,0,0,.24);padding:10px;min-width:230px;max-width:300px}
+.staffing-popover:before{content:"";position:absolute;top:-7px;left:18px;width:12px;height:12px;background:#fff;border-left:1px solid #c5221f;border-top:1px solid #c5221f;transform:rotate(45deg)}
+.staffing-popover-title{font-size:12px;font-weight:800;color:#a01918;margin-bottom:8px}
+.staffing-popover-actions{display:flex;flex-direction:column;gap:6px}
+.staffing-popover-actions button{justify-content:space-between;width:100%;padding:7px 9px}
 /* N (nocturnist shift) */
 .cell-N{background:#1a1a2e!important;color:#c9b8f5!important}
 .cell-X{background:#e8f0fe!important;color:#244b7a!important}
@@ -1115,6 +1121,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
 </div>
 
 <div class="toast" id="toast"></div>
+<div id="staffing-popover" class="staffing-popover" style="display:none"></div>
 
 <script>
 // ════════════════════════════════════════════════════════
@@ -1193,6 +1200,11 @@ function closeSettingsMenu(){
 document.addEventListener('click',ev=>{
   const sm=document.getElementById('settings-menu');
   if(sm&&!sm.contains(ev.target))closeSettingsMenu();
+  const pop=document.getElementById('staffing-popover');
+  if(pop&&pop.style.display!=='none'&&!pop.contains(ev.target)&&!ev.target.closest('.col-hdr'))closeStaffingPopover();
+});
+document.addEventListener('keydown',ev=>{
+  if(ev.key==='Escape')closeStaffingPopover();
 });
 
 function navSettings(p){
@@ -3958,7 +3970,7 @@ function renderSchedule(){
     if(staffingIssues.length)cls.push('staffing-issue');
     if(selCols.has(ds))cls.push('col-hl');
     const issueTip=staffingIssues.length?'\nStaffing: '+staffingIssues.map(x=>`${x.label} ${x.count}/${x.target}`).join(' · '):'';
-    html+=`<th class="${cls.join(' ')} col-hdr" data-date="${ds}" onclick="handleDateHeaderClick('${ds}')" title="${qgEsc(d.toDateString()+issueTip)}">${d.getDate()}<br><span style="font-weight:400;font-size:9px;color:var(--ink3)">${['S','M','T','W','T','F','S'][d.getDay()]}</span></th>`;
+    html+=`<th class="${cls.join(' ')} col-hdr" data-date="${ds}" onclick="handleDateHeaderClick('${ds}',event)" title="${qgEsc(d.toDateString()+issueTip)}">${d.getDate()}<br><span style="font-weight:400;font-size:9px;color:var(--ink3)">${['S','M','T','W','T','F','S'][d.getDay()]}</span></th>`;
   });
   html+='</tr></thead><tbody>';
 
@@ -4138,34 +4150,59 @@ function toggleColHighlight(ds){
   }
   renderSchedule();
 }
-function handleDateHeaderClick(ds){
+function closeStaffingPopover(){
+  const pop=document.getElementById('staffing-popover');
+  if(pop)pop.style.display='none';
+}
+function positionStaffingPopover(anchor){
+  const pop=document.getElementById('staffing-popover');
+  if(!pop||!anchor)return;
+  const r=anchor.getBoundingClientRect();
+  const pad=8;
+  let left=r.left;
+  let top=r.bottom+7;
+  pop.style.display='block';
+  const pr=pop.getBoundingClientRect();
+  if(left+pr.width>window.innerWidth-pad)left=Math.max(pad,window.innerWidth-pr.width-pad);
+  if(top+pr.height>window.innerHeight-pad)top=Math.max(pad,r.top-pr.height-7);
+  pop.style.left=left+'px';
+  pop.style.top=top+'px';
+}
+function handleDateHeaderClick(ds,ev){
+  if(ev)ev.stopPropagation();
   if(!(S.ui.selectedCols instanceof Set)) S.ui.selectedCols=new Set();
   S.ui.selectedCols.clear();
   S.ui.selectedCols.add(ds);
   S.ui.staffingFocus=null;
   const issues=staffingIssueDefinitions(ds,activeDocs(parseInt(ds.slice(0,4),10)));
-  if(!issues.length||!isAdmin()){renderSchedule();return;}
-  const body=`<div style="font-size:13px;margin-bottom:10px">Choose which staffing problem to work on first for <strong>${qgEsc(ds)}</strong>.</div>
-    <div style="display:flex;flex-direction:column;gap:8px">
+  if(!issues.length||!isAdmin()){closeStaffingPopover();renderSchedule();return;}
+  const pop=document.getElementById('staffing-popover');
+  if(pop){
+    pop.innerHTML=`<div class="staffing-popover-title">${qgEsc(ds)} staffing</div>
+    <div class="staffing-popover-actions">
       ${issues.map(x=>{
         const direction=x.diff<0?'short':'over';
         const amount=Math.abs(x.diff);
-        return `<button class="btn" style="justify-content:space-between;width:100%;padding:8px 10px" onclick="selectStaffingIssue('${ds}','${x.key}')">
+        return `<button class="btn" onclick="selectStaffingIssue('${ds}','${x.key}')">
           <span>${qgEsc(x.label)}</span>
           <strong style="color:${x.diff<0?'#a01918':'#1b4d8f'}">${x.count}/${x.target} · ${direction} ${amount}</strong>
         </button>`;
       }).join('')}
     </div>
-    <div class="tx-xs tx-mu" style="margin-top:10px">For shortages, rows outlined in red are providers below the quarter average for that shift type. For overstaffing, rows outlined are providers currently working that shift that day.</div>`;
-  showModal('Staffing Issue',body,null,null);
+    <div class="tx-xs tx-mu" style="margin-top:8px;line-height:1.35">Choose a problem to outline candidate rows.</div>`;
+  }
   renderSchedule();
+  requestAnimationFrame(()=>{
+    const anchor=document.querySelector(`.col-hdr[data-date="${ds}"]`);
+    positionStaffingPopover(anchor);
+  });
 }
 function selectStaffingIssue(ds,key){
   S.ui.staffingFocus={dateStr:ds,key};
   if(!(S.ui.selectedCols instanceof Set))S.ui.selectedCols=new Set();
   S.ui.selectedCols.clear();
   S.ui.selectedCols.add(ds);
-  document.getElementById('modal').style.display='none';
+  closeStaffingPopover();
   renderSchedule();
 }
 
