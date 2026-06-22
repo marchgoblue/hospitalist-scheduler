@@ -282,6 +282,8 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
 /* N (nocturnist shift) */
 .cell-N{background:#1a1a2e!important;color:#c9b8f5!important}
 .cell-X{background:#e8f0fe!important;color:#244b7a!important}
+.cell-APP_NS{background:#241a36!important;color:#ddc7ff!important}
+.cell-APP_NX{background:#17313a!important;color:#bdeaf5!important}
 /* Sticky quarter-total column — works with border-collapse:collapse */
 /* Quarter-total embedded in name cell — no separate column needed */
 .qtot-inline{
@@ -866,7 +868,8 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
       <div class="fg"><label>Nocturnists</label><input type="number" id="c-n" value="1" min="0" onchange="handleShiftCountChange()"></div>
       <div class="fg"><label>APP Rounders</label><input type="number" id="c-app-r" value="0" min="0" onchange="handleShiftCountChange()"></div>
       <div class="fg"><label>APP Admitters</label><input type="number" id="c-app-s" value="0" min="0" onchange="handleShiftCountChange()"></div>
-      <div class="fg"><label>APP Nocturnists</label><input type="number" id="c-app-n" value="0" min="0" onchange="handleShiftCountChange()"></div>
+      <div class="fg"><label>APP Night Admit</label><input type="number" id="c-app-na" value="0" min="0" onchange="handleShiftCountChange()"></div>
+      <div class="fg"><label>APP Night Cross</label><input type="number" id="c-app-nx" value="0" min="0" onchange="handleShiftCountChange()"></div>
       <div class="fg annual-target"><label>Annual Shifts (1.0 FTE)</label><input type="number" id="c-annual" value="182" onchange="autoSaveCfg()" oninput="autoSaveCfg()"></div>
     </div>
     <div id="shift-param-fields"></div>
@@ -886,7 +889,8 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
         <div class="row">
           <div class="fg"><label>Extra APP Rounders</label><input type="number" id="tmp-app-r" value="0" min="0" style="width:110px"></div>
           <div class="fg"><label>Extra APP Admitters</label><input type="number" id="tmp-app-s" value="0" min="0" style="width:110px"></div>
-          <div class="fg"><label>Extra APP Nocturnists</label><input type="number" id="tmp-app-n" value="0" min="0" style="width:125px"></div>
+          <div class="fg"><label>Extra APP Night Admit</label><input type="number" id="tmp-app-na" value="0" min="0" style="width:135px"></div>
+          <div class="fg"><label>Extra APP Night Cross</label><input type="number" id="tmp-app-nx" value="0" min="0" style="width:135px"></div>
           <button class="btn btn-sm" onclick="addStaffingOverride()">Add Temporary Change</button>
         </div>
         <div id="staffing-overrides-list"></div>
@@ -1556,13 +1560,17 @@ function qgIsCrossCoverageTask(raw){return /\b(cross[-\s]*cover|remote|coverage)
 function qgIsMedicalDirectorTask(raw){return /\b(medical\s+director|director|dir\.?)\b/i.test(String(raw||''))&&!qgIsAppTask(raw);}
 function updateShiftCfgFromQgendaTaskMap(map){
   ensureShiftCfg();
-  const labels={rounderLabels:[],swingLabels:[],nocturnistLabels:[],appRounderLabels:[],appAdmitterLabels:[],appNocturnistLabels:[]};
+  const labels={rounderLabels:[],swingLabels:[],nocturnistLabels:[],appRounderLabels:[],appAdmitterLabels:[],appNocturnistAdmitterLabels:[],appNocturnistCrossCoverLabels:[]};
   Object.entries(map||{}).forEach(([task,code])=>{
     if(!code||code==='IGNORE')return;
     const clean=qgCleanTask(task);
     const isApp=qgIsAppTask(clean);
-    if(code==='N'||qgIsNocturnistTask(clean)){
-      if(isApp) labels.appNocturnistLabels.push(clean);
+    if(code==='APP_NS'){
+      labels.appNocturnistAdmitterLabels.push(clean);
+    } else if(code==='APP_NX'){
+      labels.appNocturnistCrossCoverLabels.push(clean);
+    } else if(code==='N'||qgIsNocturnistTask(clean)){
+      if(isApp) labels.appNocturnistAdmitterLabels.push(clean);
       else labels.nocturnistLabels.push(clean);
     }
     else if(code==='S'){
@@ -1582,7 +1590,8 @@ function updateShiftCfgFromQgendaTaskMap(map){
   if(labels.nocturnistLabels.length) S.cfg.nocturnists=labels.nocturnistLabels.length;
   if(labels.appRounderLabels.length) S.cfg.appRounders=labels.appRounderLabels.length;
   if(labels.appAdmitterLabels.length) S.cfg.appAdmitters=labels.appAdmitterLabels.length;
-  if(labels.appNocturnistLabels.length) S.cfg.appNocturnists=labels.appNocturnistLabels.length;
+  if(labels.appNocturnistAdmitterLabels.length) S.cfg.appNocturnistAdmitters=labels.appNocturnistAdmitterLabels.length;
+  if(labels.appNocturnistCrossCoverLabels.length) S.cfg.appNocturnistCrossCover=labels.appNocturnistCrossCoverLabels.length;
 }
 
 // Suggest a shift code for a qGenda task. Admin can override in the import modal.
@@ -1594,6 +1603,9 @@ function qgGuessShift(raw){
   if(/^(date|staff abbreviation|start time|end time)$/.test(s)) return 'IGNORE';
   if(qgLooksLikePersonName(s)||qgLooksLikeTimeOrDate(s)) return 'IGNORE';
 
+  if(/\bapp\b/.test(s)&&qgIsNocturnistTask(s)&&qgIsAdmitTask(s)) return 'APP_NS';
+  if(/\bapp\b/.test(s)&&qgIsNocturnistTask(s)&&qgIsCrossCoverageTask(s)) return 'APP_NX';
+  if(/\bapp\b/.test(s)&&qgIsNocturnistTask(s)) return 'APP_NS';
   if(qgIsCrossCoverageTask(s)) return 'X';
   if(/\bnocturn/.test(s)) return 'N';
   if(/\bnight\b/.test(s) && /\bapp\b/.test(s)) return 'N';
@@ -1857,6 +1869,8 @@ function showQgendaTaskMapModal(rawRecords, filename, totalParsed, totalIgnored)
       ['S','Swing / Admit'],
       ['N','Nocturnist'],
       ['X','Cross Coverage'],
+      ['APP_NS','APP Night Admitter'],
+      ['APP_NX','APP Night Cross Cover'],
       ['IGNORE','Ignore']
     ].map(([v,l])=>`<option value="${v}" ${guess===v?'selected':''}>${l}</option>`).join('');
     return `<tr>
@@ -2489,7 +2503,8 @@ function baseStaffingCounts(){
     nocturnists:S.cfg.nocturnists||0,
     appRounders:S.cfg.appRounders||0,
     appAdmitters:S.cfg.appAdmitters||0,
-    appNocturnists:S.cfg.appNocturnists||0
+    appNocturnistAdmitters:S.cfg.appNocturnistAdmitters||0,
+    appNocturnistCrossCover:S.cfg.appNocturnistCrossCover||0
   };
 }
 function staffingOverridesForDate(ds){
@@ -2504,7 +2519,8 @@ function staffingForDate(ds){
     counts.nocturnists+=(o.nocturnists||0);
     counts.appRounders+=(o.appRounders||0);
     counts.appAdmitters+=(o.appAdmitters||0);
-    counts.appNocturnists+=(o.appNocturnists||0);
+    counts.appNocturnistAdmitters+=(o.appNocturnistAdmitters||0);
+    counts.appNocturnistCrossCover+=(o.appNocturnistCrossCover||0);
   });
   return counts;
 }
@@ -2529,7 +2545,8 @@ function staffingIssueDefinitions(ds,docs=activeDocs(parseInt(ds.slice(0,4),10))
     {key:'N',label:'Nocturnists',target:st.nocturnists,count:count(d=>!isAppProvider(d)&&d.type==='nocturnist'&&isSched(d,'N'))},
     {key:'APP_R',label:'APP Rounders',target:st.appRounders,count:count(d=>isAppProvider(d)&&d.type!=='prn'&&isSched(d,'R'))},
     {key:'APP_S',label:'APP Admitters',target:st.appAdmitters,count:count(d=>isAppProvider(d)&&d.type!=='prn'&&(isSched(d,'S')||isSched(d,'H')))},
-    {key:'APP_N',label:'APP Nocturnists',target:st.appNocturnists,count:count(d=>isAppProvider(d)&&d.type==='nocturnist'&&isSched(d,'N'))}
+    {key:'APP_NS',label:'APP Nocturnist Admitters',target:st.appNocturnistAdmitters,count:count(d=>isAppProvider(d)&&d.type==='nocturnist'&&isSched(d,'APP_NS'))},
+    {key:'APP_NX',label:'APP Nocturnist Cross Cover',target:st.appNocturnistCrossCover,count:count(d=>isAppProvider(d)&&d.type==='nocturnist'&&isSched(d,'APP_NX'))}
   ];
   return items.map(x=>({...x,diff:x.count-x.target})).filter(x=>x.diff!==0);
 }
@@ -2544,12 +2561,13 @@ function shiftMatchesStaffingKey(doc,ds,key){
   if(key==='N')return sh==='N'&&!isAppProvider(doc)&&doc.type==='nocturnist';
   if(key==='APP_R')return sh==='R'&&isAppProvider(doc)&&doc.type!=='prn';
   if(key==='APP_S')return (sh==='S'||sh==='H')&&isAppProvider(doc)&&doc.type!=='prn';
-  if(key==='APP_N')return sh==='N'&&isAppProvider(doc)&&doc.type==='nocturnist';
+  if(key==='APP_NS')return sh==='APP_NS'&&isAppProvider(doc)&&doc.type==='nocturnist';
+  if(key==='APP_NX')return sh==='APP_NX'&&isAppProvider(doc)&&doc.type==='nocturnist';
   return false;
 }
 function eligibleDocsForStaffingKey(docs,key){
   if(key==='N')return docs.filter(d=>d.type==='nocturnist'&&!isAppProvider(d));
-  if(key==='APP_N')return docs.filter(d=>isAppProvider(d)&&d.type==='nocturnist');
+  if(key==='APP_NS'||key==='APP_NX')return docs.filter(d=>isAppProvider(d)&&d.type==='nocturnist');
   if(key==='APP_R'||key==='APP_S')return docs.filter(d=>isAppProvider(d)&&d.type!=='prn');
   return docs.filter(d=>!isAppProvider(d)&&d.type!=='prn'&&d.type!=='nocturnist'&&!isMedicalDirectorDoc(d));
 }
@@ -2586,13 +2604,15 @@ function shiftCfgDefaults(){
     nocturnists:1,
     appRounders:0,
     appAdmitters:0,
-    appNocturnists:0,
+    appNocturnistAdmitters:0,
+    appNocturnistCrossCover:0,
     rounderLabels:[],
     swingLabels:[],
     nocturnistLabels:[],
     appRounderLabels:[],
     appAdmitterLabels:[],
-    appNocturnistLabels:[],
+    appNocturnistAdmitterLabels:[],
+    appNocturnistCrossCoverLabels:[],
     staffingOverrides:[]
   };
 }
@@ -2621,7 +2641,8 @@ function syncCfgInputs(){
     ['c-n',S.cfg.nocturnists||0],
     ['c-app-r',S.cfg.appRounders||0],
     ['c-app-s',S.cfg.appAdmitters||0],
-    ['c-app-n',S.cfg.appNocturnists||0],
+    ['c-app-na',S.cfg.appNocturnistAdmitters||0],
+    ['c-app-nx',S.cfg.appNocturnistCrossCover||0],
     ['c-max-req',S.cfg.maxReq],
     ['c-max-required',S.cfg.maxRequired||5],
     ['c-max-wk',S.cfg.maxWeekendReq]
@@ -2635,7 +2656,8 @@ function staffingOverrideText(o){
   if(o.nocturnists)parts.push(`+${o.nocturnists} nocturnist${o.nocturnists===1?'':'s'}`);
   if(o.appRounders)parts.push(`+${o.appRounders} APP rounder${o.appRounders===1?'':'s'}`);
   if(o.appAdmitters)parts.push(`+${o.appAdmitters} APP admitter${o.appAdmitters===1?'':'s'}`);
-  if(o.appNocturnists)parts.push(`+${o.appNocturnists} APP nocturnist${o.appNocturnists===1?'':'s'}`);
+  if(o.appNocturnistAdmitters)parts.push(`+${o.appNocturnistAdmitters} APP night admitter${o.appNocturnistAdmitters===1?'':'s'}`);
+  if(o.appNocturnistCrossCover)parts.push(`+${o.appNocturnistCrossCover} APP night cross cover`);
   return parts.join(', ')||'No extra staffing';
 }
 function renderStaffingOverrides(){
@@ -2672,14 +2694,15 @@ function addStaffingOverride(){
     nocturnists:cfgInputInt('tmp-n',0),
     appRounders:cfgInputInt('tmp-app-r',0),
     appAdmitters:cfgInputInt('tmp-app-s',0),
-    appNocturnists:cfgInputInt('tmp-app-n',0)
+    appNocturnistAdmitters:cfgInputInt('tmp-app-na',0),
+    appNocturnistCrossCover:cfgInputInt('tmp-app-nx',0)
   };
-  if(!entry.R&&!entry.S&&!entry.nocturnists&&!entry.appRounders&&!entry.appAdmitters&&!entry.appNocturnists){
+  if(!entry.R&&!entry.S&&!entry.nocturnists&&!entry.appRounders&&!entry.appAdmitters&&!entry.appNocturnistAdmitters&&!entry.appNocturnistCrossCover){
     toast('Add at least one extra staffing count','error');
     return;
   }
   S.cfg.staffingOverrides.push(entry);
-  ['tmp-r','tmp-s','tmp-n','tmp-app-r','tmp-app-s','tmp-app-n'].forEach(id=>{const el=document.getElementById(id);if(el)el.value=0;});
+  ['tmp-r','tmp-s','tmp-n','tmp-app-r','tmp-app-s','tmp-app-na','tmp-app-nx'].forEach(id=>{const el=document.getElementById(id);if(el)el.value=0;});
   renderStaffingOverrides();
   renderSchedule();
   renderWeek();
@@ -2705,7 +2728,8 @@ function renderShiftParamFields(){
     nocturnistLabels:cfgInputInt('c-n',S.cfg.nocturnists||0),
     appRounderLabels:cfgInputInt('c-app-r',S.cfg.appRounders||0),
     appAdmitterLabels:cfgInputInt('c-app-s',S.cfg.appAdmitters||0),
-    appNocturnistLabels:cfgInputInt('c-app-n',S.cfg.appNocturnists||0)
+    appNocturnistAdmitterLabels:cfgInputInt('c-app-na',S.cfg.appNocturnistAdmitters||0),
+    appNocturnistCrossCoverLabels:cfgInputInt('c-app-nx',S.cfg.appNocturnistCrossCover||0)
   };
   const meta={
     rounderLabels:['Rounder Names','Rounder'],
@@ -2713,7 +2737,8 @@ function renderShiftParamFields(){
     nocturnistLabels:['Nocturnist Names','Nocturnist'],
     appRounderLabels:['APP Rounder Names','APP Rounder'],
     appAdmitterLabels:['APP Admitter Names','APP Admitter'],
-    appNocturnistLabels:['APP Nocturnist Names','APP Nocturnist']
+    appNocturnistAdmitterLabels:['APP Night Admit Names','APP Night Admit'],
+    appNocturnistCrossCoverLabels:['APP Night Cross Cover Names','APP Night Cross']
   };
   let html='<div class="shift-param-grid">';
   Object.entries(counts).forEach(([key,count])=>{
@@ -2922,7 +2947,7 @@ function _scoreScheduleCandidate(year,q){
     const optional=Array.isArray(entry)?entry:(entry.optional||[]);
     required.forEach(ds=>{
       const sh=S.sched[doc.id]&&S.sched[doc.id][ds];
-      if(sh==='R'||sh==='S'||sh==='H'){requiredMisses++;affectedRequired.add(doc.id);}
+        if(sh==='R'||sh==='S'||sh==='H'||sh==='N'||sh==='APP_NS'||sh==='APP_NX'){requiredMisses++;affectedRequired.add(doc.id);}
     });
     const priorFairness=getHonoringRate(doc.id,year-1);
     optional.forEach(ds=>{
@@ -2953,7 +2978,7 @@ function _scoreScheduleCandidate(year,q){
     };
     days.forEach((date,idx)=>{
       const sh=(S.sched[doc.id]&&S.sched[doc.id][dstrD(date)])||'OFF';
-      if(sh==='R'||sh==='S'||sh==='H'){
+      if(sh==='R'||sh==='S'||sh==='H'||sh==='N'||sh==='APP_NS'||sh==='APP_NX'){
         if(offRun&&priorBlockLen) restMismatch+=Math.max(0,priorBlockLen-offRun);
         offRun=0;
         if(!block.length) blockStart=idx;
@@ -3059,11 +3084,26 @@ function strictPriorPhasePenalty(doc,startD,phase){
     const sh=S.sched[doc.id]&&S.sched[doc.id][ds];
     if(!sh)continue;
     seen++;
-    const actualWork=sh==='R'||sh==='S'||sh==='H'||sh==='N';
+	    const actualWork=sh==='R'||sh==='S'||sh==='H'||sh==='N'||sh==='APP_NS'||sh==='APP_NX';
     const predictedWork=strictIsWorkingOffset(-lb,phase);
     if(actualWork!==predictedWork)penalty+=10;
   }
   return seen?penalty:0;
+}
+function strictRequestPenalty(doc,days,phase){
+  const qKey=`${S.ui.year}-${S.ui.quarter}`;
+  const entry=S.requests&&S.requests[qKey]&&S.requests[qKey][doc.id];
+  if(!entry)return 0;
+  const required=new Set(Array.isArray(entry)?[]:(entry.required||[]));
+  const optional=new Set(Array.isArray(entry)?entry:(entry.optional||[]));
+  let penalty=0;
+  days.forEach((d,idx)=>{
+    const ds=dstrD(d);
+    if(!strictIsWorkingOffset(idx,phase))return;
+    if(required.has(ds))penalty+=250;
+    else if(optional.has(ds))penalty+=25;
+  });
+  return penalty;
 }
 function strictContinuingShift(doc,startD,phase){
   const priorDs=dstrD(addD(startD,-1));
@@ -3102,7 +3142,8 @@ function chooseStrictPhases(pool,days,startD,targetWorkForDay,candidateSeed){
         return strictIsWorkingOffset(idx,phase)?1:0;
       });
       const continuity=strictPriorPhasePenalty(doc,startD,phase);
-      const score=squaredError(extra)+continuity+_candidateUnit(candidateSeed,doc.id+'|phase|'+phase)*0.01;
+      const requestPenalty=strictRequestPenalty(doc,days,phase);
+      const score=squaredError(extra)+continuity+requestPenalty+_candidateUnit(candidateSeed,doc.id+'|phase|'+phase)*0.01;
       if(!best||score<best.score)best={phase,extra,score};
     }
     phaseById[doc.id]=best.phase;
@@ -3130,7 +3171,7 @@ function strictWorkBlocksForDoc(doc,days,startD,phase){
   if(current)blocks.push(current);
   return blocks;
 }
-function chooseStrictSwingBlocks(pool,days,startD,phaseById,targetSwingForDay,candidateSeed){
+function chooseStrictSwingBlocks(pool,days,startD,phaseById,targetSwingForDay,candidateSeed,activeBlockIds=null){
   const swingCounts=days.map(()=>0);
   const selected=new Set();
   const selectedByDoc={};
@@ -3169,6 +3210,7 @@ function chooseStrictSwingBlocks(pool,days,startD,phaseById,targetSwingForDay,ca
     let best=null;
     blocks.forEach(block=>{
       if(selected.has(block.id)||block.lockR)return;
+      if(activeBlockIds&&activeBlockIds.size&&!activeBlockIds.has(block.id))return;
       if(!block.days.length)return;
       const doc=block.doc;
       const target=Math.max(1,Math.round((parseFloat(doc.fte)||1)*targetPerFte));
@@ -3189,6 +3231,66 @@ function chooseStrictSwingBlocks(pool,days,startD,phaseById,targetSwingForDay,ca
   }
   return selected;
 }
+function chooseStrictFteWorkBlocks(pool,days,startD,phaseById,targetWorkForDay,candidateSeed){
+  const workCounts=days.map(()=>0);
+  const selected=new Set();
+  const selectedDaysByDoc={};
+  const blocks=[];
+  pool.forEach(doc=>{
+    const phase=phaseById[doc.id];
+    if(phase===undefined)return;
+    strictWorkBlocksForDoc(doc,days,startD,phase).forEach((block,blockIdx)=>{
+      block.id=doc.id+'|'+block.startIdx+'|'+blockIdx;
+      block.target=Math.max(0,Math.round((parseFloat(doc.fte)||1)*(S.cfg.annual||182)/4));
+      blocks.push(block);
+    });
+  });
+  blocks.forEach(block=>{
+    if((parseFloat(block.doc.fte)||1)<0.95)return;
+    selected.add(block.id);
+    selectedDaysByDoc[block.doc.id]=(selectedDaysByDoc[block.doc.id]||0)+block.days.length;
+    block.days.forEach(x=>{workCounts[x.idx]++;});
+  });
+  function errorWith(block=null){
+    return days.reduce((sum,d,idx)=>{
+      const add=block&&block.days.some(x=>x.idx===idx)?1:0;
+      const diff=(workCounts[idx]+add)-targetWorkForDay(dstrD(d),idx);
+      return sum+diff*diff;
+    },0);
+  }
+  function blockRequestPenalty(block){
+    const qKey=`${S.ui.year}-${S.ui.quarter}`;
+    const entry=S.requests&&S.requests[qKey]&&S.requests[qKey][block.doc.id];
+    if(!entry)return 0;
+    const required=new Set(Array.isArray(entry)?[]:(entry.required||[]));
+    const optional=new Set(Array.isArray(entry)?entry:(entry.optional||[]));
+    return block.days.reduce((sum,x)=>sum+(required.has(x.ds)?250:(optional.has(x.ds)?25:0)),0);
+  }
+  let improved=true;
+  while(improved){
+    improved=false;
+    const base=errorWith();
+    let best=null;
+    blocks.forEach(block=>{
+      if(selected.has(block.id))return;
+      const current=selectedDaysByDoc[block.doc.id]||0;
+      if(current>=block.target)return;
+      const after=current+block.days.length;
+      const overPenalty=Math.max(0,after-block.target)*Math.max(0,after-block.target)*25;
+      const fteGain=(Math.max(0,block.target-current)-Math.max(0,block.target-after))*8;
+      const score=errorWith(block)+overPenalty+blockRequestPenalty(block)-fteGain+_candidateUnit(candidateSeed,block.id+'|fte-work')*0.01;
+      const gain=base-score;
+      if(gain>0&&(!best||gain>best.gain))best={block,gain};
+    });
+    if(best){
+      selected.add(best.block.id);
+      selectedDaysByDoc[best.block.doc.id]=(selectedDaysByDoc[best.block.doc.id]||0)+best.block.days.length;
+      best.block.days.forEach(x=>{workCounts[x.idx]++;});
+      improved=true;
+    }
+  }
+  return selected;
+}
 function assignStrictBaseline({strictAll,swingOnly,days,startD,candidateSeed}){
   const mdStrict=strictAll.filter(d=>!isAppProvider(d)).sort(providerSort);
   const appStrict=strictAll.filter(isAppProvider).sort(providerSort);
@@ -3201,22 +3303,32 @@ function assignStrictBaseline({strictAll,swingOnly,days,startD,candidateSeed}){
     const st=staffingForDate(ds);
     return Math.max(0,(st.appRounders||0)+(st.appAdmitters||0));
   },candidateSeed+1000);
+  const mdWorkBlocks=chooseStrictFteWorkBlocks(mdStrict,days,startD,mdPhase,(ds,idx)=>{
+    const st=staffingForDate(ds);
+    const swingOnlyCount=strictSwingOnlyCountForOffset(swingOnly,startD,idx,ds);
+    return Math.max(0,(st.R||0)+(st.S||0)-swingOnlyCount);
+  },candidateSeed);
+  const appWorkBlocks=chooseStrictFteWorkBlocks(appStrict,days,startD,appPhase,(ds)=>{
+    const st=staffingForDate(ds);
+    return Math.max(0,(st.appRounders||0)+(st.appAdmitters||0));
+  },candidateSeed+1000);
   const mdSwingBlocks=chooseStrictSwingBlocks(mdStrict,days,startD,mdPhase,(ds,idx)=>{
     const st=staffingForDate(ds);
     const swingOnlyCount=strictSwingOnlyCountForOffset(swingOnly,startD,idx,ds);
     return Math.max(0,(st.S||0)-swingOnlyCount);
-  },candidateSeed);
+  },candidateSeed,mdWorkBlocks);
   const appSwingBlocks=chooseStrictSwingBlocks(appStrict,days,startD,appPhase,(ds)=>{
     const st=staffingForDate(ds);
     return Math.max(0,st.appAdmitters||0);
-  },candidateSeed+1000);
-  function applyPool(pool,phaseById,swingBlocks){
+  },candidateSeed+1000,appWorkBlocks);
+  function applyPool(pool,phaseById,workBlocks,swingBlocks){
     pool.forEach(doc=>{
       const phase=phaseById[doc.id];
       if(phase===undefined)return;
-      strictWorkBlocksForDoc(doc,days,startD,phase).forEach((block,blockIdx)=>{
-        const blockId=doc.id+'|'+block.startIdx+'|'+blockIdx;
-        const shift=swingBlocks.has(blockId)?'S':'R';
+	      strictWorkBlocksForDoc(doc,days,startD,phase).forEach((block,blockIdx)=>{
+	        const blockId=doc.id+'|'+block.startIdx+'|'+blockIdx;
+        if(!workBlocks.has(blockId))return;
+	        const shift=swingBlocks.has(blockId)?'S':'R';
         block.days.forEach(x=>{
           if(!S.sched[doc.id])S.sched[doc.id]={};
           S.sched[doc.id][x.ds]=shift;
@@ -3229,27 +3341,46 @@ function assignStrictBaseline({strictAll,swingOnly,days,startD,candidateSeed}){
       });
     });
   }
-  applyPool(mdStrict,mdPhase,mdSwingBlocks);
-  applyPool(appStrict,appPhase,appSwingBlocks);
+  applyPool(mdStrict,mdPhase,mdWorkBlocks,mdSwingBlocks);
+  applyPool(appStrict,appPhase,appWorkBlocks,appSwingBlocks);
 }
 function assignNocturnistBaseline({nocturnists,days,startD,candidateSeed}){
   const mdNoct=nocturnists.filter(d=>!isAppProvider(d)).sort(providerSort);
   const appNoct=nocturnists.filter(isAppProvider).sort(providerSort);
-  function applyNightPool(pool,targetFn,seedOffset){
+  function applyNightPool(pool,targetFn,seedOffset,shiftForDocDay=null){
     const phaseById=chooseStrictPhases(pool,days,startD,(ds)=>Math.max(0,targetFn(staffingForDate(ds))),candidateSeed+seedOffset);
+    const workBlocks=chooseStrictFteWorkBlocks(pool,days,startD,phaseById,(ds)=>Math.max(0,targetFn(staffingForDate(ds))),candidateSeed+seedOffset);
     pool.forEach(doc=>{
       const phase=phaseById[doc.id];
       if(phase===undefined)return;
-      days.forEach((d,idx)=>{
+      strictWorkBlocksForDoc(doc,days,startD,phase).forEach((block,blockIdx)=>{
+        const blockId=doc.id+'|'+block.startIdx+'|'+blockIdx;
+        if(!workBlocks.has(blockId))return;
+        block.days.forEach(x=>{
+          if(!S.sched[doc.id])S.sched[doc.id]={};
+          S.sched[doc.id][x.ds]=shiftForDocDay?shiftForDocDay(doc,x.ds):'N';
+        });
+      });
+      days.forEach(d=>{
         const ds=dstrD(d);
         if(!S.sched[doc.id])S.sched[doc.id]={};
-        if(doc.startDate&&doc.startDate>ds){S.sched[doc.id][ds]='OFF';return;}
-        S.sched[doc.id][ds]=strictIsWorkingOffset(idx,phase)?'N':'OFF';
+        if(S.sched[doc.id][ds]===undefined)S.sched[doc.id][ds]='OFF';
       });
     });
   }
   applyNightPool(mdNoct,st=>st.nocturnists||0,2000);
-  applyNightPool(appNoct,st=>st.appNocturnists||0,3000);
+  applyNightPool(appNoct,st=>(st.appNocturnistAdmitters||0)+(st.appNocturnistCrossCover||0),3000);
+  days.forEach(d=>{
+    const ds=dstrD(d);
+    const st=staffingForDate(ds);
+    const working=appNoct
+      .filter(doc=>S.sched[doc.id]&&S.sched[doc.id][ds]==='N')
+      .sort((a,b)=>_candidateTie(candidateSeed,ds,a.id)-_candidateTie(candidateSeed,ds,b.id));
+    working.forEach((doc,idx)=>{
+      if(idx<(st.appNocturnistAdmitters||0))S.sched[doc.id][ds]='APP_NS';
+      else S.sched[doc.id][ds]='APP_NX';
+    });
+  });
 }
 
 function nextStressQuarter(){
@@ -3586,6 +3717,7 @@ function _generateQuarter(candidateSeed=0,finalize=true){
 
   const MIN_R_HARD=5;
   const MAX_S_BLOCK=2;   // ← critical cap: no more than 2 consecutive S days
+  const SOFT_VARIABLE_WORK=7;
   const MAX_VARIABLE_WORK=10;
   // Monthly S target per provider (~quarterTargetS / 3 months)
   // Target ~8 S per quarter → ~2.67 per month → we use 3 as soft cap
@@ -3700,7 +3832,7 @@ function _generateQuarter(candidateSeed=0,finalize=true){
     if(!s) return false;
     if(s.lastShift==='S') return false;          // mid-S-block: no R
     if(s.lastBlockEndedOnS) return false;        // just came off S: must rest ≥1 day first
-    if(s.block==='W') return s.workInBlock<s.maxWork;
+    if(s.block==='W') return s.workInBlock<SOFT_VARIABLE_WORK;
     return s.dayInBlock>=s.lastWorkSize&&!hasRequiredInNextRBlock(docId,di);
   }
   function canBeS_base(docId){
@@ -3745,7 +3877,7 @@ function _generateQuarter(candidateSeed=0,finalize=true){
   function mustContinueR(docId){
     const s=state[docId];
     return s&&s.block==='W'&&s.lastShift==='R'
-        &&s.runLen<s.preferredR&&s.workInBlock<s.maxWork;
+        &&s.runLen<Math.min(s.preferredR,SOFT_VARIABLE_WORK)&&s.workInBlock<SOFT_VARIABLE_WORK;
   }
   function mustContinueS_couplet(docId){
     const s=state[docId];
@@ -4007,8 +4139,8 @@ function _generateQuarter(candidateSeed=0,finalize=true){
         const sa=state[a.id],sb=state[b.id];
         // Continue through day 7, then prefer a clean new block. Days 8-10
         // remain available when coverage cannot be met otherwise.
-        const aCont=(sa.block==='W'&&sa.lastShift==='R')?(sa.workInBlock<7?0:2):1;
-        const bCont=(sb.block==='W'&&sb.lastShift==='R')?(sb.workInBlock<7?0:2):1;
+        const aCont=(sa.block==='W'&&sa.lastShift==='R')?(sa.workInBlock<SOFT_VARIABLE_WORK?0:2):1;
+        const bCont=(sb.block==='W'&&sb.lastShift==='R')?(sb.workInBlock<SOFT_VARIABLE_WORK?0:2):1;
         if(aCont!==bCont) return aCont-bCont;
         // Annual fairness: providers with more remaining budget get priority
         const aRem=ytdRemaining[a.id]||0, bRem=ytdRemaining[b.id]||0;
@@ -4521,11 +4653,21 @@ function renderSchedule(){
       return `${imported.task}${suffix}`;
     }
     if(sh==='X') return 'Cross Coverage';
+    if(sh==='APP_NS'){
+      const docsForShift=allDocs.filter(d=>S.sched[d.id]&&S.sched[d.id][ds]==='APP_NS'&&isAppProvider(d)).sort(providerSort);
+      const idx=Math.max(0,docsForShift.findIndex(d=>d.id===doc.id));
+      return shiftLabelFor('appNocturnistAdmitterLabels',idx,'APP Night Admit');
+    }
+    if(sh==='APP_NX'){
+      const docsForShift=allDocs.filter(d=>S.sched[d.id]&&S.sched[d.id][ds]==='APP_NX'&&isAppProvider(d)).sort(providerSort);
+      const idx=Math.max(0,docsForShift.findIndex(d=>d.id===doc.id));
+      return shiftLabelFor('appNocturnistCrossCoverLabels',idx,'APP Night Cross');
+    }
     if(sh==='N'){
       const app=isAppProvider(doc);
       const docsForShift=allDocs.filter(d=>S.sched[d.id]&&S.sched[d.id][ds]==='N'&&isAppProvider(d)===app).sort(providerSort);
       const idx=Math.max(0,docsForShift.findIndex(d=>d.id===doc.id));
-      return app?shiftLabelFor('appNocturnistLabels',idx,'APP Nocturnist'):shiftLabelFor('nocturnistLabels',idx,'Nocturnist');
+      return app?shiftLabelFor('appNocturnistAdmitterLabels',idx,'APP Night Admit'):shiftLabelFor('nocturnistLabels',idx,'Nocturnist');
     }
     if(sh==='S'||sh==='H'){
       const app=isAppProvider(doc);
@@ -4568,7 +4710,7 @@ function renderSchedule(){
       const sh=(S.sched[doc.id]&&S.sched[doc.id][dstrD(d)])||'OFF';
       if(sh==='R'){mc[d.getMonth()].r++;qTotalR++;}
       if(sh==='S'||sh==='H'){mc[d.getMonth()].s++;qTotalS++;}
-      if(sh==='N'){mc[d.getMonth()].n++;qTotalN++;}
+      if(sh==='N'||sh==='APP_NS'||sh==='APP_NX'){mc[d.getMonth()].n++;qTotalN++;}
       if(sh==='X')qTotalX++;
     });
     const qTotal=qTotalR+qTotalS+qTotalN+qTotalX;
@@ -4601,7 +4743,7 @@ function renderSchedule(){
       if(conflict)cls.push(isReqRequired?'cell-REQCONFLICT':'cell-CONFLICT');
       if(i>0&&d.getDate()===1)cls.push('month-sep');
       if(isHighlighted)cls.push('row-hl-cell');if(isColHl)cls.push('col-hl');
-      const label=sh==='OFF'?'':sh;
+      const label=sh==='OFF'?'':(sh==='APP_NS'?'NA':sh==='APP_NX'?'NX':sh);
       const tipParts=[];
       if(isReqRequired&&conflict) tipParts.push('REQUIRED OFF CONFLICT');
       else if(isReq) tipParts.push('Requested off');
@@ -4656,7 +4798,8 @@ function renderSchedule(){
   coverageRow('NOCTURNISTS',ds=>staffingForDate(ds).nocturnists,ds=>allDocs.filter(doc=>S.sched[doc.id]&&S.sched[doc.id][ds]==='N'&&!isAppProvider(doc)).length);
   coverageRow('APP ROUND',ds=>staffingForDate(ds).appRounders,ds=>allDocs.filter(doc=>doc.type!=='prn'&&S.sched[doc.id]&&S.sched[doc.id][ds]==='R'&&isAppProvider(doc)).length);
   coverageRow('APP SWING',ds=>staffingForDate(ds).appAdmitters,ds=>allDocs.filter(doc=>doc.type!=='prn'&&S.sched[doc.id]&&(S.sched[doc.id][ds]==='S'||S.sched[doc.id][ds]==='H')&&isAppProvider(doc)).length);
-  coverageRow('APP NIGHT',ds=>staffingForDate(ds).appNocturnists,ds=>allDocs.filter(doc=>doc.type==='nocturnist'&&S.sched[doc.id]&&S.sched[doc.id][ds]==='N'&&isAppProvider(doc)).length);
+  coverageRow('APP NIGHT ADMIT',ds=>staffingForDate(ds).appNocturnistAdmitters,ds=>allDocs.filter(doc=>doc.type==='nocturnist'&&S.sched[doc.id]&&S.sched[doc.id][ds]==='APP_NS'&&isAppProvider(doc)).length);
+  coverageRow('APP NIGHT CROSS',ds=>staffingForDate(ds).appNocturnistCrossCover,ds=>allDocs.filter(doc=>doc.type==='nocturnist'&&S.sched[doc.id]&&S.sched[doc.id][ds]==='APP_NX'&&isAppProvider(doc)).length);
   html+='</tfoot></table>';
 
   document.getElementById('sheet-outer').innerHTML='<div class="sheet-wrap" id="sheet-wrap">'+html+'</div>';
@@ -4811,8 +4954,9 @@ function setShiftMode(mode){
   }
 }
 
-// ── Cell click: cycles R→S→N→OFF, or applies fill mode ─
+// ── Cell click: cycles common shifts, or applies fill mode ─
 const SHIFT_CYCLE=['R','S','N','X','OFF'];
+const APP_NOCT_SHIFT_CYCLE=['APP_NS','APP_NX','OFF'];
 function cycleCell(docId,ds){
   if(!isAdmin()){ toast('View-only — sign in as admin to edit','error'); return; }
   if(S.ui.fillMode){
@@ -4825,8 +4969,10 @@ function cycleCell(docId,ds){
     return;
   }
   const cur=(S.sched[docId]&&S.sched[docId][ds])||'OFF';
-  const idx=SHIFT_CYCLE.indexOf(cur);
-  const next=SHIFT_CYCLE[(idx+1)%SHIFT_CYCLE.length];
+  const doc=byId(docId);
+  const cycle=(doc&&isAppProvider(doc)&&doc.type==='nocturnist')?APP_NOCT_SHIFT_CYCLE:SHIFT_CYCLE;
+  const idx=cycle.indexOf(cur);
+  const next=cycle[(idx+1)%cycle.length];
   if(!S.sched[docId]) S.sched[docId]={};
   const old=S.sched[docId][ds];
   pushScheduleUndo(docId,ds,old,next);
@@ -4868,7 +5014,9 @@ function renderWeek(){
       .sort(providerSort);
     const ns=docs.filter(doc=>S.sched[doc.id]&&S.sched[doc.id][ds]==='N'&&!isAppProvider(doc))
       .sort(providerSort);
-    const appNs=docs.filter(doc=>S.sched[doc.id]&&S.sched[doc.id][ds]==='N'&&isAppProvider(doc))
+    const appNas=docs.filter(doc=>S.sched[doc.id]&&S.sched[doc.id][ds]==='APP_NS'&&isAppProvider(doc))
+      .sort(providerSort);
+    const appNxs=docs.filter(doc=>S.sched[doc.id]&&S.sched[doc.id][ds]==='APP_NX'&&isAppProvider(doc))
       .sort(providerSort);
     const renderTeam=team=>team==='green'||team==='white'
       ?`<span class="team-num ${team}">${teamLabel(team)}</span> `
@@ -4888,8 +5036,10 @@ function renderWeek(){
       ${appSs.map((doc,idx)=>renderWeekShift(shiftLabelFor('appAdmitterLabels',idx,'APP Admitter'),doc)).join('')||'<div class="wd-name tx-mu">—</div>'}
       <div class="wd-section-tit" style="color:#3a3a6e;margin-top:8px">Nocturnists (${ns.length}/${staffing.nocturnists})</div>
       ${ns.map((doc,idx)=>renderWeekShift(shiftLabelFor('nocturnistLabels',idx,'Nocturnist'),doc)).join('')||'<div class="wd-name tx-mu">—</div>'}
-      <div class="wd-section-tit" style="color:#3a3a6e;margin-top:8px">APP Nocturnists (${appNs.length}/${staffing.appNocturnists})</div>
-      ${appNs.map((doc,idx)=>renderWeekShift(shiftLabelFor('appNocturnistLabels',idx,'APP Nocturnist'),doc)).join('')||'<div class="wd-name tx-mu">—</div>'}
+      <div class="wd-section-tit" style="color:#3a3a6e;margin-top:8px">APP Night Admit (${appNas.length}/${staffing.appNocturnistAdmitters})</div>
+      ${appNas.map((doc,idx)=>renderWeekShift(shiftLabelFor('appNocturnistAdmitterLabels',idx,'APP Night Admit'),doc)).join('')||'<div class="wd-name tx-mu">—</div>'}
+      <div class="wd-section-tit" style="color:#3a3a6e;margin-top:8px">APP Night Cross (${appNxs.length}/${staffing.appNocturnistCrossCover})</div>
+      ${appNxs.map((doc,idx)=>renderWeekShift(shiftLabelFor('appNocturnistCrossCoverLabels',idx,'APP Night Cross'),doc)).join('')||'<div class="wd-name tx-mu">—</div>'}
     </div>`;
   }
   html+='</div>';
@@ -6209,15 +6359,16 @@ function saveCfg(opts={}){
   S.cfg.nocturnists=cfgInputInt('c-n',S.cfg.nocturnists||0);
   S.cfg.appRounders=cfgInputInt('c-app-r',S.cfg.appRounders||0);
   S.cfg.appAdmitters=cfgInputInt('c-app-s',S.cfg.appAdmitters||0);
-  S.cfg.appNocturnists=cfgInputInt('c-app-n',S.cfg.appNocturnists||0);
-  const labels={rounderLabels:[],swingLabels:[],nocturnistLabels:[],appRounderLabels:[],appAdmitterLabels:[],appNocturnistLabels:[]};
+  S.cfg.appNocturnistAdmitters=cfgInputInt('c-app-na',S.cfg.appNocturnistAdmitters||0);
+  S.cfg.appNocturnistCrossCover=cfgInputInt('c-app-nx',S.cfg.appNocturnistCrossCover||0);
+  const labels={rounderLabels:[],swingLabels:[],nocturnistLabels:[],appRounderLabels:[],appAdmitterLabels:[],appNocturnistAdmitterLabels:[],appNocturnistCrossCoverLabels:[]};
   document.querySelectorAll('.shift-label-input').forEach(inp=>{
     const key=inp.getAttribute('data-key');
     const idx=parseInt(inp.getAttribute('data-idx'));
     if(!labels[key])return;
     labels[key][idx]=(inp.value||'').trim();
   });
-  const prefixes={rounderLabels:'Rounder',swingLabels:'Admitter',nocturnistLabels:'Nocturnist',appRounderLabels:'APP Rounder',appAdmitterLabels:'APP Admitter',appNocturnistLabels:'APP Nocturnist'};
+  const prefixes={rounderLabels:'Rounder',swingLabels:'Admitter',nocturnistLabels:'Nocturnist',appRounderLabels:'APP Rounder',appAdmitterLabels:'APP Admitter',appNocturnistAdmitterLabels:'APP Night Admit',appNocturnistCrossCoverLabels:'APP Night Cross'};
   Object.keys(labels).forEach(key=>{
     S.cfg[key]=labels[key].map((v,i)=>v||`${prefixes[key]} ${i+1}`).filter(Boolean);
   });
