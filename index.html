@@ -567,11 +567,15 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
 /* qGenda Import */
 .qg-match-row{display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--line);font-size:12px}
 .qg-match-row:last-child{border-bottom:none}
-.qg-name-raw{min-width:160px;font-family:'JetBrains Mono',monospace;color:var(--ink3);font-size:11px}
+.qg-name-raw{min-width:180px;max-width:280px;flex:0 1 26%;font-family:'JetBrains Mono',monospace;color:var(--ink3);font-size:11px;overflow-wrap:anywhere}
 .qg-arrow{color:var(--ink3);flex-shrink:0}
-.qg-match-sel{flex:1;padding:3px 6px;border:1px solid var(--line);border-radius:3px;font-size:12px}
+.qg-match-sel{flex:1 1 280px;min-width:220px;padding:3px 6px;border:1px solid var(--line);border-radius:3px;font-size:12px}
 .qg-match-sel.matched{border-color:#0a7044;background:#f0faf4}
 .qg-match-sel.unmatched{border-color:#a85800;background:#fff8f0}
+.qg-new-provider{display:flex;align-items:center;gap:6px;width:100%;padding:4px 8px;background:#f0faf4;border-radius:4px;font-size:11px;flex-wrap:wrap}
+.qg-new-provider select{flex:1 1 150px;min-width:120px;padding:2px 4px;font-size:11px}
+.qg-new-provider .qg-new-fte{width:70px;padding:2px 4px;font-size:11px}
+.qg-new-provider .qg-new-name{margin-left:auto;color:#888;overflow-wrap:anywhere}
 .qg-progress{height:6px;background:var(--line);border-radius:3px;margin-top:8px;overflow:hidden}
 .qg-progress-bar{height:100%;background:#1b4d8f;border-radius:3px;transition:width .3s}
 .qg-import-grid{display:grid;grid-template-columns:minmax(0,1fr) 250px;gap:14px;align-items:start}
@@ -1942,14 +1946,14 @@ function showQgendaMapModal(records, filename, totalParsed, totalIgnored, unknow
         data-deflast="${defLast.replace(/"/g,'&quot;')}" data-deffirst="${defFirst.replace(/"/g,'&quot;')}"
         onchange="this.className='qg-match-sel '+(this.value?'matched':'unmatched');var nr=document.getElementById('np_${safeId}');if(nr)nr.style.display=this.value==='__add__'?'flex':'none';"
       >${opts}</select>
-      <div id="np_${safeId}" style="display:${onboardingEmptyRoster?'flex':'none'};align-items:center;gap:6px;width:100%;padding:4px 8px;background:#f0faf4;border-radius:4px;font-size:11px">
+      <div id="np_${safeId}" class="qg-new-provider" style="display:${onboardingEmptyRoster?'flex':'none'}">
         <span style="color:#555">Role:</span>
-        <select class="qg-new-role" data-raw="${rawName.replace(/"/g,'&quot;')}" style="padding:2px 4px;font-size:11px">
+        <select class="qg-new-role" data-raw="${rawName.replace(/"/g,'&quot;')}">
           <option value="MD/DO" ${defaultRole==='MD/DO'?'selected':''}>MD/DO</option>
           <option value="APP" ${defaultRole==='APP'?'selected':''}>APP</option>
         </select>
         <span style="color:#555">Type:</span>
-        <select class="qg-new-type" data-raw="${rawName.replace(/"/g,'&quot;')}" style="padding:2px 4px;font-size:11px"
+        <select class="qg-new-type" data-raw="${rawName.replace(/"/g,'&quot;')}"
           onchange="var f=this.parentElement.querySelector('.qg-new-fte');if(f&&this.value==='prn')f.value='0.0';else if(f&&parseFloat(f.value)===0)f.value='1.0';">
           <option value="standard" ${defaultType==='standard'?'selected':''}>Standard</option>
           <option value="prn" ${defaultType==='prn'?'selected':''}>PRN / Track Only</option>
@@ -1958,8 +1962,8 @@ function showQgendaMapModal(records, filename, totalParsed, totalIgnored, unknow
           <option value="swing-only" ${defaultType==='swing-only'?'selected':''}>Swing Only</option>
         </select>
         <span style="color:#555">FTE:</span>
-        <input type="number" class="qg-new-fte" data-raw="${rawName.replace(/"/g,'&quot;')}" value="${defaultFte}" min="0.0" max="1.0" step="0.1" style="width:50px;padding:2px 4px;font-size:11px">
-        <span style="color:#888">(${defFirst} ${defLast})</span>
+        <input type="number" class="qg-new-fte" data-raw="${rawName.replace(/"/g,'&quot;')}" value="${defaultFte}" min="0.0" max="1.0" step="0.1">
+        <span class="qg-new-name">(${defFirst} ${defLast})</span>
       </div>
     </div>`;
   }).join('');
@@ -2448,8 +2452,8 @@ function normalizeRole(role){return role==='NP'?'APP':(role==='MD'?'MD/DO':(role
 function providerRoleLabel(d){return normalizeRole(d&&d.role)}
 function isStrictTeamEligible(d){return d&&d.type==='standard'&&!isMedicalDirectorDoc(d)&&isStrictStyle(d)}
 function isAppProvider(d){return d&&(d.role==='APP'||d.role==='NP')}
-function physicianRounderTarget(){return (S.cfg.R||0)+(S.cfg.appRounders||0)}
-function admitterTarget(){return (S.cfg.S||0)+(S.cfg.appAdmitters||0)}
+function physicianRounderTarget(){return S.cfg.R||0}
+function admitterTarget(){return S.cfg.S||0}
 function baseStaffingCounts(){
   ensureShiftCfg();
   return {
@@ -2475,8 +2479,8 @@ function staffingForDate(ds){
   });
   return counts;
 }
-function physicianRounderTargetForDate(ds){const c=staffingForDate(ds);return c.R+c.appRounders}
-function admitterTargetForDate(ds){const c=staffingForDate(ds);return c.S+c.appAdmitters}
+function physicianRounderTargetForDate(ds){const c=staffingForDate(ds);return c.R}
+function admitterTargetForDate(ds){const c=staffingForDate(ds);return c.S}
 function avgPhysicianRounderTarget(days){
   if(!days||!days.length)return physicianRounderTarget();
   return days.reduce((sum,d)=>sum+physicianRounderTargetForDate(dstrD(d)),0)/days.length;
@@ -2488,22 +2492,24 @@ function avgAdmitterTarget(days){
 function staffingIssueDefinitions(ds,docs=activeDocs(parseInt(ds.slice(0,4),10))){
   const st=staffingForDate(ds);
   const count=fn=>docs.filter(fn).length;
+  const isSched=(d,sh)=>S.sched[d.id]&&S.sched[d.id][ds]===sh;
+  const isPhysicianCoverageDoc=d=>!isAppProvider(d)&&d.type!=='prn'&&!isMedicalDirectorDoc(d);
   const items=[
-    {key:'R',label:'Rounding',target:st.R+st.appRounders,count:count(d=>S.sched[d.id]&&S.sched[d.id][ds]==='R')},
-    {key:'S',label:'Swing / Admit',target:st.S+st.appAdmitters,count:count(d=>S.sched[d.id]&&(S.sched[d.id][ds]==='S'||S.sched[d.id][ds]==='H'))},
-    {key:'N',label:'Nocturnists',target:st.nocturnists,count:count(d=>S.sched[d.id]&&S.sched[d.id][ds]==='N'&&!isAppProvider(d))},
-    {key:'APP_R',label:'APP Rounders',target:st.appRounders,count:count(d=>S.sched[d.id]&&S.sched[d.id][ds]==='R'&&isAppProvider(d))},
-    {key:'APP_S',label:'APP Admitters',target:st.appAdmitters,count:count(d=>S.sched[d.id]&&(S.sched[d.id][ds]==='S'||S.sched[d.id][ds]==='H')&&isAppProvider(d))}
+    {key:'R',label:'MD/DO Rounding',target:st.R,count:count(d=>isPhysicianCoverageDoc(d)&&isSched(d,'R'))},
+    {key:'S',label:'MD/DO Swing / Admit',target:st.S,count:count(d=>isPhysicianCoverageDoc(d)&&(isSched(d,'S')||isSched(d,'H')))},
+    {key:'N',label:'Nocturnists',target:st.nocturnists,count:count(d=>!isAppProvider(d)&&d.type==='nocturnist'&&isSched(d,'N'))},
+    {key:'APP_R',label:'APP Rounders',target:st.appRounders,count:count(d=>isAppProvider(d)&&d.type!=='prn'&&isSched(d,'R'))},
+    {key:'APP_S',label:'APP Admitters',target:st.appAdmitters,count:count(d=>isAppProvider(d)&&d.type!=='prn'&&(isSched(d,'S')||isSched(d,'H')))}
   ];
   return items.map(x=>({...x,diff:x.count-x.target})).filter(x=>x.diff!==0);
 }
 function shiftMatchesStaffingKey(doc,ds,key){
   const sh=S.sched[doc.id]&&S.sched[doc.id][ds];
-  if(key==='R')return sh==='R';
-  if(key==='S')return sh==='S'||sh==='H';
-  if(key==='N')return sh==='N'&&!isAppProvider(doc);
-  if(key==='APP_R')return sh==='R'&&isAppProvider(doc);
-  if(key==='APP_S')return (sh==='S'||sh==='H')&&isAppProvider(doc);
+  if(key==='R')return sh==='R'&&!isAppProvider(doc)&&!isMedicalDirectorDoc(doc);
+  if(key==='S')return (sh==='S'||sh==='H')&&!isAppProvider(doc)&&!isMedicalDirectorDoc(doc);
+  if(key==='N')return sh==='N'&&!isAppProvider(doc)&&doc.type==='nocturnist';
+  if(key==='APP_R')return sh==='R'&&isAppProvider(doc)&&doc.type!=='prn';
+  if(key==='APP_S')return (sh==='S'||sh==='H')&&isAppProvider(doc)&&doc.type!=='prn';
   return false;
 }
 function eligibleDocsForStaffingKey(docs,key){
@@ -2922,8 +2928,9 @@ function _scoreScheduleCandidate(year,q){
     let r=0,s=0;
     activeDocs(year,date.getMonth()).forEach(doc=>{
       const sh=S.sched[doc.id]&&S.sched[doc.id][ds];
-      if(sh==='R'||sh==='H') r++;
-      else if(sh==='S') s++;
+      if(isAppProvider(doc)||isMedicalDirectorDoc(doc))return;
+      if(sh==='R') r++;
+      else if(sh==='S'||sh==='H') s++;
     });
     shortages+=Math.max(0,physicianRounderTargetForDate(ds)-r)+Math.max(0,admitterTargetForDate(ds)-s);
     overages+=Math.max(0,r-physicianRounderTargetForDate(ds))+Math.max(0,s-admitterTargetForDate(ds));
@@ -3027,16 +3034,56 @@ function stressDatePickScore(seed,docId,ds,kind,weekendBias){
   const weekendBoost=isWeekend(d)?Math.max(0,weekendBias)/100:0;
   return _candidateUnit(seed,docId+'|'+ds+'|'+kind)+weekendBoost;
 }
+function stressPickRequestBlocks(year,q,docId,count,kind,weekendBias,seed,blocked=new Set()){
+  if(count<=0)return [];
+  const days=quarterDays(year,q).map(dstrD);
+  const picked=new Set();
+  const minGap=kind==='required'?3:2;
+  const blockLens=kind==='required'?[1,2,2,3]:[1,2,3,4,5];
+  const candidates=days.map((ds,idx)=>{
+    const d=parseD(ds);
+    const weekendNear=[-1,0,1].some(offset=>{
+      const near=days[idx+offset];
+      return near&&isWeekend(parseD(near));
+    });
+    const weekendBoost=weekendNear?Math.max(0,weekendBias)/100:0;
+    return {ds,idx,score:_candidateUnit(seed,docId+'|'+ds+'|'+kind+'|block')+weekendBoost};
+  }).sort((a,b)=>b.score-a.score);
+  function tooClose(idx){
+    for(let i=Math.max(0,idx-minGap);i<=Math.min(days.length-1,idx+minGap);i++){
+      if(picked.has(days[i])||blocked.has(days[i]))return true;
+    }
+    return false;
+  }
+  for(const cand of candidates){
+    if(picked.size>=count)break;
+    if(tooClose(cand.idx))continue;
+    const len=blockLens[Math.floor(_candidateUnit(seed,cand.ds+'|'+docId+'|'+kind+'|len')*blockLens.length)]||1;
+    const direction=_candidateUnit(seed,cand.ds+'|'+docId+'|'+kind+'|dir')<0.5?-1:1;
+    const block=[];
+    for(let step=0;step<len&&block.length<count-picked.size;step++){
+      const idx=cand.idx+(step*direction);
+      if(idx<0||idx>=days.length)continue;
+      const ds=days[idx];
+      if(blocked.has(ds)||picked.has(ds))continue;
+      block.push(ds);
+    }
+    block.sort();
+    block.forEach(ds=>picked.add(ds));
+  }
+  if(picked.size<count){
+    candidates.forEach(cand=>{
+      if(picked.size>=count)return;
+      if(!blocked.has(cand.ds)&&!picked.has(cand.ds))picked.add(cand.ds);
+    });
+  }
+  return [...picked].sort();
+}
 function buildStressRequests(year,q,docs,requiredCount,optionalCount,weekendBias,seed){
-  const dayStrs=quarterDays(year,q).map(dstrD);
   const requests={};
   docs.forEach(doc=>{
-    const picked=new Set();
-    const sortedRequired=dayStrs.slice().sort((a,b)=>stressDatePickScore(seed,doc.id,b,'required',weekendBias)-stressDatePickScore(seed,doc.id,a,'required',weekendBias));
-    const required=sortedRequired.slice(0,requiredCount);
-    required.forEach(ds=>picked.add(ds));
-    const sortedOptional=dayStrs.slice().filter(ds=>!picked.has(ds)).sort((a,b)=>stressDatePickScore(seed,doc.id,b,'optional',weekendBias)-stressDatePickScore(seed,doc.id,a,'optional',weekendBias));
-    const optional=sortedOptional.slice(0,optionalCount);
+    const required=stressPickRequestBlocks(year,q,doc.id,requiredCount,'required',weekendBias,seed);
+    const optional=stressPickRequestBlocks(year,q,doc.id,optionalCount,'optional',weekendBias,seed+7000,new Set(required));
     requests[doc.id]={required,optional};
   });
   return requests;
@@ -3582,16 +3629,20 @@ function _generateQuarter(candidateSeed=0,finalize=true){
         m=superPos>=7-tailDays?'S':'R';
       }
       S.sched[doc.id][ds]=m;
-      if(m==='R') marchR++;
-      if(m==='S'){ marchS++; doc._ptQS=(doc._ptQS||0)+1; }
+      if(!isAppProvider(doc)&&!isMedicalDirectorDoc(doc)&&m==='R') marchR++;
+      if(m==='S'){
+        if(!isAppProvider(doc)&&!isMedicalDirectorDoc(doc)) marchS++;
+        doc._ptQS=(doc._ptQS||0)+1;
+      }
     });
 
-    let needR=physicianRounderTargetForDate(ds)-tahirR-marchR;
+    let needR=physicianRounderTargetForDate(ds)-marchR;
     let needS=admitterTargetForDate(ds)-slavinaS-marchS;
 
     // Deduct strict pre-assigned shifts
     strictAll.forEach(doc=>{
       const sh=S.sched[doc.id]&&S.sched[doc.id][ds];
+      if(isAppProvider(doc)||isMedicalDirectorDoc(doc))return;
       if(sh==='R') needR--;
       else if(sh==='S') needS--;
     });
@@ -4347,12 +4398,12 @@ function renderSchedule(){
     });
     html+='</tr>';
   }
-  coverageRow('ROUNDERS',ds=>physicianRounderTargetForDate(ds)+consultDocs.length,ds=>allDocs.filter(doc=>S.sched[doc.id]&&S.sched[doc.id][ds]==='R').length);
-  coverageRow('SWING',ds=>admitterTargetForDate(ds),ds=>allDocs.filter(doc=>S.sched[doc.id]&&(S.sched[doc.id][ds]==='S'||S.sched[doc.id][ds]==='H')).length);
+  coverageRow('MD/DO ROUND',ds=>physicianRounderTargetForDate(ds),ds=>allDocs.filter(doc=>!isAppProvider(doc)&&!isMedicalDirectorDoc(doc)&&S.sched[doc.id]&&S.sched[doc.id][ds]==='R').length);
+  coverageRow('MD/DO SWING',ds=>admitterTargetForDate(ds),ds=>allDocs.filter(doc=>!isAppProvider(doc)&&!isMedicalDirectorDoc(doc)&&S.sched[doc.id]&&(S.sched[doc.id][ds]==='S'||S.sched[doc.id][ds]==='H')).length);
   coverageRow('NOCTURNISTS',ds=>staffingForDate(ds).nocturnists,ds=>allDocs.filter(doc=>S.sched[doc.id]&&S.sched[doc.id][ds]==='N'&&!isAppProvider(doc)).length);
-  coverageRow('APP ROUND',ds=>staffingForDate(ds).appRounders,ds=>allDocs.filter(doc=>S.sched[doc.id]&&S.sched[doc.id][ds]==='R'&&isAppProvider(doc)).length);
-  coverageRow('APP SWING',ds=>staffingForDate(ds).appAdmitters,ds=>allDocs.filter(doc=>S.sched[doc.id]&&(S.sched[doc.id][ds]==='S'||S.sched[doc.id][ds]==='H')&&isAppProvider(doc)).length);
-  coverageRow('APP NIGHT',0,ds=>allDocs.filter(doc=>S.sched[doc.id]&&S.sched[doc.id][ds]==='N'&&isAppProvider(doc)).length);
+  coverageRow('APP ROUND',ds=>staffingForDate(ds).appRounders,ds=>allDocs.filter(doc=>doc.type!=='prn'&&S.sched[doc.id]&&S.sched[doc.id][ds]==='R'&&isAppProvider(doc)).length);
+  coverageRow('APP SWING',ds=>staffingForDate(ds).appAdmitters,ds=>allDocs.filter(doc=>doc.type!=='prn'&&S.sched[doc.id]&&(S.sched[doc.id][ds]==='S'||S.sched[doc.id][ds]==='H')&&isAppProvider(doc)).length);
+  coverageRow('APP NIGHT',0,ds=>allDocs.filter(doc=>doc.type!=='prn'&&S.sched[doc.id]&&S.sched[doc.id][ds]==='N'&&isAppProvider(doc)).length);
   html+='</tfoot></table>';
 
   document.getElementById('sheet-outer').innerHTML='<div class="sheet-wrap" id="sheet-wrap">'+html+'</div>';
