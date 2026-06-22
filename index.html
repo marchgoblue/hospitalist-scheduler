@@ -865,6 +865,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
       <div class="fg"><label>Nocturnists</label><input type="number" id="c-n" value="1" min="0" onchange="handleShiftCountChange()"></div>
       <div class="fg"><label>APP Rounders</label><input type="number" id="c-app-r" value="0" min="0" onchange="handleShiftCountChange()"></div>
       <div class="fg"><label>APP Admitters</label><input type="number" id="c-app-s" value="0" min="0" onchange="handleShiftCountChange()"></div>
+      <div class="fg"><label>APP Nocturnists</label><input type="number" id="c-app-n" value="0" min="0" onchange="handleShiftCountChange()"></div>
       <div class="fg annual-target"><label>Annual Shifts (1.0 FTE)</label><input type="number" id="c-annual" value="182" onchange="autoSaveCfg()" oninput="autoSaveCfg()"></div>
     </div>
     <div id="shift-param-fields"></div>
@@ -884,6 +885,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
         <div class="row">
           <div class="fg"><label>Extra APP Rounders</label><input type="number" id="tmp-app-r" value="0" min="0" style="width:110px"></div>
           <div class="fg"><label>Extra APP Admitters</label><input type="number" id="tmp-app-s" value="0" min="0" style="width:110px"></div>
+          <div class="fg"><label>Extra APP Nocturnists</label><input type="number" id="tmp-app-n" value="0" min="0" style="width:125px"></div>
           <button class="btn btn-sm" onclick="addStaffingOverride()">Add Temporary Change</button>
         </div>
         <div id="staffing-overrides-list"></div>
@@ -1553,12 +1555,15 @@ function qgIsCrossCoverageTask(raw){return /\b(cross[-\s]*cover|remote|coverage)
 function qgIsMedicalDirectorTask(raw){return /\b(medical\s+director|director|dir\.?)\b/i.test(String(raw||''))&&!qgIsAppTask(raw);}
 function updateShiftCfgFromQgendaTaskMap(map){
   ensureShiftCfg();
-  const labels={rounderLabels:[],swingLabels:[],nocturnistLabels:[],appRounderLabels:[],appAdmitterLabels:[]};
+  const labels={rounderLabels:[],swingLabels:[],nocturnistLabels:[],appRounderLabels:[],appAdmitterLabels:[],appNocturnistLabels:[]};
   Object.entries(map||{}).forEach(([task,code])=>{
     if(!code||code==='IGNORE')return;
     const clean=qgCleanTask(task);
     const isApp=qgIsAppTask(clean);
-    if(code==='N'||qgIsNocturnistTask(clean)) labels.nocturnistLabels.push(clean);
+    if(code==='N'||qgIsNocturnistTask(clean)){
+      if(isApp) labels.appNocturnistLabels.push(clean);
+      else labels.nocturnistLabels.push(clean);
+    }
     else if(code==='S'){
       if(isApp) labels.appAdmitterLabels.push(clean);
       else labels.swingLabels.push(clean);
@@ -1576,6 +1581,7 @@ function updateShiftCfgFromQgendaTaskMap(map){
   if(labels.nocturnistLabels.length) S.cfg.nocturnists=labels.nocturnistLabels.length;
   if(labels.appRounderLabels.length) S.cfg.appRounders=labels.appRounderLabels.length;
   if(labels.appAdmitterLabels.length) S.cfg.appAdmitters=labels.appAdmitterLabels.length;
+  if(labels.appNocturnistLabels.length) S.cfg.appNocturnists=labels.appNocturnistLabels.length;
 }
 
 // Suggest a shift code for a qGenda task. Admin can override in the import modal.
@@ -2481,7 +2487,8 @@ function baseStaffingCounts(){
     S:S.cfg.S||0,
     nocturnists:S.cfg.nocturnists||0,
     appRounders:S.cfg.appRounders||0,
-    appAdmitters:S.cfg.appAdmitters||0
+    appAdmitters:S.cfg.appAdmitters||0,
+    appNocturnists:S.cfg.appNocturnists||0
   };
 }
 function staffingOverridesForDate(ds){
@@ -2496,6 +2503,7 @@ function staffingForDate(ds){
     counts.nocturnists+=(o.nocturnists||0);
     counts.appRounders+=(o.appRounders||0);
     counts.appAdmitters+=(o.appAdmitters||0);
+    counts.appNocturnists+=(o.appNocturnists||0);
   });
   return counts;
 }
@@ -2519,7 +2527,8 @@ function staffingIssueDefinitions(ds,docs=activeDocs(parseInt(ds.slice(0,4),10))
     {key:'S',label:'MD/DO Swing / Admit',target:st.S,count:count(d=>isPhysicianCoverageDoc(d)&&(isSched(d,'S')||isSched(d,'H')))},
     {key:'N',label:'Nocturnists',target:st.nocturnists,count:count(d=>!isAppProvider(d)&&d.type==='nocturnist'&&isSched(d,'N'))},
     {key:'APP_R',label:'APP Rounders',target:st.appRounders,count:count(d=>isAppProvider(d)&&d.type!=='prn'&&isSched(d,'R'))},
-    {key:'APP_S',label:'APP Admitters',target:st.appAdmitters,count:count(d=>isAppProvider(d)&&d.type!=='prn'&&(isSched(d,'S')||isSched(d,'H')))}
+    {key:'APP_S',label:'APP Admitters',target:st.appAdmitters,count:count(d=>isAppProvider(d)&&d.type!=='prn'&&(isSched(d,'S')||isSched(d,'H')))},
+    {key:'APP_N',label:'APP Nocturnists',target:st.appNocturnists,count:count(d=>isAppProvider(d)&&d.type==='nocturnist'&&isSched(d,'N'))}
   ];
   return items.map(x=>({...x,diff:x.count-x.target})).filter(x=>x.diff!==0);
 }
@@ -2534,10 +2543,12 @@ function shiftMatchesStaffingKey(doc,ds,key){
   if(key==='N')return sh==='N'&&!isAppProvider(doc)&&doc.type==='nocturnist';
   if(key==='APP_R')return sh==='R'&&isAppProvider(doc)&&doc.type!=='prn';
   if(key==='APP_S')return (sh==='S'||sh==='H')&&isAppProvider(doc)&&doc.type!=='prn';
+  if(key==='APP_N')return sh==='N'&&isAppProvider(doc)&&doc.type==='nocturnist';
   return false;
 }
 function eligibleDocsForStaffingKey(docs,key){
-  if(key==='N')return docs.filter(d=>d.type==='nocturnist');
+  if(key==='N')return docs.filter(d=>d.type==='nocturnist'&&!isAppProvider(d));
+  if(key==='APP_N')return docs.filter(d=>isAppProvider(d)&&d.type==='nocturnist');
   if(key==='APP_R'||key==='APP_S')return docs.filter(d=>isAppProvider(d)&&d.type!=='prn');
   return docs.filter(d=>!isAppProvider(d)&&d.type!=='prn'&&d.type!=='nocturnist'&&!isMedicalDirectorDoc(d));
 }
@@ -2574,11 +2585,13 @@ function shiftCfgDefaults(){
     nocturnists:1,
     appRounders:0,
     appAdmitters:0,
+    appNocturnists:0,
     rounderLabels:[],
     swingLabels:[],
     nocturnistLabels:[],
     appRounderLabels:[],
     appAdmitterLabels:[],
+    appNocturnistLabels:[],
     staffingOverrides:[]
   };
 }
@@ -2607,6 +2620,7 @@ function syncCfgInputs(){
     ['c-n',S.cfg.nocturnists||0],
     ['c-app-r',S.cfg.appRounders||0],
     ['c-app-s',S.cfg.appAdmitters||0],
+    ['c-app-n',S.cfg.appNocturnists||0],
     ['c-max-req',S.cfg.maxReq],
     ['c-max-required',S.cfg.maxRequired||5],
     ['c-max-wk',S.cfg.maxWeekendReq]
@@ -2620,6 +2634,7 @@ function staffingOverrideText(o){
   if(o.nocturnists)parts.push(`+${o.nocturnists} nocturnist${o.nocturnists===1?'':'s'}`);
   if(o.appRounders)parts.push(`+${o.appRounders} APP rounder${o.appRounders===1?'':'s'}`);
   if(o.appAdmitters)parts.push(`+${o.appAdmitters} APP admitter${o.appAdmitters===1?'':'s'}`);
+  if(o.appNocturnists)parts.push(`+${o.appNocturnists} APP nocturnist${o.appNocturnists===1?'':'s'}`);
   return parts.join(', ')||'No extra staffing';
 }
 function renderStaffingOverrides(){
@@ -2655,14 +2670,15 @@ function addStaffingOverride(){
     S:cfgInputInt('tmp-s',0),
     nocturnists:cfgInputInt('tmp-n',0),
     appRounders:cfgInputInt('tmp-app-r',0),
-    appAdmitters:cfgInputInt('tmp-app-s',0)
+    appAdmitters:cfgInputInt('tmp-app-s',0),
+    appNocturnists:cfgInputInt('tmp-app-n',0)
   };
-  if(!entry.R&&!entry.S&&!entry.nocturnists&&!entry.appRounders&&!entry.appAdmitters){
+  if(!entry.R&&!entry.S&&!entry.nocturnists&&!entry.appRounders&&!entry.appAdmitters&&!entry.appNocturnists){
     toast('Add at least one extra staffing count','error');
     return;
   }
   S.cfg.staffingOverrides.push(entry);
-  ['tmp-r','tmp-s','tmp-n','tmp-app-r','tmp-app-s'].forEach(id=>{const el=document.getElementById(id);if(el)el.value=0;});
+  ['tmp-r','tmp-s','tmp-n','tmp-app-r','tmp-app-s','tmp-app-n'].forEach(id=>{const el=document.getElementById(id);if(el)el.value=0;});
   renderStaffingOverrides();
   renderSchedule();
   renderWeek();
@@ -2687,14 +2703,16 @@ function renderShiftParamFields(){
     swingLabels:cfgInputInt('c-s',S.cfg.S||0),
     nocturnistLabels:cfgInputInt('c-n',S.cfg.nocturnists||0),
     appRounderLabels:cfgInputInt('c-app-r',S.cfg.appRounders||0),
-    appAdmitterLabels:cfgInputInt('c-app-s',S.cfg.appAdmitters||0)
+    appAdmitterLabels:cfgInputInt('c-app-s',S.cfg.appAdmitters||0),
+    appNocturnistLabels:cfgInputInt('c-app-n',S.cfg.appNocturnists||0)
   };
   const meta={
     rounderLabels:['Rounder Names','Rounder'],
     swingLabels:['Admitter / Swing Names','Admitter'],
     nocturnistLabels:['Nocturnist Names','Nocturnist'],
     appRounderLabels:['APP Rounder Names','APP Rounder'],
-    appAdmitterLabels:['APP Admitter Names','APP Admitter']
+    appAdmitterLabels:['APP Admitter Names','APP Admitter'],
+    appNocturnistLabels:['APP Nocturnist Names','APP Nocturnist']
   };
   let html='<div class="shift-param-grid">';
   Object.entries(counts).forEach(([key,count])=>{
@@ -3212,6 +3230,25 @@ function assignStrictBaseline({strictAll,swingOnly,days,startD,candidateSeed}){
   }
   applyPool(mdStrict,mdPhase,mdSwingBlocks);
   applyPool(appStrict,appPhase,appSwingBlocks);
+}
+function assignNocturnistBaseline({nocturnists,days,startD,candidateSeed}){
+  const mdNoct=nocturnists.filter(d=>!isAppProvider(d)).sort(providerSort);
+  const appNoct=nocturnists.filter(isAppProvider).sort(providerSort);
+  function applyNightPool(pool,targetFn,seedOffset){
+    const phaseById=chooseStrictPhases(pool,days,startD,(ds)=>Math.max(0,targetFn(staffingForDate(ds))),candidateSeed+seedOffset);
+    pool.forEach(doc=>{
+      const phase=phaseById[doc.id];
+      if(phase===undefined)return;
+      days.forEach((d,idx)=>{
+        const ds=dstrD(d);
+        if(!S.sched[doc.id])S.sched[doc.id]={};
+        if(doc.startDate&&doc.startDate>ds){S.sched[doc.id][ds]='OFF';return;}
+        S.sched[doc.id][ds]=strictIsWorkingOffset(idx,phase)?'N':'OFF';
+      });
+    });
+  }
+  applyNightPool(mdNoct,st=>st.nocturnists||0,2000);
+  applyNightPool(appNoct,st=>st.appNocturnists||0,3000);
 }
 
 function nextStressQuarter(){
@@ -3767,6 +3804,7 @@ function _generateQuarter(candidateSeed=0,finalize=true){
   // The solver chooses 7-on/7-off phases using the 14-day prior-quarter tail
   // as a continuity constraint, then selects full 7-day work blocks for swing.
   assignStrictBaseline({strictAll,swingOnly,days,startD,candidateSeed});
+  assignNocturnistBaseline({nocturnists,days,startD,candidateSeed});
 
     // ──────── DAILY LOOP ────────
   // Reset per-quarter S counters for part-time providers
@@ -3797,16 +3835,6 @@ function _generateQuarter(candidateSeed=0,finalize=true){
         }
       });
       continue; // don't generate for this day
-    }
-
-    const dayStaffing=staffingForDate(ds);
-    const availableNocturnists=nocturnists
-      .filter(doc=>!doc.startDate||doc.startDate<=ds)
-      .sort((a,b)=>providerSort(a,b));
-    nocturnists.forEach(doc=>{S.sched[doc.id][ds]='OFF';});
-    for(let ni=0;ni<Math.min(dayStaffing.nocturnists,availableNocturnists.length);ni++){
-      const doc=availableNocturnists[(di+ni)%availableNocturnists.length];
-      S.sched[doc.id][ds]='N';
     }
 
     let tahirR=0;
@@ -4491,9 +4519,10 @@ function renderSchedule(){
     }
     if(sh==='X') return 'Cross Coverage';
     if(sh==='N'){
-      const docsForShift=allDocs.filter(d=>S.sched[d.id]&&S.sched[d.id][ds]==='N').sort(providerSort);
+      const app=isAppProvider(doc);
+      const docsForShift=allDocs.filter(d=>S.sched[d.id]&&S.sched[d.id][ds]==='N'&&isAppProvider(d)===app).sort(providerSort);
       const idx=Math.max(0,docsForShift.findIndex(d=>d.id===doc.id));
-      return shiftLabelFor('nocturnistLabels',idx,'Nocturnist');
+      return app?shiftLabelFor('appNocturnistLabels',idx,'APP Nocturnist'):shiftLabelFor('nocturnistLabels',idx,'Nocturnist');
     }
     if(sh==='S'||sh==='H'){
       const app=isAppProvider(doc);
@@ -4620,7 +4649,7 @@ function renderSchedule(){
   coverageRow('NOCTURNISTS',ds=>staffingForDate(ds).nocturnists,ds=>allDocs.filter(doc=>S.sched[doc.id]&&S.sched[doc.id][ds]==='N'&&!isAppProvider(doc)).length);
   coverageRow('APP ROUND',ds=>staffingForDate(ds).appRounders,ds=>allDocs.filter(doc=>doc.type!=='prn'&&S.sched[doc.id]&&S.sched[doc.id][ds]==='R'&&isAppProvider(doc)).length);
   coverageRow('APP SWING',ds=>staffingForDate(ds).appAdmitters,ds=>allDocs.filter(doc=>doc.type!=='prn'&&S.sched[doc.id]&&(S.sched[doc.id][ds]==='S'||S.sched[doc.id][ds]==='H')&&isAppProvider(doc)).length);
-  coverageRow('APP NIGHT',0,ds=>allDocs.filter(doc=>doc.type!=='prn'&&S.sched[doc.id]&&S.sched[doc.id][ds]==='N'&&isAppProvider(doc)).length);
+  coverageRow('APP NIGHT',ds=>staffingForDate(ds).appNocturnists,ds=>allDocs.filter(doc=>doc.type==='nocturnist'&&S.sched[doc.id]&&S.sched[doc.id][ds]==='N'&&isAppProvider(doc)).length);
   html+='</tfoot></table>';
 
   document.getElementById('sheet-outer').innerHTML='<div class="sheet-wrap" id="sheet-wrap">'+html+'</div>';
@@ -4830,7 +4859,9 @@ function renderWeek(){
       .sort(providerSort);
     const appSs=docs.filter(doc=>S.sched[doc.id]&&(S.sched[doc.id][ds]==='S'||S.sched[doc.id][ds]==='H')&&isAppProvider(doc))
       .sort(providerSort);
-    const ns=docs.filter(doc=>S.sched[doc.id]&&S.sched[doc.id][ds]==='N')
+    const ns=docs.filter(doc=>S.sched[doc.id]&&S.sched[doc.id][ds]==='N'&&!isAppProvider(doc))
+      .sort(providerSort);
+    const appNs=docs.filter(doc=>S.sched[doc.id]&&S.sched[doc.id][ds]==='N'&&isAppProvider(doc))
       .sort(providerSort);
     const renderTeam=team=>team==='green'||team==='white'
       ?`<span class="team-num ${team}">${teamLabel(team)}</span> `
@@ -4850,6 +4881,8 @@ function renderWeek(){
       ${appSs.map((doc,idx)=>renderWeekShift(shiftLabelFor('appAdmitterLabels',idx,'APP Admitter'),doc)).join('')||'<div class="wd-name tx-mu">—</div>'}
       <div class="wd-section-tit" style="color:#3a3a6e;margin-top:8px">Nocturnists (${ns.length}/${staffing.nocturnists})</div>
       ${ns.map((doc,idx)=>renderWeekShift(shiftLabelFor('nocturnistLabels',idx,'Nocturnist'),doc)).join('')||'<div class="wd-name tx-mu">—</div>'}
+      <div class="wd-section-tit" style="color:#3a3a6e;margin-top:8px">APP Nocturnists (${appNs.length}/${staffing.appNocturnists})</div>
+      ${appNs.map((doc,idx)=>renderWeekShift(shiftLabelFor('appNocturnistLabels',idx,'APP Nocturnist'),doc)).join('')||'<div class="wd-name tx-mu">—</div>'}
     </div>`;
   }
   html+='</div>';
@@ -6169,14 +6202,15 @@ function saveCfg(opts={}){
   S.cfg.nocturnists=cfgInputInt('c-n',S.cfg.nocturnists||0);
   S.cfg.appRounders=cfgInputInt('c-app-r',S.cfg.appRounders||0);
   S.cfg.appAdmitters=cfgInputInt('c-app-s',S.cfg.appAdmitters||0);
-  const labels={rounderLabels:[],swingLabels:[],nocturnistLabels:[],appRounderLabels:[],appAdmitterLabels:[]};
+  S.cfg.appNocturnists=cfgInputInt('c-app-n',S.cfg.appNocturnists||0);
+  const labels={rounderLabels:[],swingLabels:[],nocturnistLabels:[],appRounderLabels:[],appAdmitterLabels:[],appNocturnistLabels:[]};
   document.querySelectorAll('.shift-label-input').forEach(inp=>{
     const key=inp.getAttribute('data-key');
     const idx=parseInt(inp.getAttribute('data-idx'));
     if(!labels[key])return;
     labels[key][idx]=(inp.value||'').trim();
   });
-  const prefixes={rounderLabels:'Rounder',swingLabels:'Admitter',nocturnistLabels:'Nocturnist',appRounderLabels:'APP Rounder',appAdmitterLabels:'APP Admitter'};
+  const prefixes={rounderLabels:'Rounder',swingLabels:'Admitter',nocturnistLabels:'Nocturnist',appRounderLabels:'APP Rounder',appAdmitterLabels:'APP Admitter',appNocturnistLabels:'APP Nocturnist'};
   Object.keys(labels).forEach(key=>{
     S.cfg[key]=labels[key].map((v,i)=>v||`${prefixes[key]} ${i+1}`).filter(Boolean);
   });
