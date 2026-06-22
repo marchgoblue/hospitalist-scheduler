@@ -227,6 +227,9 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
   font-family:'Source Sans 3',sans-serif;font-size:11px;text-transform:uppercase;
   transform:translateZ(0);
 }
+.name-resizer{position:absolute;top:0;right:-4px;width:8px;height:100%;cursor:col-resize;z-index:20}
+.name-resizer:after{content:"";position:absolute;top:4px;bottom:4px;left:3px;width:2px;background:#b8c2cc;border-radius:2px}
+.name-resizer:hover:after{background:#1b4d8f}
 .sheet thead th.month-sep{background:#dfe6ec;border-left:2px solid #999}
 .sheet thead th.weekend{background:#e8e8e8;color:var(--ink3)}
 .sheet thead th.today{background:#f9e08e;color:var(--ink);font-weight:700}
@@ -2513,6 +2516,36 @@ function scheduleStyleBadgeHtml(d){
 function isVariableAdjustmentDoc(d){
   return !!d&&!isMedicalDirectorDoc(d)&&!isAppProvider(d)&&d.type==='standard'&&!isStrictStyle(d);
 }
+function getSavedNameColWidth(){
+  const v=parseInt(localStorage.getItem('hsqNameColWidth')||'',10);
+  return Number.isFinite(v)?Math.max(180,Math.min(460,v)):null;
+}
+function saveNameColWidth(width){
+  const w=Math.max(180,Math.min(460,Math.round(width)));
+  localStorage.setItem('hsqNameColWidth',String(w));
+  document.querySelectorAll('.sheet').forEach(el=>el.style.setProperty('--name-col-w',w+'px'));
+}
+function startNameColResize(ev){
+  ev.preventDefault();
+  ev.stopPropagation();
+  const table=ev.target.closest('.sheet');
+  const current=parseInt((table&&table.style.getPropertyValue('--name-col-w'))||'',10)||getSavedNameColWidth()||220;
+  const startX=ev.clientX;
+  function onMove(e){saveNameColWidth(current+(e.clientX-startX));}
+  function onUp(){
+    document.removeEventListener('mousemove',onMove);
+    document.removeEventListener('mouseup',onUp);
+    document.body.style.cursor='';
+    document.body.style.userSelect='';
+  }
+  document.body.style.cursor='col-resize';
+  document.body.style.userSelect='none';
+  document.addEventListener('mousemove',onMove);
+  document.addEventListener('mouseup',onUp);
+}
+document.addEventListener('mousedown',ev=>{
+  if(ev.target&&ev.target.classList&&ev.target.classList.contains('name-resizer'))startNameColResize(ev);
+});
 function providerExtraTitle(d){return d&&d.title&&d.title.toLowerCase()!=='medical director'?d.title:''}
 function normalizeRole(role){return role==='NP'?'APP':(role==='MD'?'MD/DO':(role||'MD/DO'))}
 function providerRoleLabel(d){return normalizeRole(d&&d.role)}
@@ -4670,7 +4703,8 @@ function renderSchedule(){
   const needsMedBadge=fConsult.length>0;
   const badgeRoom=(needsSchedBadge||needsMedBadge)?42:0;
   const totalsRoom=98;
-  const nameColWidth=Math.max(220,Math.min(430,(longestName*7)+badgeRoom+totalsRoom+34));
+  const defaultNameColWidth=Math.max(200,Math.min(360,(longestName*6.2)+badgeRoom+totalsRoom+24));
+  const nameColWidth=getSavedNameColWidth()||defaultNameColWidth;
 
   // Month cells
   let currentMonth=-1; const monthCells=[];
@@ -4686,7 +4720,7 @@ function renderSchedule(){
   // ── HEADER: single name-col th with Q∑ label embedded ──
   let html=`<table class="sheet" style="--name-col-w:${nameColWidth}px"><thead><tr>`;
   // Name column header — includes Q∑ label in the bottom-right corner
-  html+='<th class="name-col" rowspan="2"><div style="display:flex;justify-content:space-between;align-items:flex-end"><span>PHYSICIAN</span><span style="font-size:9px;font-weight:700;color:#1b4d8f;background:#dde9f7;padding:1px 4px;border-radius:2px;letter-spacing:.3px">Q∑</span></div></th>';
+  html+='<th class="name-col" rowspan="2"><div style="display:flex;justify-content:space-between;align-items:flex-end"><span>PHYSICIAN</span><span style="font-size:9px;font-weight:700;color:#1b4d8f;background:#dde9f7;padding:1px 4px;border-radius:2px;letter-spacing:.3px">Q∑</span></div><span class="name-resizer" title="Drag to resize name column"></span></th>';
   monthCells.forEach((m,mi)=>{
     html+=`<th colspan="${m.span}" class="${mi>0?'month-sep':''}" style="background:#dfe6ec;font-size:11px;text-transform:uppercase">${monN(m.month)} ${year}</th>`;
   });
