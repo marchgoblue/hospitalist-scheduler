@@ -3663,15 +3663,17 @@ async function runDemoMode(){
     const qKey=`${inputs.year}-${inputs.q}`;
     S.requests[qKey]=buildStressRequests(inputs.year,inputs.q,mix.variableDocs,inputs.requiredCount,inputs.optionalCount,inputs.weekendBias,9900);
     let best=null;
-    const candidateCount=12;
+    const candidateCount=48;
     for(let seed=0;seed<candidateCount;seed++){
       _generateQuarter(9900+seed,false);
       const score=_scoreScheduleCandidate(inputs.year,inputs.q);
       if(!best||score<best.score){
         best={score,seed,sched:JSON.parse(JSON.stringify(S.sched)),teams:JSON.parse(JSON.stringify(S.teams))};
       }
-      if(status)status.innerHTML=`Testing demo candidate ${seed+1} of ${candidateCount}...`;
-      await generationSleep();
+      if(seed===0||seed%2===1||seed===candidateCount-1){
+        if(status)status.innerHTML=`Testing demo candidate ${seed+1} of ${candidateCount}...`;
+        await generationSleep();
+      }
     }
     S.sched=best.sched;
     S.teams=best.teams;
