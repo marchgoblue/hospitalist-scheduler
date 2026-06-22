@@ -250,6 +250,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
 .consult-hdr{background:#e8f5e9!important;color:#0a7044;border-top:2px solid #0a7044}
 .rounds-hdr{background:#dde9f7!important;color:#1b4d8f;border-top:2px solid #1b4d8f}
 .noct-hdr{background:#1a1a2e!important;color:#c9b8f5;border-top:2px solid #3a3a6e}
+.app-hdr{background:#eef7f4!important;color:#0f766e;border-top:2px solid #0f766e}
 .prn-hdr{background:#f5f0ff!important;color:#6b21a8;border-top:2px solid #9333ea;font-style:italic}
 
 /* Row / column highlights */
@@ -4457,15 +4458,17 @@ function renderSchedule(){
     return;
   }
   const consultDocs=allDocs.filter(isMedicalDirectorDoc).sort(providerSort);
-  const nocturnistDocs=allDocs.filter(d=>d.type==='nocturnist').sort(providerSort);
+  const nocturnistDocs=allDocs.filter(d=>d.type==='nocturnist'&&!isAppProvider(d)).sort(providerSort);
+  const appDocs=allDocs.filter(d=>!isMedicalDirectorDoc(d)&&d.type!=='prn'&&isAppProvider(d)).sort(providerSort);
   const prnDocs=allDocs.filter(d=>d.type==='prn').sort(providerSort);
-  const rotationDocs=allDocs.filter(d=>!isMedicalDirectorDoc(d)&&d.type!=='nocturnist'&&d.type!=='prn')
+  const rotationDocs=allDocs.filter(d=>!isMedicalDirectorDoc(d)&&d.type!=='nocturnist'&&d.type!=='prn'&&!isAppProvider(d))
     .sort(providerSort);
   const fConsult=filterText?consultDocs.filter(d=>dname(d).toLowerCase().includes(filterText)):consultDocs;
   const fRotation=filterText?rotationDocs.filter(d=>dname(d).toLowerCase().includes(filterText)):rotationDocs;
   const fNocturnist=filterText?nocturnistDocs.filter(d=>dname(d).toLowerCase().includes(filterText)):nocturnistDocs;
+  const fApp=filterText?appDocs.filter(d=>dname(d).toLowerCase().includes(filterText)):appDocs;
   const fPrn=filterText?prnDocs.filter(d=>dname(d).toLowerCase().includes(filterText)):prnDocs;
-  if(!fConsult.length&&!fRotation.length&&!fNocturnist.length&&!fPrn.length){
+  if(!fConsult.length&&!fRotation.length&&!fNocturnist.length&&!fApp.length&&!fPrn.length){
     document.getElementById('sheet-outer').innerHTML='<div class="sheet-wrap" id="sheet-wrap"><div style="padding:40px;text-align:center;color:var(--ink3)">No providers match filter.</div></div>';
     return;
   }
@@ -4622,6 +4625,10 @@ function renderSchedule(){
   if(fNocturnist.length){
     html+=`<tr><td class="section-hdr noct-hdr" colspan="${allCols}">▶ Nocturnists</td></tr>`;
     fNocturnist.forEach(d=>html+=buildRow(d,false));
+  }
+  if(fApp.length){
+    html+=`<tr><td class="section-hdr app-hdr" colspan="${allCols}">▶ APP Providers</td></tr>`;
+    fApp.forEach(d=>html+=buildRow(d,false));
   }
   if(fPrn.length){
     html+=`<tr><td class="section-hdr prn-hdr" colspan="${allCols}">▶ PRN / Per Diem (not scheduled — shifts filled manually)</td></tr>`;
