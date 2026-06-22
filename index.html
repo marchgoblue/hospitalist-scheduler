@@ -1175,6 +1175,7 @@ let S = {
   hols: {},                // {year: {docId: {tg:bool, xm:bool}}}
   announcement: '',        // admin message displayed in physician portal
   qgendaShiftMap: {},      // {qGenda task label: 'R'|'S'|'N'|'IGNORE'}
+  staffingDismissals: {},  // {dateStr: true} admin-hidden staffing issue flags
   cfg: {annual:182, R:13, S:3, maxReq:15, maxWeekendReq:6, maxRequired:5},
   ui: {
     role:'admin',          // 'admin' or 'phys'
@@ -1306,6 +1307,7 @@ function applyMigrations(){
   if(!S.teams)S.teams={};if(!S.announcement)S.announcement='';
   if(!S.qgendaShiftMap)S.qgendaShiftMap={};
   if(!S.qgendaShiftDetails)S.qgendaShiftDetails={};
+  if(!S.staffingDismissals)S.staffingDismissals={};
   ensureShiftCfg();
   if(!S.ui)S.ui={};
   if(S.ui.currentPhysId&&!S.docs.find(d=>d.id===S.ui.currentPhysId))S.ui.currentPhysId=null;
@@ -2353,6 +2355,7 @@ function confirmClearSchedule(){
       S.bonusShifts={};
       S.baseSchedule={};
       S.qgendaShiftDetails={};
+      S.staffingDismissals={};
       S.cycleStarts={};
       S.hols={};
       S.teams={};
@@ -2376,6 +2379,7 @@ function freshGroupState(){
     announcement: '',
     qgendaShiftMap: {},
     qgendaShiftDetails: {},
+    staffingDismissals: {},
     cfg: {...{annual:182, R:13, S:3, maxReq:15, maxWeekendReq:6, maxRequired:5}, ...shiftCfgDefaults()},
     ui: {
       role:'admin',
@@ -2502,6 +2506,10 @@ function staffingIssueDefinitions(ds,docs=activeDocs(parseInt(ds.slice(0,4),10))
     {key:'APP_S',label:'APP Admitters',target:st.appAdmitters,count:count(d=>isAppProvider(d)&&d.type!=='prn'&&(isSched(d,'S')||isSched(d,'H')))}
   ];
   return items.map(x=>({...x,diff:x.count-x.target})).filter(x=>x.diff!==0);
+}
+function isStaffingDismissed(ds){return !!(S.staffingDismissals&&S.staffingDismissals[ds])}
+function visibleStaffingIssueDefinitions(ds,docs=activeDocs(parseInt(ds.slice(0,4),10))){
+  return isStaffingDismissed(ds)?[]:staffingIssueDefinitions(ds,docs);
 }
 function shiftMatchesStaffingKey(doc,ds,key){
   const sh=S.sched[doc.id]&&S.sched[doc.id][ds];
@@ -4249,7 +4257,7 @@ function renderSchedule(){
     const cls=[];
     if(isWeekend(d))cls.push('weekend');if(ds===today)cls.push('today');
     if(isHol(ds,year))cls.push('holiday');if(i>0&&d.getDate()===1)cls.push('month-sep');
-    const staffingIssues=staffingIssueDefinitions(ds,allDocs);
+    const staffingIssues=visibleStaffingIssueDefinitions(ds,allDocs);
     if(staffingIssues.length)cls.push('staffing-issue');
     if(selCols.has(ds))cls.push('col-hl');
     const issueTip=staffingIssues.length?'\nStaffing: '+staffingIssues.map(x=>`${x.label} ${x.count}/${x.target}`).join(' · '):'';
@@ -4300,7 +4308,7 @@ function renderSchedule(){
   function staffingFocusMatchesDoc(doc){
     const focus=S.ui.staffingFocus;
     if(!focus||!focus.dateStr||!focus.key)return false;
-    const issue=staffingIssueDefinitions(focus.dateStr,allDocs).find(x=>x.key===focus.key);
+    const issue=visibleStaffingIssueDefinitions(focus.dateStr,allDocs).find(x=>x.key===focus.key);
     if(!issue)return false;
     const eligible=eligibleDocsForStaffingKey(allDocs,focus.key);
     if(!eligible.some(d=>d.id===doc.id))return false;
@@ -4457,11 +4465,14 @@ function handleDateHeaderClick(ds,ev){
   S.ui.selectedCols.clear();
   S.ui.selectedCols.add(ds);
   S.ui.staffingFocus=null;
-  const issues=staffingIssueDefinitions(ds,activeDocs(parseInt(ds.slice(0,4),10)));
-  if(!issues.length||!isAdmin()){closeStaffingPopover();renderSchedule();return;}
+  const allIssues=staffingIssueDefinitions(ds,activeDocs(parseInt(ds.slice(0,4),10)));
+  const dismissed=isStaffingDismissed(ds);
+  const issues=dismissed?[]:allIssues;
+  if((!allIssues.length&&!dismissed)||!isAdmin()){closeStaffingPopover();renderSchedule();return;}
   const pop=document.getElementById('staffing-popover');
   if(pop){
     pop.innerHTML=`<div class="staffing-popover-title">${qgEsc(ds)} staffing</div>
+    ${dismissed?'<div class="tx-xs tx-mu" style="margin-bottom:8px;line-height:1.35">This date is hidden from red staffing flags.</div>':''}
     <div class="staffing-popover-actions">
       ${issues.map(x=>{
         const direction=x.diff<0?'short':'over';
@@ -4472,7 +4483,12 @@ function handleDateHeaderClick(ds,ev){
         </button>`;
       }).join('')}
     </div>
-    <div class="tx-xs tx-mu" style="margin-top:8px;line-height:1.35">Choose a problem to outline candidate rows.</div>`;
+    <div class="staffing-popover-actions" style="margin-top:8px">
+      ${dismissed
+        ?`<button class="btn" onclick="restoreStaffingFlag('${ds}')">Show red flag again</button>`
+        :`<button class="btn" onclick="dismissStaffingFlag('${ds}')">Clear red flag for this date</button>`}
+    </div>
+    <div class="tx-xs tx-mu" style="margin-top:8px;line-height:1.35">${dismissed?'This does not change the schedule.':'Choose a problem to outline candidate rows, or clear the red flag if this day is accepted.'}</div>`;
   }
   renderSchedule();
   requestAnimationFrame(()=>{
@@ -4487,6 +4503,24 @@ function selectStaffingIssue(ds,key){
   S.ui.selectedCols.add(ds);
   closeStaffingPopover();
   renderSchedule();
+}
+function dismissStaffingFlag(ds){
+  if(!isAdmin()){toast('Admin only','error');return;}
+  if(!S.staffingDismissals)S.staffingDismissals={};
+  S.staffingDismissals[ds]=true;
+  S.ui.staffingFocus=null;
+  closeStaffingPopover();
+  renderSchedule();
+  saveData(true);
+  toast('Staffing flag hidden for '+ds,'success');
+}
+function restoreStaffingFlag(ds){
+  if(!isAdmin()){toast('Admin only','error');return;}
+  if(S.staffingDismissals)delete S.staffingDismissals[ds];
+  closeStaffingPopover();
+  renderSchedule();
+  saveData(true);
+  toast('Staffing flag restored for '+ds,'success');
 }
 
 // ── Fill mode (Fill R / Fill S / Fill OFF buttons) ─────
