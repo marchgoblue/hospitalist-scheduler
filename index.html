@@ -302,6 +302,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
 .sched-badge-7s{background:#e8f5e9;color:#0a7044;border-color:#a8d8b8}
 .sched-badge-2s{background:#dde9f7;color:#1b4d8f;border-color:#b8d4f0}
 .sched-badge-vari{background:#fff5dc;color:#806000;border-color:#e0c890}
+.sched-badge-swing{background:var(--S);color:var(--S-tx);border-color:#f0d49a}
 .sched-badge-other{background:#f5f5f5;color:#666;border-color:#ddd}
 /* Remove old qtot-hdr/qtot-cell rules */
 .qtot-hdr{display:none}
@@ -2502,6 +2503,7 @@ function providerTypeLabel(d){
   return 'Standard';
 }
 function scheduleStyleShortLabel(d){
+  if(d&&d.type==='swing-only')return {text:'SWING',cls:'sched-badge-swing',title:'Swing-only provider'};
   const style=(d&&d.preferences&&d.preferences.scheduleStyle)||'variable';
   if(style==='strict-swing-block')return {text:'7S',cls:'sched-badge-7s',title:'Strict 7-on/7-off with 7-day swing blocks'};
   if(style==='strict')return {text:'2S',cls:'sched-badge-2s',title:'Strict 7-on/7-off with 2-day swing tail'};
@@ -2512,6 +2514,13 @@ function scheduleStyleBadgeHtml(d){
   if(isMedicalDirectorDoc(d)||isAppProvider(d)||d.type==='prn'||d.type==='nocturnist')return '';
   const b=scheduleStyleShortLabel(d);
   return `<span class="sched-badge ${b.cls}" title="${qgEsc(b.title)}">${b.text}</span>`;
+}
+function rounderTeamLabel(team,isApp=false){
+  if(team===undefined||team===null||team==='')return '';
+  if(team==='green'||team==='white')return teamLabel(team);
+  const idx=parseInt(team,10);
+  if(Number.isFinite(idx)&&idx>0)return shiftLabelFor(isApp?'appRounderLabels':'rounderLabels',idx-1,isApp?'APP Rounder':'Rounder');
+  return String(team);
 }
 function isVariableAdjustmentDoc(d){
   return !!d&&!isMedicalDirectorDoc(d)&&!isAppProvider(d)&&d.type==='standard'&&!isStrictStyle(d);
@@ -4386,46 +4395,71 @@ function _finalizeGeneratedQuarter(year,q,best){
   setTimeout(recheckFairness, 100);  // auto-check fairness after generation
 }
 
-// Assign team labels to R-shift docs for a given day.
-// Strict 7-on/7-off providers keep their roster Green/White team;
-// variable providers retain the legacy numeric team fallback.
+// Assign persistent rounding team labels.
+// Continuing R stretches keep their team. New R stretches pick up a team
+// from a provider who just ended R, favoring the least-recent handoff pair.
 function assignTeamNumbers(allActive,ds,state,di){
   if(!S.teams) S.teams={};
-  const rDocs=allActive.filter(d=>S.sched[d.id]&&S.sched[d.id][ds]==='R');
+  if(!S.teamHandoffs) S.teamHandoffs={};
+  const rDocs=allActive.filter(d=>S.sched[d.id]&&S.sched[d.id][ds]==='R').sort(providerSort);
   if(rDocs.length===0) return;
-  rDocs.forEach(doc=>{
-    if(isStrictStyle(doc)&&doc.teamColor){
-      if(!S.teams[doc.id]) S.teams[doc.id]={};
-      S.teams[doc.id][ds]=doc.teamColor;
-    }
-  });
-  const prevDS=di>0?dstrD(addD(parseD(ds),-1)):null;
+  const prevDS=dstrD(addD(parseD(ds),-1));
   const takenTeams=new Set();
-  // First pass: continue existing R blocks (keep same team)
+  const endedByTeam={};
+  const teamKey=(doc,team)=>(isAppProvider(doc)?'APP:':'MD:')+String(team);
+  function poolSizeForDoc(doc){
+    const st=staffingForDate(ds);
+    const configured=isAppProvider(doc)?(st.appRounders||0):physicianRounderTargetForDate(ds);
+    return Math.max(configured,rDocs.filter(d=>isAppProvider(d)===isAppProvider(doc)).length,1);
+  }
+  function isWorkingR(doc,dateStr){return !!(S.sched[doc.id]&&S.sched[doc.id][dateStr]==='R');}
+  allActive.forEach(doc=>{
+    if(!isWorkingR(doc,prevDS)||isWorkingR(doc,ds))return;
+    const team=S.teams[doc.id]&&S.teams[doc.id][prevDS];
+    if(team!==undefined&&team!==null&&team!=='')endedByTeam[teamKey(doc,team)]={team,fromDoc:doc};
+  });
+
+  // First pass: continue existing R blocks.
   rDocs.forEach(doc=>{
-    if(isStrictStyle(doc)&&doc.teamColor) return;
-    if(prevDS){
-      const yest=S.sched[doc.id][prevDS];
-      const yestTeam=S.teams[doc.id]&&S.teams[doc.id][prevDS];
-      if(yest==='R'&&yestTeam){
-        if(!S.teams[doc.id]) S.teams[doc.id]={};
-        S.teams[doc.id][ds]=yestTeam;
-        takenTeams.add(yestTeam);
-      }
+    const yestTeam=S.teams[doc.id]&&S.teams[doc.id][prevDS];
+    if(isWorkingR(doc,prevDS)&&yestTeam){
+      if(takenTeams.has(teamKey(doc,yestTeam)))return;
+      if(!S.teams[doc.id]) S.teams[doc.id]={};
+      S.teams[doc.id][ds]=yestTeam;
+      takenTeams.add(teamKey(doc,yestTeam));
     }
   });
-  // Second pass: new block starts — avoid recent teams
+
+  function chooseTeamForStarter(doc){
+    const isApp=isAppProvider(doc);
+    const candidates=Object.values(endedByTeam)
+      .filter(x=>!takenTeams.has(teamKey(doc,x.team))&&isAppProvider(x.fromDoc)===isApp);
+    if(candidates.length){
+      const history=S.teamHandoffs[doc.id]||{};
+      candidates.sort((a,b)=>{
+        const ah=history[a.fromDoc.id]||'';
+        const bh=history[b.fromDoc.id]||'';
+        if(ah!==bh)return ah.localeCompare(bh);
+        return providerSort(a.fromDoc,b.fromDoc);
+      });
+      const picked=candidates[0];
+      S.teamHandoffs[doc.id]={...(S.teamHandoffs[doc.id]||{}),[picked.fromDoc.id]:ds};
+      return picked.team;
+    }
+    const recent=new Set((state[doc.id]&&state[doc.id].teamHistory||[]).slice(-3).map(String));
+    const size=poolSizeForDoc(doc);
+    for(let t=1;t<=size;t++){if(!takenTeams.has(teamKey(doc,t))&&!recent.has(String(t)))return t;}
+    for(let t=1;t<=size;t++){if(!takenTeams.has(teamKey(doc,t)))return t;}
+    return size;
+  }
+
+  // Second pass: new block starts.
   rDocs.forEach(doc=>{
-    if(isStrictStyle(doc)&&doc.teamColor) return;
     if(S.teams[doc.id]&&S.teams[doc.id][ds]) return;
-    const recent=new Set((state[doc.id]&&state[doc.id].teamHistory||[]).slice(-3));
-    let chosen=null;
-    for(let t=1;t<=13;t++){if(!takenTeams.has(t)&&!recent.has(t)){chosen=t;break;}}
-    if(!chosen){for(let t=1;t<=13;t++){if(!takenTeams.has(t)){chosen=t;break;}}}
-    if(!chosen) chosen=13;
+    const chosen=chooseTeamForStarter(doc);
     if(!S.teams[doc.id]) S.teams[doc.id]={};
     S.teams[doc.id][ds]=chosen;
-    takenTeams.add(chosen);
+    takenTeams.add(teamKey(doc,chosen));
     if(state[doc.id]){
       state[doc.id].teamHistory.push(chosen);
       if(state[doc.id].teamHistory.length>4) state[doc.id].teamHistory.shift();
@@ -4810,10 +4844,9 @@ function renderSchedule(){
       const docsForShift=allDocs.filter(d=>S.sched[d.id]&&S.sched[d.id][ds]==='R'&&isAppProvider(d)===app)
         .sort((a,b)=>teamSortValue(a)-teamSortValue(b)||providerSort(a,b));
       const idx=Math.max(0,docsForShift.findIndex(d=>d.id===doc.id));
-      const label=app?shiftLabelFor('appRounderLabels',idx,'APP Rounder'):shiftLabelFor('rounderLabels',idx,'Rounder');
       const team=S.teams&&S.teams[doc.id]&&S.teams[doc.id][ds];
-      const teamText=team==='green'||team==='white'?`${teamLabel(team)} team`:team?`Team ${team}`:'';
-      return teamText?`${teamText} · ${label}`:label;
+      const label=team?rounderTeamLabel(team,app):(app?shiftLabelFor('appRounderLabels',idx,'APP Rounder'):shiftLabelFor('rounderLabels',idx,'Rounder'));
+      return label;
     }
     return sh;
   }
@@ -5152,18 +5185,18 @@ function renderWeek(){
       .sort(providerSort);
     const appNxs=docs.filter(doc=>S.sched[doc.id]&&S.sched[doc.id][ds]==='APP_NX'&&isAppProvider(doc))
       .sort(providerSort);
-    const renderTeam=team=>team==='green'||team==='white'
+    const renderTeam=(team)=>team==='green'||team==='white'
       ?`<span class="team-num ${team}">${teamLabel(team)}</span> `
       :'';
-    const renderWeekShift=(label,doc,team='')=>`<div class="wd-name"><span class="wd-shift">${renderTeam(team)}${label}</span><span class="wd-provider">${dname(doc)}</span></div>`;
+    const renderWeekShift=(label,doc,team='')=>`<div class="wd-name"><span class="wd-shift">${renderTeam(team,isAppProvider(doc))}${label}</span><span class="wd-provider">${dname(doc)}</span></div>`;
     html+=`<div class="week-day"${isH?' style="background:#f8f3fe"':''}>
       <div class="wd-hdr">${dayN(d)}</div>
       <div class="wd-date${isT?' today':''}">${d.getDate()}</div>
       ${isH?'<div style="font-size:10px;color:var(--H-tx);font-weight:600;margin-bottom:4px">Holiday</div>':''}
       <div class="wd-section-tit r">Physician Rounders (${rs.length}/${staffing.R})</div>
-      ${rs.map(({doc,team},idx)=>renderWeekShift(shiftLabelFor('rounderLabels',idx,'Rounder'),doc,team)).join('')||'<div class="wd-name tx-mu">—</div>'}
+      ${rs.map(({doc,team},idx)=>renderWeekShift(team?rounderTeamLabel(team,false):shiftLabelFor('rounderLabels',idx,'Rounder'),doc,team)).join('')||'<div class="wd-name tx-mu">—</div>'}
       <div class="wd-section-tit r">APP Rounders (${appRs.length}/${staffing.appRounders})</div>
-      ${appRs.map(({doc,team},idx)=>renderWeekShift(shiftLabelFor('appRounderLabels',idx,'APP Rounder'),doc,team)).join('')||'<div class="wd-name tx-mu">—</div>'}
+      ${appRs.map(({doc,team},idx)=>renderWeekShift(team?rounderTeamLabel(team,true):shiftLabelFor('appRounderLabels',idx,'APP Rounder'),doc,team)).join('')||'<div class="wd-name tx-mu">—</div>'}
       <div class="wd-section-tit s">Admitters / Swing (${ss.length}/${staffing.S})</div>
       ${ss.map((doc,idx)=>renderWeekShift(shiftLabelFor('swingLabels',idx,'Admitter'),doc)).join('')||'<div class="wd-name tx-mu">—</div>'}
       <div class="wd-section-tit s">APP Admitters (${appSs.length}/${staffing.appAdmitters})</div>
@@ -6095,8 +6128,10 @@ function renderDocCalendarsForView(docId, mode, viewYear){
       if(isPast) cls += ' past';
       cls += ' shift-' + sh;
       const team = (sh==='R'&&S.teams&&S.teams[docId]&&S.teams[docId][ds])||null;
-      const label = sh==='OFF' ? '' : (sh==='R'&&team ? (team==='green'?'R-G':team==='white'?'R-W':`R${team}`) : sh);
-      html += `<div class="${cls}" title="${ds} · ${sh}${team?' · Team '+team:''}">
+      const doc=byId(docId);
+      const teamName=team?rounderTeamLabel(team,!!(doc&&isAppProvider(doc))):'';
+      const label = sh==='OFF' ? '' : (sh==='R'&&teamName ? teamName : sh);
+      html += `<div class="${cls}" title="${ds} · ${sh}${teamName?' · '+qgEsc(teamName):''}">
         <span class="doc-cal-dnum">${d}</span>
         ${label ? `<span class="doc-cal-shift">${label}</span>` : ''}
       </div>`;
