@@ -531,7 +531,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
 
 /* MISC */
 .row{display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:10px}
-.daily-count-row{gap:8px;flex-wrap:nowrap}
+.daily-count-row{gap:8px;flex-wrap:wrap}
 .daily-count-row .fg{min-width:0}
 .daily-count-row input{width:64px}
 .daily-count-row .annual-target{margin-left:auto}
@@ -2754,7 +2754,7 @@ function renderShiftParamFields(){
   el.innerHTML=html;
 }
 function flexibleRequestRecommendation(){
-  const active=S.docs.filter(d=>d.active&&d.type==='standard'&&!isMedicalDirectorDoc(d)&&d.type!=='prn'&&d.type!=='nocturnist');
+  const active=S.docs.filter(d=>d.active&&d.type==='standard'&&!isMedicalDirectorDoc(d)&&!isAppProvider(d)&&d.type!=='prn'&&d.type!=='nocturnist');
   const variable=active.filter(d=>!isStrictStyle(d));
   const strict=active.length-variable.length;
   const flexFte=variable.reduce((sum,d)=>sum+(parseFloat(d.fte)||1),0);
@@ -2936,7 +2936,7 @@ function _scoreScheduleCandidate(year,q){
   const days=quarterDays(year,q);
   const qKey=`${year}-${q}`;
   const reqs=S.requests[qKey]||{};
-  const docs=activeDocs(year).filter(d=>d.type==='standard'&&!isMedicalDirectorDoc(d)&&!isStrictStyle(d));
+  const docs=activeDocs(year).filter(d=>d.type==='standard'&&!isMedicalDirectorDoc(d)&&!isAppProvider(d)&&!isStrictStyle(d));
   let requiredMisses=0,optionalMisses=0,structural=0,shortages=0,overages=0;
   let longDays=0,restMismatch=0;
   const affectedRequired=new Set();
@@ -3325,10 +3325,10 @@ function assignStrictBaseline({strictAll,swingOnly,days,startD,candidateSeed}){
     pool.forEach(doc=>{
       const phase=phaseById[doc.id];
       if(phase===undefined)return;
-	      strictWorkBlocksForDoc(doc,days,startD,phase).forEach((block,blockIdx)=>{
-	        const blockId=doc.id+'|'+block.startIdx+'|'+blockIdx;
+      strictWorkBlocksForDoc(doc,days,startD,phase).forEach((block,blockIdx)=>{
+        const blockId=doc.id+'|'+block.startIdx+'|'+blockIdx;
         if(!workBlocks.has(blockId))return;
-	        const shift=swingBlocks.has(blockId)?'S':'R';
+        const shift=swingBlocks.has(blockId)?'S':'R';
         block.days.forEach(x=>{
           if(!S.sched[doc.id])S.sched[doc.id]={};
           S.sched[doc.id][x.ds]=shift;
@@ -3341,8 +3341,42 @@ function assignStrictBaseline({strictAll,swingOnly,days,startD,candidateSeed}){
       });
     });
   }
+  function applyAppPool(pool,phaseById,workBlocks,swingBlocks){
+    const workingByDate={};
+    pool.forEach(doc=>{
+      const phase=phaseById[doc.id];
+      if(phase===undefined)return;
+      strictWorkBlocksForDoc(doc,days,startD,phase).forEach((block,blockIdx)=>{
+        const blockId=doc.id+'|'+block.startIdx+'|'+blockIdx;
+        if(!workBlocks.has(blockId))return;
+        block.days.forEach(x=>{
+          if(!workingByDate[x.ds])workingByDate[x.ds]=[];
+          workingByDate[x.ds].push({doc,preferS:swingBlocks.has(blockId)});
+        });
+      });
+      days.forEach(d=>{
+        const ds=dstrD(d);
+        if(!S.sched[doc.id])S.sched[doc.id]={};
+        if(S.sched[doc.id][ds]===undefined)S.sched[doc.id][ds]='OFF';
+      });
+    });
+    days.forEach(d=>{
+      const ds=dstrD(d);
+      const st=staffingForDate(ds);
+      const working=(workingByDate[ds]||[])
+        .sort((a,b)=>(b.preferS?1:0)-(a.preferS?1:0)||providerSort(a.doc,b.doc));
+      let needS=st.appAdmitters||0;
+      let needR=st.appRounders||0;
+      working.forEach(item=>{
+        if(!S.sched[item.doc.id])S.sched[item.doc.id]={};
+        if(needS>0){S.sched[item.doc.id][ds]='S';needS--;return;}
+        if(needR>0){S.sched[item.doc.id][ds]='R';needR--;return;}
+        S.sched[item.doc.id][ds]='OFF';
+      });
+    });
+  }
   applyPool(mdStrict,mdPhase,mdWorkBlocks,mdSwingBlocks);
-  applyPool(appStrict,appPhase,appWorkBlocks,appSwingBlocks);
+  applyAppPool(appStrict,appPhase,appWorkBlocks,appSwingBlocks);
 }
 function assignNocturnistBaseline({nocturnists,days,startD,candidateSeed}){
   const mdNoct=nocturnists.filter(d=>!isAppProvider(d)).sort(providerSort);
@@ -3378,7 +3412,8 @@ function assignNocturnistBaseline({nocturnists,days,startD,candidateSeed}){
       .sort((a,b)=>_candidateTie(candidateSeed,ds,a.id)-_candidateTie(candidateSeed,ds,b.id));
     working.forEach((doc,idx)=>{
       if(idx<(st.appNocturnistAdmitters||0))S.sched[doc.id][ds]='APP_NS';
-      else S.sched[doc.id][ds]='APP_NX';
+      else if(idx<(st.appNocturnistAdmitters||0)+(st.appNocturnistCrossCover||0))S.sched[doc.id][ds]='APP_NX';
+      else S.sched[doc.id][ds]='OFF';
     });
   });
 }
@@ -3395,7 +3430,7 @@ function nextStressQuarter(){
   return {year,q};
 }
 function stressVariableCandidates(year){
-  return activeDocs(year).filter(d=>d.type==='standard'&&!isMedicalDirectorDoc(d)&&d.type!=='prn'&&d.type!=='nocturnist').sort(providerSort);
+  return activeDocs(year).filter(d=>d.type==='standard'&&!isMedicalDirectorDoc(d)&&!isAppProvider(d)&&d.type!=='prn'&&d.type!=='nocturnist').sort(providerSort);
 }
 function renderStressSummary(){
   const yEl=document.getElementById('stress-year');
@@ -3689,8 +3724,8 @@ function _generateQuarter(candidateSeed=0,finalize=true){
   const strictAll=[...strictMixed,...strictSwing];
 
   // Variable providers: standard type only — PRN are NOT scheduled in generation
-  const rotation=allActive.filter(d=>d.type==='standard'&&!isMedicalDirectorDoc(d)&&d.fte===1.0&&!isStrictStyle(d));
-  const partTime=allActive.filter(d=>d.type==='standard'&&!isMedicalDirectorDoc(d)&&d.fte<1.0&&!isStrictStyle(d));
+  const rotation=allActive.filter(d=>d.type==='standard'&&!isMedicalDirectorDoc(d)&&!isAppProvider(d)&&d.fte===1.0&&!isStrictStyle(d));
+  const partTime=allActive.filter(d=>d.type==='standard'&&!isMedicalDirectorDoc(d)&&!isAppProvider(d)&&d.fte<1.0&&!isStrictStyle(d));
   // PRN providers are never scheduled by the algorithm (0 FTE / on-call only)
 
   rotation.sort((a,b)=>a.last.localeCompare(b.last)||a.first.localeCompare(b.first));
