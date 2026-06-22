@@ -4007,12 +4007,13 @@ function renderSchedule(){
     if(!focus||!focus.dateStr||!focus.key)return false;
     const issue=staffingIssueDefinitions(focus.dateStr,allDocs).find(x=>x.key===focus.key);
     if(!issue)return false;
-    if(issue.diff>0)return shiftMatchesStaffingKey(doc,focus.dateStr,focus.key);
     const eligible=eligibleDocsForStaffingKey(allDocs,focus.key);
     if(!eligible.some(d=>d.id===doc.id))return false;
     const counts=eligible.map(d=>quarterShiftCount(d,days,focus.key));
     const avg=counts.reduce((sum,v)=>sum+v,0)/Math.max(1,counts.length);
-    return quarterShiftCount(doc,days,focus.key)<avg;
+    const myCount=quarterShiftCount(doc,days,focus.key);
+    if(issue.diff>0)return shiftMatchesStaffingKey(doc,focus.dateStr,focus.key)&&myCount>avg;
+    return myCount<avg;
   }
   function buildRow(doc,isConsult){
     const{all:docReqs,req:docRequired}=getDocReqs(doc.id);
