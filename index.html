@@ -211,6 +211,8 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
 /* SCHEDULE GRID — Excel-like spreadsheet */
 .sheet-outer{border:1px solid var(--line);border-radius:0 0 4px 4px;background:#fff;overflow:auto;max-height:calc(100vh - 220px)}
 .sheet-wrap{overflow:visible;position:relative}
+.sheet-scrollbar{position:sticky;top:54px;z-index:35;height:16px;overflow-x:auto;overflow-y:hidden;background:#fff;border:1px solid var(--line);border-bottom:none;border-radius:4px 4px 0 0}
+.sheet-scroll-spacer{height:1px}
 .sheet{border-collapse:collapse;background:#fff;table-layout:fixed;font-size:11px}
 .sheet th,.sheet td{border:1px solid var(--line);padding:0;text-align:center;vertical-align:middle;height:24px;line-height:1;background:#fff;position:relative}
 
@@ -664,7 +666,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
         <button onclick="navSettings('cfg-params')">Schedule Parameters</button>
         <button onclick="navSettings('cfg-data')">Data Management</button>
         <button onclick="navSettings('cfg-roster')">Provider Roster</button>
-        <button onclick="navSettings('cfg-stress')">Stress Test</button>
+        <button onclick="navSettings('cfg-stress')">Stress Test / Demo Mode</button>
         <button onclick="navSettings('cfg-groups')">Group Onboarding</button>
       </div>
     </div>
@@ -754,6 +756,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
     </div>
   </div>
 
+  <div class="sheet-scrollbar" id="sheet-scrollbar"><div class="sheet-scroll-spacer" id="sheet-scroll-spacer"></div></div>
   <div class="sheet-outer" id="sheet-outer">
     <div class="sheet-wrap" id="sheet-wrap">
       <div style="padding:40px;text-align:center;color:var(--ink3)">Pick a quarter and click <strong>Generate Schedule</strong> to begin.</div>
@@ -1034,7 +1037,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
 </div>
 
 <div class="pg" id="pg-cfg-stress">
-  <h1 class="mb">Stress Test</h1>
+  <h1 class="mb">Stress Test / Demo Mode</h1>
   <div class="settings-split">
     <div class="card">
       <h3>Build a Test Run</h3>
@@ -3661,7 +3664,7 @@ async function runDemoMode(){
     const mix=configureDemoProviderMix(inputs.year,inputs.varPct,inputs.sevenPct,inputs.twoPct);
     if(!mix.pool.length)throw new Error('No eligible MD/DO standard providers are available for demo mode.');
     const qKey=`${inputs.year}-${inputs.q}`;
-    S.requests[qKey]=buildStressRequests(inputs.year,inputs.q,mix.variableDocs,inputs.requiredCount,inputs.optionalCount,inputs.weekendBias,9900);
+    S.requests[qKey]=buildDemoRequests(inputs.year,inputs.q,mix.variableDocs,inputs.requiredCount,inputs.optionalCount,inputs.weekendBias,9900);
     let best=null;
     const candidateCount=48;
     for(let seed=0;seed<candidateCount;seed++){
@@ -3786,11 +3789,82 @@ function stressPickRequestBlocks(year,q,docId,count,kind,weekendBias,seed,blocke
   }
   return [...picked].sort();
 }
+function demoPickRequestBlocks(year,q,docId,count,kind,weekendBias,seed,blocked=new Set()){
+  if(count<=0)return [];
+  const targetCount=Math.max(4,count);
+  const days=quarterDays(year,q).map(dstrD);
+  const picked=new Set();
+  const protectedDays=new Set(blocked||[]);
+  const minGap=7;
+  const blockLens=kind==='required'?[4,4,5,5,6,7]:[4,5,5,6,7,8,9];
+  const candidates=days.map((ds,idx)=>{
+    const d=parseD(ds);
+    const weekendNear=[-2,-1,0,1,2].some(offset=>{
+      const near=days[idx+offset];
+      return near&&isWeekend(parseD(near));
+    });
+    const weekendBoost=weekendNear?Math.max(0,weekendBias)/100:0;
+    const edgePenalty=(idx<7||idx>days.length-8)?0.2:0;
+    return {ds,idx,score:_candidateUnit(seed,docId+'|'+ds+'|demo|'+kind)+weekendBoost-edgePenalty};
+  }).sort((a,b)=>b.score-a.score);
+  function dateBlocked(idx){
+    const ds=days[idx];
+    if(protectedDays.has(ds)||picked.has(ds))return true;
+    for(let i=Math.max(0,idx-minGap);i<=Math.min(days.length-1,idx+minGap);i++){
+      if(picked.has(days[i])||protectedDays.has(days[i]))return true;
+    }
+    return false;
+  }
+  function tryBlock(startIdx,len,direction){
+    const block=[];
+    for(let step=0;step<len;step++){
+      const idx=startIdx+(step*direction);
+      if(idx<0||idx>=days.length)return [];
+      const ds=days[idx];
+      if(protectedDays.has(ds)||picked.has(ds))return [];
+      block.push({idx,ds});
+    }
+    if(block.length<4)return [];
+    const lo=block[0].idx,hi=block[block.length-1].idx;
+    for(let i=Math.max(0,Math.min(lo,hi)-minGap);i<=Math.min(days.length-1,Math.max(lo,hi)+minGap);i++){
+      if(block.some(x=>x.idx===i))continue;
+      if(picked.has(days[i])||protectedDays.has(days[i]))return [];
+    }
+    return block;
+  }
+  for(const cand of candidates){
+    if(picked.size>=targetCount)break;
+    if(dateBlocked(cand.idx))continue;
+    const len=blockLens[Math.floor(_candidateUnit(seed,cand.ds+'|'+docId+'|demo|'+kind+'|len')*blockLens.length)]||4;
+    const firstDir=_candidateUnit(seed,cand.ds+'|'+docId+'|demo|'+kind+'|dir')<0.5?-1:1;
+    let block=tryBlock(cand.idx,len,firstDir);
+    if(!block.length)block=tryBlock(cand.idx,len,-firstDir);
+    block.forEach(x=>picked.add(x.ds));
+  }
+  if(picked.size<targetCount){
+    candidates.forEach(cand=>{
+      if(picked.size>=targetCount)return;
+      if(dateBlocked(cand.idx))return;
+      const block=tryBlock(cand.idx,4,1);
+      block.forEach(x=>picked.add(x.ds));
+    });
+  }
+  return [...picked].sort();
+}
 function buildStressRequests(year,q,docs,requiredCount,optionalCount,weekendBias,seed){
   const requests={};
   docs.forEach(doc=>{
     const required=stressPickRequestBlocks(year,q,doc.id,requiredCount,'required',weekendBias,seed);
     const optional=stressPickRequestBlocks(year,q,doc.id,optionalCount,'optional',weekendBias,seed+7000,new Set(required));
+    requests[doc.id]={required,optional};
+  });
+  return requests;
+}
+function buildDemoRequests(year,q,docs,requiredCount,optionalCount,weekendBias,seed){
+  const requests={};
+  docs.forEach(doc=>{
+    const required=demoPickRequestBlocks(year,q,doc.id,requiredCount,'required',weekendBias,seed);
+    const optional=demoPickRequestBlocks(year,q,doc.id,optionalCount,'optional',weekendBias,seed+7000,new Set(required));
     requests[doc.id]={required,optional};
   });
   return requests;
@@ -3999,7 +4073,9 @@ function _generateQuarter(candidateSeed=0,finalize=true){
   // Strict providers are pre-assigned before variable scheduling
   const strictMixed=allActive.filter(d=>d.type==='standard'&&!isMedicalDirectorDoc(d)&&d.preferences&&d.preferences.scheduleStyle==='strict');
   const strictSwing=allActive.filter(d=>d.type==='standard'&&!isMedicalDirectorDoc(d)&&d.preferences&&d.preferences.scheduleStyle==='strict-swing-block');
-  const strictAll=[...strictMixed,...strictSwing];
+  const appStandard=allActive.filter(d=>d.type==='standard'&&!isMedicalDirectorDoc(d)&&isAppProvider(d));
+  const strictAll=[...new Map([...strictMixed,...strictSwing,...appStandard].map(d=>[d.id,d])).values()];
+  const strictPhysicianCount=strictAll.filter(d=>!isAppProvider(d)).length;
 
   // Variable providers: standard type only — PRN are NOT scheduled in generation
   const rotation=allActive.filter(d=>d.type==='standard'&&!isMedicalDirectorDoc(d)&&!isAppProvider(d)&&d.fte===1.0&&!isStrictStyle(d));
@@ -4163,7 +4239,7 @@ function _generateQuarter(candidateSeed=0,finalize=true){
     // Pro-rated quarterly S target based on FTE
     const doc=byId(docId);
     const fte=doc?doc.fte:1.0;
-    const baseQTarget=Math.round(avgAdmitterTarget(quarterDays(year,q)) * totalDays / (rotation.length + partTime.length + strictAll.length || 1));
+    const baseQTarget=Math.round(avgAdmitterTarget(quarterDays(year,q)) * totalDays / (rotation.length + partTime.length + strictPhysicianCount || 1));
     return Math.max(1, Math.round(baseQTarget * fte));
   }
   function canBeS_normal(docId){
@@ -4305,7 +4381,7 @@ function _generateQuarter(candidateSeed=0,finalize=true){
     // Part-time providers: 7on/7off cycle with FTE-adjusted S quota
     // Compute their quarterly S target same as qSTarget() but inline since we're pre-loop
     const ptSTarget=Math.max(1, Math.round(
-      Math.round(avgAdmitterTarget(quarterDays(year,q)) * totalDays / (rotation.length + partTime.length + strictAll.length || 1))
+      Math.round(avgAdmitterTarget(quarterDays(year,q)) * totalDays / (rotation.length + partTime.length + strictPhysicianCount || 1))
     ));
     partTime.forEach(doc=>{
       if(doc.startDate&&doc.startDate>ds){S.sched[doc.id][ds]='OFF';return;}
@@ -4925,6 +5001,7 @@ function renderSchedule(){
   const allDocs=activeDocs(year);
   if(!allDocs.length){
     document.getElementById('sheet-outer').innerHTML='<div class="sheet-wrap" id="sheet-wrap"><div style="padding:40px;text-align:center;color:var(--ink3)"><div style="font-weight:700;color:var(--ink);margin-bottom:6px">No providers in this roster yet.</div><div>Use <strong>Settings → Import qGenda Excel</strong> to populate this group, or add providers manually below.</div></div></div>';
+    syncScheduleTopScrollbar();
     return;
   }
   const consultDocs=allDocs.filter(isMedicalDirectorDoc).sort(providerSort);
@@ -4940,6 +5017,7 @@ function renderSchedule(){
   const fPrn=filterText?prnDocs.filter(d=>dname(d).toLowerCase().includes(filterText)):prnDocs;
   if(!fConsult.length&&!fRotation.length&&!fNocturnist.length&&!fApp.length&&!fPrn.length){
     document.getElementById('sheet-outer').innerHTML='<div class="sheet-wrap" id="sheet-wrap"><div style="padding:40px;text-align:center;color:var(--ink3)">No providers match filter.</div></div>';
+    syncScheduleTopScrollbar();
     return;
   }
   const visibleDocs=[...fConsult,...fRotation,...fNocturnist,...fApp,...fPrn];
@@ -5153,8 +5231,37 @@ function renderSchedule(){
 
   document.getElementById('sheet-outer').innerHTML=`<div class="sheet-wrap" id="sheet-wrap" style="--name-col-w:${nameColWidth}px"><span class="name-resizer" title="Drag to resize name column"></span>${html}</div>`;
   bindNameColumnResizer();
+  syncScheduleTopScrollbar();
   updateDemoModeUI();
   updateUndoButton();
+}
+
+function syncScheduleTopScrollbar(){
+  const outer=document.getElementById('sheet-outer');
+  const top=document.getElementById('sheet-scrollbar');
+  const spacer=document.getElementById('sheet-scroll-spacer');
+  const wrap=document.getElementById('sheet-wrap');
+  if(!outer||!top||!spacer)return;
+  const scrollWidth=Math.max(outer.scrollWidth,wrap?wrap.scrollWidth:0,outer.clientWidth);
+  spacer.style.width=scrollWidth+'px';
+  top.style.display=scrollWidth>outer.clientWidth+2?'block':'none';
+  top.scrollLeft=outer.scrollLeft;
+  if(top._scheduleScrollBound)return;
+  top._scheduleScrollBound=true;
+  let syncing=false;
+  top.addEventListener('scroll',()=>{
+    if(syncing)return;
+    syncing=true;
+    outer.scrollLeft=top.scrollLeft;
+    syncing=false;
+  });
+  outer.addEventListener('scroll',()=>{
+    if(syncing)return;
+    syncing=true;
+    top.scrollLeft=outer.scrollLeft;
+    syncing=false;
+  });
+  window.addEventListener('resize',()=>setTimeout(syncScheduleTopScrollbar,0));
 }
 
 
