@@ -222,7 +222,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
   min-width:28px;width:28px;
 }
 .sheet thead th.name-col{
-  text-align:left;padding:6px 10px;min-width:180px;width:180px;
+  text-align:left;padding:6px 10px;min-width:var(--name-col-w,180px);width:var(--name-col-w,180px);
   background:var(--hdr2);position:sticky;left:0;z-index:10;
   font-family:'Source Sans 3',sans-serif;font-size:11px;text-transform:uppercase;
   transform:translateZ(0);
@@ -238,7 +238,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
 .sheet tbody td.name-col{
   text-align:left;padding:4px 10px;font-weight:600;font-size:12px;
   background:#fff;position:sticky;left:0;z-index:2;
-  border-right:2px solid var(--line2);width:180px;min-width:180px;
+  border-right:2px solid var(--line2);width:var(--name-col-w,180px);min-width:var(--name-col-w,180px);
   cursor:pointer;transform:translateZ(0);
 }
 .sheet tbody td.name-col:hover{background:#eef5fb;color:#1f5a99}
@@ -265,6 +265,9 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
   border:2px solid #c5221f!important;
   box-shadow:inset 4px 0 0 #c5221f!important;
 }
+.sheet tbody tr.staffing-locked td{opacity:.42;filter:grayscale(.8)}
+.sheet tbody tr.staffing-locked td.name-col{color:#8a8f96!important}
+.sheet tbody tr.staffing-candidate td{opacity:1;filter:none}
 .name-col-hl{font-weight:700!important}
 .sheet .col-hl{
   border-left:2px solid #1b4d8f!important;
@@ -2503,9 +2506,12 @@ function scheduleStyleShortLabel(d){
   return {text:'STD',cls:'sched-badge-other',title:'Standard scheduling'};
 }
 function scheduleStyleBadgeHtml(d){
-  if(isMedicalDirectorDoc(d)||d.type==='prn'||d.type==='nocturnist')return '';
+  if(isMedicalDirectorDoc(d)||isAppProvider(d)||d.type==='prn'||d.type==='nocturnist')return '';
   const b=scheduleStyleShortLabel(d);
   return `<span class="sched-badge ${b.cls}" title="${qgEsc(b.title)}">${b.text}</span>`;
+}
+function isVariableAdjustmentDoc(d){
+  return !!d&&!isMedicalDirectorDoc(d)&&!isAppProvider(d)&&d.type==='standard'&&!isStrictStyle(d);
 }
 function providerExtraTitle(d){return d&&d.title&&d.title.toLowerCase()!=='medical director'?d.title:''}
 function normalizeRole(role){return role==='NP'?'APP':(role==='MD'?'MD/DO':(role||'MD/DO'))}
@@ -4658,6 +4664,13 @@ function renderSchedule(){
     document.getElementById('sheet-outer').innerHTML='<div class="sheet-wrap" id="sheet-wrap"><div style="padding:40px;text-align:center;color:var(--ink3)">No providers match filter.</div></div>';
     return;
   }
+  const visibleDocs=[...fConsult,...fRotation,...fNocturnist,...fApp,...fPrn];
+  const longestName=visibleDocs.reduce((max,d)=>Math.max(max,dname(d).length),0);
+  const needsSchedBadge=visibleDocs.some(d=>!!scheduleStyleBadgeHtml(d));
+  const needsMedBadge=fConsult.length>0;
+  const badgeRoom=(needsSchedBadge||needsMedBadge)?42:0;
+  const totalsRoom=98;
+  const nameColWidth=Math.max(220,Math.min(430,(longestName*7)+badgeRoom+totalsRoom+34));
 
   // Month cells
   let currentMonth=-1; const monthCells=[];
@@ -4671,7 +4684,7 @@ function renderSchedule(){
   const selCols=S.ui.selectedCols;
 
   // ── HEADER: single name-col th with Q∑ label embedded ──
-  let html='<table class="sheet"><thead><tr>';
+  let html=`<table class="sheet" style="--name-col-w:${nameColWidth}px"><thead><tr>`;
   // Name column header — includes Q∑ label in the bottom-right corner
   html+='<th class="name-col" rowspan="2"><div style="display:flex;justify-content:space-between;align-items:flex-end"><span>PHYSICIAN</span><span style="font-size:9px;font-weight:700;color:#1b4d8f;background:#dde9f7;padding:1px 4px;border-radius:2px;letter-spacing:.3px">Q∑</span></div></th>';
   monthCells.forEach((m,mi)=>{
@@ -4745,6 +4758,7 @@ function renderSchedule(){
   function staffingFocusMatchesDoc(doc){
     const focus=S.ui.staffingFocus;
     if(!focus||!focus.dateStr||!focus.key)return false;
+    if(!isVariableAdjustmentDoc(doc))return false;
     const issue=visibleStaffingIssueDefinitions(focus.dateStr,allDocs).find(x=>x.key===focus.key);
     if(!issue)return false;
     const eligible=eligibleDocsForStaffingKey(allDocs,focus.key);
@@ -4773,7 +4787,9 @@ function renderSchedule(){
     const mTip=monthCells.map(m=>`${monAbbr(m.month)}:${mc[m.month].r}R${mc[m.month].s}S${mc[m.month].n?mc[m.month].n+'N':''}`).join(' | ');
     const isHighlighted=selRow===doc.id;
     const isStaffingCandidate=staffingFocusMatchesDoc(doc);
-    const rowCls=[isHighlighted?'row-hl':'',isStaffingCandidate?'staffing-candidate':''].filter(Boolean).join(' ');
+    const hasStaffingFocus=!!(S.ui.staffingFocus&&S.ui.staffingFocus.dateStr&&S.ui.staffingFocus.key);
+    const isStaffingLocked=hasStaffingFocus&&!isVariableAdjustmentDoc(doc)&&!isStaffingCandidate;
+    const rowCls=[isHighlighted?'row-hl':'',isStaffingCandidate?'staffing-candidate':'',isStaffingLocked?'staffing-locked':''].filter(Boolean).join(' ');
     const styleBadge=scheduleStyleBadgeHtml(doc);
 
     let row=`<tr class="${rowCls}" id="row-${doc.id}">`;
