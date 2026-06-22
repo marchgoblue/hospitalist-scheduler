@@ -1024,6 +1024,14 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
         <div class="fg"><label>Weekend Request Bias</label><input type="number" id="stress-weekend" value="35" min="0" max="100" style="width:130px"></div>
         <button class="btn btn-p" id="stress-run-btn" onclick="runStressTest()">Run Stress Test</button>
       </div>
+      <div id="stress-progress" style="display:none;margin-top:10px">
+        <div class="fb" style="align-items:center;margin-bottom:6px">
+          <div id="stress-progress-label" class="tx-xs" style="font-weight:700;color:var(--ink2)">Preparing test...</div>
+          <div id="stress-progress-pct" class="tx-xs tx-mu">0%</div>
+        </div>
+        <div class="qg-progress"><div class="qg-progress-bar" id="stress-progress-bar" style="width:0%"></div></div>
+        <div id="stress-progress-time" class="tx-xs tx-mu" style="margin-top:5px">Estimated time will update after the first few candidates.</div>
+      </div>
       <div id="stress-summary" class="dm-help" style="margin-top:8px"></div>
     </div>
     <div class="card">
@@ -3380,6 +3388,41 @@ function renderStressResults(rows,elapsed,inputs){
       </tbody>
     </table>`;
 }
+function fmtDuration(ms){
+  if(!Number.isFinite(ms)||ms<0)return 'calculating...';
+  const sec=Math.max(1,Math.round(ms/1000));
+  if(sec<60)return `${sec} sec`;
+  const min=Math.floor(sec/60),rem=sec%60;
+  return rem?`${min} min ${rem} sec`:`${min} min`;
+}
+function estimateStressRuntimeText(runs,variableCount){
+  const base=runs*12;
+  const providerFactor=Math.max(1,variableCount/25);
+  const low=base*180*providerFactor;
+  const high=base*420*providerFactor;
+  return `Expected time: roughly ${fmtDuration(low)} to ${fmtDuration(high)}. Larger rosters and more strict providers can take longer.`;
+}
+function setStressProgress(done,total,label,startedAt){
+  const box=document.getElementById('stress-progress');
+  const bar=document.getElementById('stress-progress-bar');
+  const pct=document.getElementById('stress-progress-pct');
+  const lbl=document.getElementById('stress-progress-label');
+  const time=document.getElementById('stress-progress-time');
+  const percent=total?Math.round(done*100/total):0;
+  if(box)box.style.display='block';
+  if(bar)bar.style.width=Math.max(0,Math.min(100,percent))+'%';
+  if(pct)pct.textContent=percent+'%';
+  if(lbl)lbl.textContent=label;
+  if(time){
+    const elapsed=Date.now()-startedAt;
+    const eta=done>0?(elapsed/done)*(total-done):NaN;
+    time.textContent=`Elapsed ${fmtDuration(elapsed)} · Remaining ${fmtDuration(eta)}`;
+  }
+}
+function hideStressProgress(){
+  const box=document.getElementById('stress-progress');
+  if(box)box.style.display='none';
+}
 async function runStressTest(){
   if(!isAdmin()){toast('Admin only','error');return;}
   const inputs={
@@ -3403,9 +3446,14 @@ async function runStressTest(){
   const oldQ=document.getElementById('q-sel')?.value;
   const started=Date.now();
   const rows=[];
+  const candidateCount=12;
+  const totalWork=inputs.runs*candidateCount;
+  let workDone=0;
   try{
     if(btn){btn.disabled=true;btn.textContent='Running...';}
-    if(out)out.innerHTML='<div class="tx-mu">Testing schedules...</div>';
+    if(out)out.innerHTML=`<div class="tx-mu">Testing schedules... ${qgEsc(estimateStressRuntimeText(inputs.runs,inputs.variableCount))}</div>`;
+    setStressProgress(0,totalWork,`Preparing ${inputs.runs} stress trial${inputs.runs===1?'':'s'}...`,started);
+    await generationSleep();
     const ySel=document.getElementById('yr-sel');
     const qSel=document.getElementById('q-sel');
     if(ySel)ySel.value=String(inputs.year);
@@ -3417,22 +3465,23 @@ async function runStressTest(){
       const quarterKey=`${inputs.year}-${inputs.q}`;
       S.requests[quarterKey]=buildStressRequests(inputs.year,inputs.q,stressDocs,inputs.requiredCount,inputs.optionalCount,inputs.weekendBias,5000+run);
       let best=null;
-      const candidateCount=12;
       for(let seed=0;seed<candidateCount;seed++){
         _generateQuarter(run*candidateCount+seed,false);
         const score=_scoreScheduleCandidate(inputs.year,inputs.q);
         if(!best||score<best.score){
           best={score,sched:JSON.parse(JSON.stringify(S.sched)),teams:JSON.parse(JSON.stringify(S.teams))};
         }
+        workDone++;
+        setStressProgress(workDone,totalWork,`Trial ${run+1} of ${inputs.runs} · candidate ${seed+1} of ${candidateCount}`,started);
+        await generationSleep();
       }
       S.sched=best.sched;
       S.teams=best.teams;
       rows.push(stressScheduleMetrics(inputs.year,inputs.q,stressDocs));
-      if(run%3===2){
-        if(out)out.innerHTML=`<div class="tx-mu">Testing schedules... ${run+1}/${inputs.runs}</div>`;
-        await new Promise(resolve=>setTimeout(resolve,0));
-      }
+      if(out)out.innerHTML=`<div class="tx-mu">Completed ${run+1}/${inputs.runs} stress trial${inputs.runs===1?'':'s'}...</div>`;
+      await generationSleep();
     }
+    setStressProgress(totalWork,totalWork,'Stress test complete. Building report...',started);
     renderStressResults(rows,Date.now()-started,inputs);
   }catch(e){
     console.error('stress test error:',errStr(e),e);
@@ -3445,6 +3494,7 @@ async function runStressTest(){
     renderStressSummary();
     renderSchedule();
     updateQuarterInfo();
+    hideStressProgress();
     if(btn){btn.disabled=false;btn.textContent='Run Stress Test';}
   }
 }
