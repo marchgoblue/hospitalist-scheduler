@@ -210,7 +210,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
 
 /* SCHEDULE GRID — Excel-like spreadsheet */
 .sheet-outer{border:1px solid var(--line);border-radius:0 0 4px 4px;background:#fff;overflow:auto;max-height:calc(100vh - 220px)}
-.sheet-wrap{overflow:visible}
+.sheet-wrap{overflow:visible;position:relative}
 .sheet{border-collapse:collapse;background:#fff;table-layout:fixed;font-size:11px}
 .sheet th,.sheet td{border:1px solid var(--line);padding:0;text-align:center;vertical-align:middle;height:24px;line-height:1;background:#fff;position:relative}
 
@@ -227,7 +227,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
   font-family:'Source Sans 3',sans-serif;font-size:11px;text-transform:uppercase;
   transform:translateZ(0);
 }
-.name-resizer{position:absolute;top:0;right:-8px;width:16px;height:100%;cursor:col-resize;z-index:20;touch-action:none}
+.name-resizer{position:absolute;top:0;left:calc(var(--name-col-w,180px) - 8px);width:16px;height:var(--name-resizer-h,100%);cursor:col-resize;z-index:40;touch-action:none}
 .name-resizer:after{content:"";position:absolute;top:4px;bottom:4px;left:7px;width:2px;background:#b8c2cc;border-radius:2px}
 .name-resizer:hover:after{background:#1b4d8f}
 .sheet thead th.month-sep{background:#dfe6ec;border-left:2px solid #999}
@@ -2524,6 +2524,7 @@ function saveNameColWidth(width){
   const w=Math.max(180,Math.min(460,Math.round(width)));
   localStorage.setItem('hsqNameColWidth',String(w));
   document.querySelectorAll('.sheet').forEach(el=>el.style.setProperty('--name-col-w',w+'px'));
+  document.querySelectorAll('.sheet-wrap').forEach(el=>el.style.setProperty('--name-col-w',w+'px'));
 }
 function eventClientX(ev){
   if(ev&&ev.touches&&ev.touches[0])return ev.touches[0].clientX;
@@ -2533,7 +2534,8 @@ function eventClientX(ev){
 function startNameColResize(ev){
   ev.preventDefault();
   ev.stopPropagation();
-  const table=ev.target.closest('.sheet');
+  const wrap=ev.target.closest('.sheet-wrap');
+  const table=wrap?wrap.querySelector('.sheet'):ev.target.closest('.sheet');
   const current=parseInt((table&&table.style.getPropertyValue('--name-col-w'))||'',10)||getSavedNameColWidth()||220;
   const startX=eventClientX(ev);
   function onMove(e){e.preventDefault();saveNameColWidth(current+(eventClientX(e)-startX));}
@@ -2560,6 +2562,10 @@ function startNameColResize(ev){
   document.addEventListener('touchcancel',onUp);
 }
 function bindNameColumnResizer(){
+  document.querySelectorAll('.sheet-wrap').forEach(wrap=>{
+    const table=wrap.querySelector('.sheet');
+    if(table)wrap.style.setProperty('--name-resizer-h',table.offsetHeight+'px');
+  });
   document.querySelectorAll('.name-resizer').forEach(handle=>{
     if(handle.dataset.bound)return;
     handle.dataset.bound='1';
@@ -4742,7 +4748,7 @@ function renderSchedule(){
   // ── HEADER: single name-col th with Q∑ label embedded ──
   let html=`<table class="sheet" style="--name-col-w:${nameColWidth}px"><thead><tr>`;
   // Name column header — includes Q∑ label in the bottom-right corner
-  html+='<th class="name-col" rowspan="2"><div style="display:flex;justify-content:space-between;align-items:flex-end"><span>PHYSICIAN</span><span style="font-size:9px;font-weight:700;color:#1b4d8f;background:#dde9f7;padding:1px 4px;border-radius:2px;letter-spacing:.3px">Q∑</span></div><span class="name-resizer" title="Drag to resize name column"></span></th>';
+  html+='<th class="name-col" rowspan="2"><div style="display:flex;justify-content:space-between;align-items:flex-end"><span>PHYSICIAN</span><span style="font-size:9px;font-weight:700;color:#1b4d8f;background:#dde9f7;padding:1px 4px;border-radius:2px;letter-spacing:.3px">Q∑</span></div></th>';
   monthCells.forEach((m,mi)=>{
     html+=`<th colspan="${m.span}" class="${mi>0?'month-sep':''}" style="background:#dfe6ec;font-size:11px;text-transform:uppercase">${monN(m.month)} ${year}</th>`;
   });
@@ -4929,7 +4935,7 @@ function renderSchedule(){
   coverageRow('APP NIGHT CROSS',ds=>staffingForDate(ds).appNocturnistCrossCover,ds=>allDocs.filter(doc=>doc.type==='nocturnist'&&S.sched[doc.id]&&S.sched[doc.id][ds]==='APP_NX'&&isAppProvider(doc)).length);
   html+='</tfoot></table>';
 
-  document.getElementById('sheet-outer').innerHTML='<div class="sheet-wrap" id="sheet-wrap">'+html+'</div>';
+  document.getElementById('sheet-outer').innerHTML=`<div class="sheet-wrap" id="sheet-wrap" style="--name-col-w:${nameColWidth}px"><span class="name-resizer" title="Drag to resize name column"></span>${html}</div>`;
   bindNameColumnResizer();
   updateUndoButton();
 }
