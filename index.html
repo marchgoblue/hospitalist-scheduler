@@ -718,6 +718,16 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
     <div class="qg-progress"><div class="qg-progress-bar" id="gen-progress-bar" style="width:0%"></div></div>
   </div>
 
+  <div id="demo-banner" class="card" style="display:none;margin-bottom:12px;padding:10px 12px;border-color:#e0c890;background:#fff8e5">
+    <div class="fb" style="align-items:center;gap:10px">
+      <div>
+        <div style="font-size:12px;font-weight:800;color:#806000;text-transform:uppercase;letter-spacing:.5px">Demo Mode</div>
+        <div id="demo-banner-text" class="tx-sm" style="color:#806000">Temporary schedule is showing. Real data has not been saved.</div>
+      </div>
+      <button class="btn btn-sm" style="margin-left:auto" onclick="exitDemoMode()">Exit Demo</button>
+    </div>
+  </div>
+
   <!-- Excel-style toolbar -->
   <div class="toolbar">
     <div class="tb-group">
@@ -1056,6 +1066,31 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
       <div id="stress-summary" class="dm-help" style="margin-top:8px"></div>
     </div>
     <div class="card">
+      <h3>Demo Mode</h3>
+      <div class="dm-help" style="margin-bottom:10px">
+        Build one temporary visible schedule for a leadership demo. It changes the screen only and does not save.
+      </div>
+      <div class="row">
+        <div class="fg"><label>Year</label><input type="number" id="demo-year" style="width:90px" min="2025" max="2035"></div>
+        <div class="fg"><label>Quarter</label><select id="demo-quarter" style="width:120px"><option value="1">Q1</option><option value="2">Q2</option><option value="3">Q3</option><option value="4">Q4</option></select></div>
+      </div>
+      <div class="row">
+        <div class="fg"><label>Variable %</label><input type="number" id="demo-var-pct" value="25" min="0" max="100" style="width:100px"></div>
+        <div class="fg"><label>7S %</label><input type="number" id="demo-7s-pct" value="55" min="0" max="100" style="width:100px"></div>
+        <div class="fg"><label>2S %</label><input type="number" id="demo-2s-pct" value="20" min="0" max="100" style="width:100px"></div>
+      </div>
+      <div class="row">
+        <div class="fg"><label>Required Off Each</label><input type="number" id="demo-required" value="2" min="0" max="20" style="width:120px"></div>
+        <div class="fg"><label>Optional Off Each</label><input type="number" id="demo-optional" value="6" min="0" max="40" style="width:120px"></div>
+        <div class="fg"><label>Weekend Bias</label><input type="number" id="demo-weekend" value="35" min="0" max="100" style="width:110px"></div>
+      </div>
+      <div class="row">
+        <button class="btn btn-p" id="demo-run-btn" onclick="runDemoMode()">Run Visible Demo</button>
+        <button class="btn btn-sm" id="demo-exit-btn" onclick="exitDemoMode()" disabled>Exit Demo</button>
+      </div>
+      <div id="demo-status" class="dm-help" style="margin-top:8px">Demo mode restores the real roster, requests, and schedule when you exit.</div>
+    </div>
+    <div class="card">
       <h3>Results</h3>
       <div id="stress-results" class="tx-sm tx-mu">Run a test to see how the scheduler handles fake requests.</div>
     </div>
@@ -1230,6 +1265,7 @@ let S = {
     holYear:2025,
   }
 };
+let demoModeSnapshot = null;
 
 // ════════════════════════════════════════════════════════
 //  PERSISTENCE
@@ -1312,6 +1348,11 @@ function updateHeaderForUser(){
 
 async function saveData(silent=false){
   if(!currentUser){toast('Not logged in','error');return;}
+  if(demoModeSnapshot){
+    setSyncStatus('demo');
+    if(!silent)toast('Demo mode is temporary. Exit Demo before saving real changes.','info',3500);
+    return;
+  }
   if(isSaving){pendingSave=true;return;}
   isSaving=true;setSyncStatus('saving');
   try{
@@ -1358,13 +1399,14 @@ function applyMigrations(){
 
 function setSyncStatus(state){
   const el=document.getElementById('sync-status');if(!el)return;
-  const m={loading:'loading',saving:'saving',saved:'saved',synced:'synced',error:'error'};
+  const m={loading:'loading',saving:'saving',saved:'saved',synced:'synced',error:'error',demo:'demo'};
   el.textContent=m[state]||state;
-  el.style.color=state==='error'?'#a01918':(state==='saved'||state==='synced')?'#0a7044':'var(--ink3)';
+  el.style.color=state==='error'?'#a01918':state==='demo'?'#a85800':(state==='saved'||state==='synced')?'#0a7044':'var(--ink3)';
 }
 
 let lastSyncTime=0;
 async function pollForChanges(){
+  if(demoModeSnapshot)return;
   try{
     const rows=await _sbGet('schedule_data',{id:currentScheduleRowId()});
     if(rows&&rows.length>0){
@@ -3541,10 +3583,139 @@ function renderStressSummary(){
   const currentVariable=candidates.filter(d=>!isStrictStyle(d)).length;
   const countEl=document.getElementById('stress-variable-count');
   if(countEl&&!countEl.value) countEl.value=currentVariable||Math.min(8,candidates.length);
+  const demoYear=document.getElementById('demo-year');
+  const demoQuarter=document.getElementById('demo-quarter');
+  if(demoYear&&!demoYear.value)demoYear.value=String(year);
+  if(demoQuarter&&!demoQuarter.value)demoQuarter.value=String(parseInt(qEl.value,10)||nextStressQuarter().q);
   const summary=document.getElementById('stress-summary');
   if(summary){
     summary.innerHTML=`Current active pool: <strong>${candidates.length}</strong> standard providers. Current variable providers: <strong>${currentVariable}</strong>. Try changing the variable provider count and request numbers to see when the schedule starts to strain.`;
   }
+}
+function configureDemoProviderMix(year,varPct,sevenPct,twoPct,seed=9100){
+  const pool=stressVariableCandidates(year)
+    .sort((a,b)=>_candidateUnit(seed,a.id+'|demo-mix')-_candidateUnit(seed,b.id+'|demo-mix'));
+  const totalPct=Math.max(1,varPct+sevenPct+twoPct);
+  const variableCount=Math.round(pool.length*varPct/totalPct);
+  const sevenCount=Math.round(pool.length*sevenPct/totalPct);
+  const variableIds=new Set(pool.slice(0,variableCount).map(d=>d.id));
+  const sevenIds=new Set(pool.slice(variableCount,variableCount+sevenCount).map(d=>d.id));
+  pool.forEach(doc=>{
+    if(!doc.preferences)doc.preferences=defaultPreferencesForType(doc.type);
+    if(variableIds.has(doc.id)){
+      doc.preferences.scheduleStyle='variable';
+      doc.preferences.preferredR=5;
+      doc.preferences.maxWork=7;
+      doc.teamColor='';
+    }else if(sevenIds.has(doc.id)){
+      doc.preferences.scheduleStyle='strict-swing-block';
+      doc.preferences.preferredR=7;
+      doc.preferences.maxWork=7;
+      if(!doc.teamColor)doc.teamColor=nextTeamColor();
+    }else{
+      doc.preferences.scheduleStyle='strict';
+      doc.preferences.preferredR=7;
+      doc.preferences.maxWork=7;
+      if(!doc.teamColor)doc.teamColor=nextTeamColor();
+    }
+  });
+  return {pool,variableDocs:pool.filter(d=>variableIds.has(d.id)),variableCount,sevenCount,twoCount:Math.max(0,pool.length-variableCount-sevenCount)};
+}
+async function runDemoMode(){
+  if(!isAdmin()){toast('Admin only','error');return;}
+  if(demoModeSnapshot){
+    if(!confirm('A demo schedule is already showing. Restore the real schedule and run a new demo?'))return;
+    exitDemoMode({silent:true});
+  }
+  const inputs={
+    year:parseInt(document.getElementById('demo-year')?.value,10)||nextStressQuarter().year,
+    q:parseInt(document.getElementById('demo-quarter')?.value,10)||nextStressQuarter().q,
+    varPct:Math.max(0,parseInt(document.getElementById('demo-var-pct')?.value,10)||0),
+    sevenPct:Math.max(0,parseInt(document.getElementById('demo-7s-pct')?.value,10)||0),
+    twoPct:Math.max(0,parseInt(document.getElementById('demo-2s-pct')?.value,10)||0),
+    requiredCount:Math.max(0,parseInt(document.getElementById('demo-required')?.value,10)||0),
+    optionalCount:Math.max(0,parseInt(document.getElementById('demo-optional')?.value,10)||0),
+    weekendBias:Math.max(0,Math.min(100,parseInt(document.getElementById('demo-weekend')?.value,10)||0))
+  };
+  const today=new Date();today.setHours(0,0,0,0);
+  if(quarterRange(inputs.year,inputs.q).end<today){
+    toast('Choose a future quarter for demo mode. Past quarters are protected from generation.','error',4000);
+    return;
+  }
+  const btn=document.getElementById('demo-run-btn');
+  const exitBtn=document.getElementById('demo-exit-btn');
+  const status=document.getElementById('demo-status');
+  const oldYear=document.getElementById('yr-sel')?.value;
+  const oldQ=document.getElementById('q-sel')?.value;
+  demoModeSnapshot={state:JSON.stringify(S),oldYear,oldQ};
+  try{
+    if(btn){btn.disabled=true;btn.textContent='Building demo...';}
+    if(status)status.innerHTML='Building a temporary demo schedule...';
+    setSyncStatus('demo');
+    const ySel=document.getElementById('yr-sel');
+    const qSel=document.getElementById('q-sel');
+    if(ySel)ySel.value=String(inputs.year);
+    if(qSel)qSel.value=String(inputs.q);
+    S.ui.year=inputs.year;
+    S.ui.quarter=inputs.q;
+    const mix=configureDemoProviderMix(inputs.year,inputs.varPct,inputs.sevenPct,inputs.twoPct);
+    if(!mix.pool.length)throw new Error('No eligible MD/DO standard providers are available for demo mode.');
+    const qKey=`${inputs.year}-${inputs.q}`;
+    S.requests[qKey]=buildStressRequests(inputs.year,inputs.q,mix.variableDocs,inputs.requiredCount,inputs.optionalCount,inputs.weekendBias,9900);
+    let best=null;
+    const candidateCount=48;
+    for(let seed=0;seed<candidateCount;seed++){
+      _generateQuarter(9900+seed,false);
+      const score=_scoreScheduleCandidate(inputs.year,inputs.q);
+      if(!best||score<best.score){
+        best={score,seed,sched:JSON.parse(JSON.stringify(S.sched)),teams:JSON.parse(JSON.stringify(S.teams))};
+      }
+      if(seed===0||seed%2===1||seed===candidateCount-1){
+        if(status)status.innerHTML=`Testing demo candidate ${seed+1} of ${candidateCount}...`;
+        await generationSleep();
+      }
+    }
+    S.sched=best.sched;
+    S.teams=best.teams;
+    S.ui.demoMode=true;
+    S.ui.demoSummary=`Temporary CMO demo: ${mix.variableCount} variable, ${mix.sevenCount} 7S, ${mix.twoCount} 2S providers. Requests were submitted for variable providers only.`;
+    updateQuarterInfo();
+    renderSchedule();
+    renderRoster();
+    renderRequestsAdmin();
+    nav('sched');
+    updateDemoModeUI();
+    if(exitBtn)exitBtn.disabled=false;
+    if(status)status.innerHTML=`<strong>Demo mode is showing.</strong> ${mix.variableCount} variable, ${mix.sevenCount} 7S, ${mix.twoCount} 2S providers. Requests were submitted for variable providers only. This has not been saved.`;
+    toast('Demo schedule is visible. Exit Demo restores the real schedule.','info',4500);
+  }catch(e){
+    console.error('demo mode error:',errStr(e),e);
+    exitDemoMode({silent:true});
+    toast('Demo mode error: '+errStr(e),'error',5000);
+  }finally{
+    if(btn){btn.disabled=false;btn.textContent='Run Visible Demo';}
+  }
+}
+function exitDemoMode(opts={}){
+  if(!demoModeSnapshot){return;}
+  const snap=demoModeSnapshot;
+  demoModeSnapshot=null;
+  S=JSON.parse(snap.state);
+  const ySel=document.getElementById('yr-sel');
+  const qSel=document.getElementById('q-sel');
+  if(ySel&&snap.oldYear)ySel.value=snap.oldYear;
+  if(qSel&&snap.oldQ)qSel.value=snap.oldQ;
+  const exitBtn=document.getElementById('demo-exit-btn');
+  if(exitBtn)exitBtn.disabled=true;
+  const status=document.getElementById('demo-status');
+  if(status)status.innerHTML='Demo mode restores the real roster, requests, and schedule when you exit.';
+  setSyncStatus('synced');
+  updateQuarterInfo();
+  renderSchedule();
+  renderRoster();
+  renderRequestsAdmin();
+  updateDemoModeUI();
+  if(!opts.silent)toast('Demo mode exited. Real schedule restored.','success');
 }
 function configureStressVariablePool(year,count){
   const pool=stressVariableCandidates(year);
@@ -3721,6 +3892,18 @@ function setStressProgress(done,total,label,startedAt){
 function hideStressProgress(){
   const box=document.getElementById('stress-progress');
   if(box)box.style.display='none';
+}
+function updateDemoModeUI(){
+  const on=!!demoModeSnapshot;
+  const banner=document.getElementById('demo-banner');
+  const bannerText=document.getElementById('demo-banner-text');
+  const exitBtn=document.getElementById('demo-exit-btn');
+  const saveBtn=document.getElementById('save-btn');
+  if(banner)banner.style.display=on?'block':'none';
+  if(bannerText)bannerText.textContent=(S.ui&&S.ui.demoSummary)||'Temporary schedule is showing. Real data has not been saved.';
+  if(exitBtn)exitBtn.disabled=!on;
+  if(saveBtn)saveBtn.disabled=on;
+  if(on)setSyncStatus('demo');
 }
 async function runStressTest(){
   if(!isAdmin()){toast('Admin only','error');return;}
@@ -4970,6 +5153,7 @@ function renderSchedule(){
 
   document.getElementById('sheet-outer').innerHTML=`<div class="sheet-wrap" id="sheet-wrap" style="--name-col-w:${nameColWidth}px"><span class="name-resizer" title="Drag to resize name column"></span>${html}</div>`;
   bindNameColumnResizer();
+  updateDemoModeUI();
   updateUndoButton();
 }
 
