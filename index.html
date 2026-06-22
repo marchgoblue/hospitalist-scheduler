@@ -287,9 +287,16 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
 /* Sticky quarter-total column — works with border-collapse:collapse */
 /* Quarter-total embedded in name cell — no separate column needed */
 .qtot-inline{
-  font-size:11px;font-weight:700;min-width:36px;text-align:right;
-  flex-shrink:0;line-height:1.2;
+  display:inline-flex;align-items:center;gap:5px;flex-shrink:0;
+  font-size:11px;font-weight:800;line-height:1;text-align:right;
 }
+.qtot-num{font-size:11px;font-weight:800}
+.qtot-sub{font-size:11px;font-weight:800;color:#56606a}
+.sched-badge{display:inline-block;min-width:28px;text-align:center;border-radius:2px;border:1px solid;font-size:9px;font-weight:800;letter-spacing:.3px;padding:1px 4px;margin-right:5px;font-family:'JetBrains Mono',monospace;vertical-align:middle}
+.sched-badge-7s{background:#e8f5e9;color:#0a7044;border-color:#a8d8b8}
+.sched-badge-2s{background:#dde9f7;color:#1b4d8f;border-color:#b8d4f0}
+.sched-badge-vari{background:#fff5dc;color:#806000;border-color:#e0c890}
+.sched-badge-other{background:#f5f5f5;color:#666;border-color:#ddd}
 /* Remove old qtot-hdr/qtot-cell rules */
 .qtot-hdr{display:none}
 .qtot-cell{display:none}
@@ -2487,6 +2494,18 @@ function providerTypeLabel(d){
   if(d.type==='swing-only')return 'Swing Only';
   if(d.type==='nocturnist')return 'Nocturnist';
   return 'Standard';
+}
+function scheduleStyleShortLabel(d){
+  const style=(d&&d.preferences&&d.preferences.scheduleStyle)||'variable';
+  if(style==='strict-swing-block')return {text:'7S',cls:'sched-badge-7s',title:'Strict 7-on/7-off with 7-day swing blocks'};
+  if(style==='strict')return {text:'2S',cls:'sched-badge-2s',title:'Strict 7-on/7-off with 2-day swing tail'};
+  if(style==='variable')return {text:'VARI',cls:'sched-badge-vari',title:'Variable scheduling'};
+  return {text:'STD',cls:'sched-badge-other',title:'Standard scheduling'};
+}
+function scheduleStyleBadgeHtml(d){
+  if(isMedicalDirectorDoc(d)||d.type==='prn'||d.type==='nocturnist')return '';
+  const b=scheduleStyleShortLabel(d);
+  return `<span class="sched-badge ${b.cls}" title="${qgEsc(b.title)}">${b.text}</span>`;
 }
 function providerExtraTitle(d){return d&&d.title&&d.title.toLowerCase()!=='medical director'?d.title:''}
 function normalizeRole(role){return role==='NP'?'APP':(role==='MD'?'MD/DO':(role||'MD/DO'))}
@@ -4755,13 +4774,14 @@ function renderSchedule(){
     const isHighlighted=selRow===doc.id;
     const isStaffingCandidate=staffingFocusMatchesDoc(doc);
     const rowCls=[isHighlighted?'row-hl':'',isStaffingCandidate?'staffing-candidate':''].filter(Boolean).join(' ');
+    const styleBadge=scheduleStyleBadgeHtml(doc);
 
     let row=`<tr class="${rowCls}" id="row-${doc.id}">`;
     // Single sticky name cell — Q∑ total embedded in bottom-right of the cell
     row+=`<td class="name-col${isHighlighted?' name-col-hl':''}" onclick="toggleRowHighlight('${doc.id}')" ondblclick="handleProviderNameDblClick('${doc.id}')" title="Q${q} total: ${qTotalR}R+${qTotalS}S${qTotalN?'+'+qTotalN+'N':''}${qTotalX?'+'+qTotalX+'X':''}=${qTotal} (target ~${target})&#10;${mTip}&#10;Double-click to open detail">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:4px">
-        <span>${isConsult?'<span class="consult-badge">MED DIR</span>':''}${dname(doc)}</span>
-        <span class="qtot-inline" style="color:${qColor}">${qTotal}<span style="font-size:8px;color:#999;display:block;line-height:1;text-align:right">${qTotalR}R ${qTotalS}S${qTotalN?' '+qTotalN+'N':''}${qTotalX?' '+qTotalX+'X':''}</span></span>
+        <span>${isConsult?'<span class="consult-badge">MED DIR</span>':styleBadge}${dname(doc)}</span>
+        <span class="qtot-inline"><span class="qtot-num" style="color:${qColor}">${qTotal}</span><span class="qtot-sub">${qTotalR}R</span><span class="qtot-sub">${qTotalS}S</span>${qTotalN?`<span class="qtot-sub">${qTotalN}N</span>`:''}${qTotalX?`<span class="qtot-sub">${qTotalX}X</span>`:''}</span>
       </div>
     </td>`;
     // Day cells
