@@ -725,6 +725,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
       <button id="r-phys" onclick="switchRole('phys')">Physician</button>
     </div>
     <select id="phys-pick" style="display:none;width:160px" onchange="onPhysPick()"></select>
+    <select id="site-pick" style="display:none;width:190px" onchange="onSitePick()" title="Select hospitalist site"></select>
     <button class="btn btn-sm" onclick="window.print()">Print</button>
     <span id="user-display" style="font-size:12px;color:#d6e2f0;font-weight:600;margin-right:4px"></span>
     <span id="sync-status">loading</span>
@@ -1318,6 +1319,7 @@ let demoModeSnapshot = null;
 //  AUTH & STORAGE — per-user login, Supabase-backed
 // ════════════════════════════════════════════════════════
 let currentUser=null; // {userId,email,username,role,docId,groupId,groupName,isMasterAdmin}
+let currentGroups=[];
 let isSaving=false,pendingSave=false;
 function isAdmin(){return currentUser&&currentUser.role==='admin';}
 function isPhysician(){return currentUser&&currentUser.role==='physician';}
@@ -1325,6 +1327,37 @@ function currentGroupId(){return (currentUser&&currentUser.groupId)||DEFAULT_GRO
 function currentGroupName(){return (currentUser&&currentUser.groupName)||currentGroupId();}
 function currentScheduleRowId(){return currentGroupId()||DATA_ROW_ID;}
 const SETTINGS_PAGES=new Set(['cfg-params','cfg-data','cfg-roster','cfg-stress','cfg-groups']);
+
+function freshAppState(){
+  return {
+    docs: JSON.parse(JSON.stringify(INIT_DOCS)),
+    sched: {},
+    teams: {},
+    qgendaShiftDetails: {},
+    requests: {},
+    cycleStarts: {},
+    hols: {},
+    announcement: '',
+    qgendaShiftMap: {},
+    staffingDismissals: {},
+    cfg: {annual:182, R:13, S:3, maxReq:15, maxWeekendReq:6, maxRequired:5},
+    ui: {
+      role:'admin',
+      currentPhysId: null,
+      year:2025, quarter:1,
+      wkStart:null,
+      fillMode:null,
+      calMode:'next3',
+      calYear:new Date().getFullYear(),
+      selectedRow:null,
+      selectedCols:new Set(),
+      staffingFocus:null,
+      requestQuarter:'2025-1',
+      adminReqQuarter:'2025-1',
+      holYear:2025,
+    }
+  };
+}
 
 function groupInitials(name){
   const parts=String(name||'Hospitalist Schedule').replace(/hospitalists?/ig,'').trim().split(/\s+/).filter(Boolean);
@@ -1388,6 +1421,7 @@ function updateHeaderForUser(){
   if(mark)mark.textContent=groupInitials(group);
   el.textContent=isAdmin()?`${currentUser.username} (Admin)`:`${currentUser.username}`;
   updateSettingsMenuVisibility();
+  renderSitePicker();
 }
 
 async function saveData(silent=false){
@@ -1409,6 +1443,7 @@ async function saveData(silent=false){
 
 async function loadData(){
   setSyncStatus('loading');
+  S=freshAppState();
   try{
     const rows = await _sbGet('schedule_data', {id: currentScheduleRowId()});
     if(rows && rows.length > 0 && rows[0].data){
@@ -1422,6 +1457,53 @@ async function loadData(){
     toast('Database load failed: ' + errStr(e), 'error');
   }
   applyMigrations();
+}
+
+async function loadGroups(){
+  if(!currentUser||!currentUser.isMasterAdmin){
+    currentGroups=[{id:currentGroupId(),name:currentGroupName()}];
+    return;
+  }
+  try{
+    const rows=await _sbGet('groups',{});
+    currentGroups=(rows||[])
+      .map(g=>({id:g.id,name:g.name||g.id}))
+      .sort((a,b)=>String(a.name).localeCompare(String(b.name)));
+    if(!currentGroups.some(g=>g.id===currentGroupId())){
+      currentGroups.unshift({id:currentGroupId(),name:currentGroupName()});
+    }
+  }catch(e){
+    console.error('loadGroups error:',errStr(e),e);
+    currentGroups=[{id:currentGroupId(),name:currentGroupName()}];
+    toast('Could not load site list: '+errStr(e),'error',4000);
+  }
+}
+
+function renderSitePicker(){
+  const sel=document.getElementById('site-pick');
+  if(!sel)return;
+  if(!currentUser||!currentUser.isMasterAdmin){
+    sel.style.display='none';
+    return;
+  }
+  const groups=currentGroups.length?currentGroups:[{id:currentGroupId(),name:currentGroupName()}];
+  sel.innerHTML=groups.map(g=>`<option value="${qgEsc(g.id)}" ${g.id===currentGroupId()?'selected':''}>${qgEsc(g.name||g.id)}</option>`).join('');
+  sel.style.display='inline-block';
+}
+
+async function onSitePick(){
+  const sel=document.getElementById('site-pick');
+  if(!sel||!currentUser||!currentUser.isMasterAdmin)return;
+  const groupId=sel.value||DEFAULT_GROUP_ID;
+  const group=currentGroups.find(g=>g.id===groupId)||{id:groupId,name:groupId};
+  currentUser.groupId=group.id;
+  currentUser.groupName=group.name||group.id;
+  closeStaffingPopover();
+  S=freshAppState();
+  updateHeaderForUser();
+  await loadData();
+  finishInit();
+  toast('Switched to '+currentGroupName(),'success',2200);
 }
 
 function applyMigrations(){
@@ -1514,6 +1596,14 @@ async function createGroupAdmin(){
   try{
     await _sbUpsert('groups',{id:groupId,name});
     ['g-name','g-id'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+    if(currentUser&&currentUser.isMasterAdmin){
+      currentUser.groupId=groupId;
+      currentUser.groupName=name;
+      await loadGroups();
+      renderSitePicker();
+      await loadData();
+      finishInit();
+    }
     const msg=`Created ${name}. Auth user creation is now handled in Supabase Authentication. Add an Auth user and profile/membership row before giving another person access.`;
     if(status)status.textContent=msg;
     toast('Group created','success');
@@ -1542,19 +1632,20 @@ async function tryLogin(){
       return;
     }
     currentUser=userSessionFromAuth(authSession.user,profile);
-    completeLogin();
+    await completeLogin();
   }catch(e){
     errEl.textContent='Login error: '+errStr(e);
     console.error('tryLogin error:', errStr(e), e);
   }finally{if(btn){btn.disabled=false;btn.textContent='Sign In';}}
 }
 
-function completeLogin(){
+async function completeLogin(){
   document.getElementById('login-overlay').style.display='none';
   if(isPhysician()&&currentUser.docId)S.ui.currentPhysId=currentUser.docId;
+  await loadGroups();
   updateHeaderForUser();
-  // Load data and initialize the app after login
-  loadData().then(()=>finishInit());
+  await loadData();
+  finishInit();
 }
 async function logout(){
   await authSignOut();
@@ -7068,6 +7159,7 @@ async function appInit(){
         if(!profile)throw new Error('No profile row exists for this Auth user.');
         currentUser=userSessionFromAuth(authSession.user,profile);
         document.getElementById('login-overlay').style.display='none';
+        await loadGroups();
         if(statusEl)statusEl.textContent='Loading schedule data...';
         await loadData();
         finishInit();
