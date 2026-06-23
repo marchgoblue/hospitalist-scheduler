@@ -211,7 +211,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
 /* SCHEDULE GRID — Excel-like spreadsheet */
 .sheet-outer{border:1px solid var(--line);border-radius:0 0 4px 4px;background:#fff;overflow:auto;max-height:calc(100vh - 220px)}
 .sheet-wrap{overflow:visible;position:relative}
-.sheet-scrollbar{position:sticky;top:54px;z-index:35;height:16px;overflow-x:auto;overflow-y:hidden;background:#fff;border:1px solid var(--line);border-bottom:none;border-radius:4px 4px 0 0}
+.sheet-scrollbar{display:none;position:fixed;left:22px;right:22px;bottom:0;z-index:850;height:16px;overflow-x:auto;overflow-y:hidden;background:#fff;border:1px solid var(--line);border-radius:4px 4px 0 0;box-shadow:0 -4px 14px rgba(0,0,0,.12)}
 .sheet-scroll-spacer{height:1px}
 .sheet{border-collapse:collapse;background:#fff;table-layout:fixed;font-size:11px}
 .sheet th,.sheet td{border:1px solid var(--line);padding:0;text-align:center;vertical-align:middle;height:24px;line-height:1;background:#fff;position:relative}
@@ -324,7 +324,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
 /* Consult team badge */
 .consult-badge{display:inline-block;background:#dff5e6;color:#0a7044;border:1px solid #a8d8b8;border-radius:2px;font-size:9px;font-weight:700;padding:1px 4px;margin-right:5px;letter-spacing:.4px}
 /* Required OFF conflict highlight */
-.cell-REQCONFLICT{background:#ff6b6b!important;color:#fff!important;font-weight:700}
+.cell-REQCONFLICT{background:#d71920!important;color:#fff!important;font-weight:700}
 
 /* Data cells — explicit position+z-index so sticky cols (z>0) always win */
 .sheet tbody td.cell{
@@ -338,7 +338,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
 .sheet tbody td.cell.selected{outline:2px solid var(--selected);outline-offset:-2px;z-index:3}
 .sheet tbody td.cell.month-sep{border-left:2px solid #999}
 .sheet tbody td.cell.has-request{box-shadow:inset 0 0 0 2px var(--req-tx)}
-.sheet tbody td.cell.has-req-required{background:#fde2e2!important;color:#a01918!important;font-weight:700;box-shadow:inset 0 0 0 2px #a01918}
+.sheet tbody td.cell.has-req-required{background:#d71920!important;color:#fff!important;font-weight:800;box-shadow:inset 0 0 0 2px #8b0000}
 
 /* Shift backgrounds */
 .cell-R{background:var(--R)!important;color:var(--R-tx)}
@@ -419,7 +419,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
 .req-cal-day.empty{background:transparent;cursor:default}
 .req-cal-day.empty:hover{background:transparent}
 .req-cal-day.selected{background:var(--req)!important;color:var(--req-tx);font-weight:700;border:1px solid var(--req-tx)}
-.req-cal-day.req-required{background:#fde2e2!important;color:#a01918;font-weight:700;border:1.5px solid #a01918}
+.req-cal-day.req-required{background:#d71920!important;color:#fff;font-weight:800;border:1.5px solid #8b0000}
 .req-cal-day.req-optional{background:#fff5dc!important;color:#806000;font-weight:700;border:1.5px solid #a85800}
 .req-cal-day.disabled{opacity:.45;cursor:not-allowed}
 .req-cal-day.disabled:hover{background:#fff}
@@ -3977,6 +3977,7 @@ function updateDemoModeUI(){
   if(bannerText)bannerText.textContent=(S.ui&&S.ui.demoSummary)||'Temporary schedule is showing. Real data has not been saved.';
   if(exitBtn)exitBtn.disabled=!on;
   if(saveBtn)saveBtn.disabled=on;
+  syncScheduleDemoScrollbar();
   if(on)setSyncStatus('demo');
 }
 async function runStressTest(){
@@ -5001,7 +5002,7 @@ function renderSchedule(){
   const allDocs=activeDocs(year);
   if(!allDocs.length){
     document.getElementById('sheet-outer').innerHTML='<div class="sheet-wrap" id="sheet-wrap"><div style="padding:40px;text-align:center;color:var(--ink3)"><div style="font-weight:700;color:var(--ink);margin-bottom:6px">No providers in this roster yet.</div><div>Use <strong>Settings → Import qGenda Excel</strong> to populate this group, or add providers manually below.</div></div></div>';
-    syncScheduleTopScrollbar();
+    syncScheduleDemoScrollbar();
     return;
   }
   const consultDocs=allDocs.filter(isMedicalDirectorDoc).sort(providerSort);
@@ -5017,7 +5018,7 @@ function renderSchedule(){
   const fPrn=filterText?prnDocs.filter(d=>dname(d).toLowerCase().includes(filterText)):prnDocs;
   if(!fConsult.length&&!fRotation.length&&!fNocturnist.length&&!fApp.length&&!fPrn.length){
     document.getElementById('sheet-outer').innerHTML='<div class="sheet-wrap" id="sheet-wrap"><div style="padding:40px;text-align:center;color:var(--ink3)">No providers match filter.</div></div>';
-    syncScheduleTopScrollbar();
+    syncScheduleDemoScrollbar();
     return;
   }
   const visibleDocs=[...fConsult,...fRotation,...fNocturnist,...fApp,...fPrn];
@@ -5231,17 +5232,21 @@ function renderSchedule(){
 
   document.getElementById('sheet-outer').innerHTML=`<div class="sheet-wrap" id="sheet-wrap" style="--name-col-w:${nameColWidth}px"><span class="name-resizer" title="Drag to resize name column"></span>${html}</div>`;
   bindNameColumnResizer();
-  syncScheduleTopScrollbar();
+  syncScheduleDemoScrollbar();
   updateDemoModeUI();
   updateUndoButton();
 }
 
-function syncScheduleTopScrollbar(){
+function syncScheduleDemoScrollbar(){
   const outer=document.getElementById('sheet-outer');
   const top=document.getElementById('sheet-scrollbar');
   const spacer=document.getElementById('sheet-scroll-spacer');
   const wrap=document.getElementById('sheet-wrap');
   if(!outer||!top||!spacer)return;
+  if(!demoModeSnapshot){
+    top.style.display='none';
+    return;
+  }
   const scrollWidth=Math.max(outer.scrollWidth,wrap?wrap.scrollWidth:0,outer.clientWidth);
   spacer.style.width=scrollWidth+'px';
   top.style.display=scrollWidth>outer.clientWidth+2?'block':'none';
@@ -5261,7 +5266,7 @@ function syncScheduleTopScrollbar(){
     top.scrollLeft=outer.scrollLeft;
     syncing=false;
   });
-  window.addEventListener('resize',()=>setTimeout(syncScheduleTopScrollbar,0));
+  window.addEventListener('resize',()=>setTimeout(syncScheduleDemoScrollbar,0));
 }
 
 
