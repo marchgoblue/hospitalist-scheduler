@@ -14,6 +14,8 @@ const SUPABASE_URL  = 'https://wyvrtaqpakncaotlusdd.supabase.co';
 const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind5dnJ0YXFwYWtuY2FvdGx1c2RkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxMjgwMzIsImV4cCI6MjA5NDcwNDAzMn0.GSSZ9cY_rtJtL76mb2uChSXHrPbs3K8s05F1uX2Jpy4';
 const DATA_ROW_ID = 'main';
 const DEFAULT_GROUP_ID = 'main';
+const AUTH_SESSION_KEY = 'hs_auth_session';
+let authSession = null;
 
 // Direct REST helpers — no Supabase client library needed
 async function _sbFetch(path, opts={}){
@@ -24,7 +26,7 @@ async function _sbFetch(path, opts={}){
       headers: {
         'Content-Type': 'application/json',
         'apikey': SUPABASE_ANON,
-        'Authorization': 'Bearer ' + SUPABASE_ANON,
+        'Authorization': 'Bearer ' + ((authSession&&authSession.access_token)||SUPABASE_ANON),
         ...(opts.headers||{})
       }
     });
@@ -63,6 +65,50 @@ async function _sbPatch(table, eq, data){
     headers: {'Prefer': 'return=minimal'},
     body: JSON.stringify(data)
   });
+}
+
+async function _authFetch(path, opts={}){
+  const res = await fetch(SUPABASE_URL + path, {
+    ...opts,
+    headers: {
+      'Content-Type': 'application/json',
+      'apikey': SUPABASE_ANON,
+      ...(authSession&&authSession.access_token?{'Authorization':'Bearer '+authSession.access_token}:{}),
+      ...(opts.headers||{})
+    }
+  });
+  if(!res.ok){
+    const txt = await res.text().catch(()=>'');
+    throw new Error(`Supabase Auth ${opts.method||'GET'} ${path}: HTTP ${res.status} ${txt}`);
+  }
+  const txt = await res.text();
+  return txt ? JSON.parse(txt) : null;
+}
+
+async function authSignIn(email,password){
+  return _authFetch('/auth/v1/token?grant_type=password', {
+    method:'POST',
+    body:JSON.stringify({email,password})
+  });
+}
+
+async function authRefreshSession(refreshToken){
+  return _authFetch('/auth/v1/token?grant_type=refresh_token', {
+    method:'POST',
+    body:JSON.stringify({refresh_token:refreshToken})
+  });
+}
+
+async function authUpdatePassword(newPassword){
+  return _authFetch('/auth/v1/user', {
+    method:'PUT',
+    body:JSON.stringify({password:newPassword})
+  });
+}
+
+async function authSignOut(){
+  if(!authSession||!authSession.access_token)return;
+  try{await _authFetch('/auth/v1/logout',{method:'POST'});}catch(e){console.warn('Auth signout warning:',errStr(e));}
 }
 
 // getSB() returns a compatibility shim so all existing call sites work unchanged
@@ -104,7 +150,6 @@ function errStr(e){
   try{ return JSON.stringify(e); } catch(_){ return String(e); }
 }
 
-async function sha256(str){const buf=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(str));return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');}
 </script>
 <style>
 :root{
@@ -637,8 +682,8 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
 <div id="login-overlay">
   <div class="login-box">
     <h2>Hospitalist Schedule</h2>
-    <p style="color:var(--ink3);font-size:13px;margin-bottom:20px">Sign in with your username and password.</p>
-    <input class="login-input" id="un-input" type="text" placeholder="Username (e.g. jane.smith)" autocomplete="username" autocapitalize="none" spellcheck="false">
+    <p style="color:var(--ink3);font-size:13px;margin-bottom:20px">Sign in with your Supabase Auth email and password.</p>
+    <input class="login-input" id="un-input" type="email" placeholder="Email address" autocomplete="username" autocapitalize="none" spellcheck="false">
     <input class="login-input" id="pw-input" type="password" placeholder="Password" autocomplete="current-password" onkeydown="if(event.key==='Enter')tryLogin()">
     <div class="login-error" id="login-error"></div>
     <button class="btn btn-p" style="width:100%;padding:10px;font-size:14px" onclick="tryLogin()">Sign In</button>
@@ -1025,13 +1070,9 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
       <div class="fg"><label>Group Name</label><input type="text" id="g-name" placeholder="Athens Hospitalists" style="width:190px" oninput="suggestGroupId()"></div>
       <div class="fg"><label>Group ID</label><input type="text" id="g-id" placeholder="athens-hospitalists" style="width:180px" oninput="this.dataset.touched='1'"></div>
     </div>
-    <div class="row">
-      <div class="fg"><label>Admin Username</label><input type="text" id="g-admin" placeholder="athens.admin" style="width:160px" autocapitalize="none" spellcheck="false"></div>
-      <div class="fg"><label>Temporary Password</label><input type="password" id="g-pass" placeholder="Min 6 chars" style="width:140px"></div>
-    </div>
-    <button class="btn btn-g btn-sm" onclick="createGroupAdmin()">Create Group Admin</button>
+    <button class="btn btn-g btn-sm" onclick="createGroupAdmin()">Create Site</button>
     <div id="group-onboard-status" class="tx-xs tx-mu" style="margin-top:8px">
-      Creates a separate storage lane for a new hospitalist site.
+      Creates a separate storage lane for a new hospitalist site. Additional admin logins now use Supabase Authentication.
     </div>
   </div>
 </div>
@@ -1276,7 +1317,7 @@ let demoModeSnapshot = null;
 // ════════════════════════════════════════════════════════
 //  AUTH & STORAGE — per-user login, Supabase-backed
 // ════════════════════════════════════════════════════════
-let currentUser=null; // {username,role,docId,groupId,groupName}
+let currentUser=null; // {userId,email,username,role,docId,groupId,groupName,isMasterAdmin}
 let isSaving=false,pendingSave=false;
 function isAdmin(){return currentUser&&currentUser.role==='admin';}
 function isPhysician(){return currentUser&&currentUser.role==='physician';}
@@ -1427,24 +1468,25 @@ async function pollForChanges(){
 }
 setInterval(pollForChanges,30000);
 
-async function getUser(u){
-  try{const rows=await _sbGet('users',{username:u});return(rows&&rows.length>0)?rows[0]:null;}
-  catch(e){console.error('getUser:',errStr(e));return null;}
+async function getProfile(userId){
+  try{const rows=await _sbGet('profiles',{user_id:userId});return(rows&&rows.length>0)?rows[0]:null;}
+  catch(e){console.error('getProfile:',errStr(e));return null;}
 }
-function userSessionFromRow(user){
+function userSessionFromAuth(authUser,profile){
+  const email=(authUser&&authUser.email)||profile?.email||'';
+  const name=profile?.display_name||email||'User';
+  const master=!!profile?.is_master_admin;
   return {
-    username:user.username,
-    role:user.role,
-    docId:user.doc_id,
-    groupId:user.group_id||DEFAULT_GROUP_ID,
-    groupName:user.group_name||user.group_id||DEFAULT_GROUP_ID
+    userId:authUser.id,
+    email,
+    username:name,
+    role:master?'admin':'physician',
+    docId:profile?.doc_id||null,
+    groupId:profile?.group_id||DEFAULT_GROUP_ID,
+    groupName:profile?.group_name||profile?.group_id||DEFAULT_GROUP_ID,
+    isMasterAdmin:master
   };
 }
-async function updatePasswordInDB(u,h){
-  try{await _sbPatch('users',{username:u},{password_hash:h});return true;}
-  catch(e){console.error('updatePwd:',errStr(e));return false;}
-}
-
 function slugifyGroupId(name){
   return String(name||'')
     .trim()
@@ -1465,54 +1507,41 @@ async function createGroupAdmin(){
   if(!isAdmin()){toast('Admin only','error');return;}
   const name=(document.getElementById('g-name')?.value||'').trim();
   const groupId=slugifyGroupId(document.getElementById('g-id')?.value||name);
-  const username=(document.getElementById('g-admin')?.value||'').trim().toLowerCase();
-  const password=document.getElementById('g-pass')?.value||'';
   const status=document.getElementById('group-onboard-status');
   if(status)status.textContent='';
   if(!name){toast('Group name required','error');return;}
   if(!groupId){toast('Group ID required','error');return;}
-  if(!username){toast('Admin username required','error');return;}
-  if(password.length<6){toast('Temporary password must be at least 6 characters','error');return;}
   try{
-    const existingUser=await _sbGet('users',{username});
-    if(existingUser&&existingUser.length){
-      toast('That username already exists. Choose a site-specific username.','error');
-      if(status)status.textContent='Username already exists.';
-      return;
-    }
     await _sbUpsert('groups',{id:groupId,name});
-    await _sbUpsert('users',{
-      username,
-      password_hash:await sha256(password),
-      role:'admin',
-      doc_id:null,
-      group_id:groupId,
-      group_name:name
-    });
-    ['g-name','g-id','g-admin','g-pass'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
-    const msg=`Created ${name}. New admin can sign in as ${username}; their qGenda import will save separately under ${groupId}.`;
+    ['g-name','g-id'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+    const msg=`Created ${name}. Auth user creation is now handled in Supabase Authentication. Add an Auth user and profile/membership row before giving another person access.`;
     if(status)status.textContent=msg;
-    toast('Group admin created','success');
+    toast('Group created','success');
   }catch(e){
     console.error('createGroupAdmin error:',errStr(e),e);
-    const msg='Could not create group admin: '+errStr(e);
+    const msg='Could not create group: '+errStr(e);
     if(status)status.textContent=msg;
     toast(msg,'error',5000);
   }
 }
 
 async function tryLogin(){
-  const username=document.getElementById('un-input').value.trim().toLowerCase();
+  const email=document.getElementById('un-input').value.trim().toLowerCase();
   const password=document.getElementById('pw-input').value;
   const errEl=document.getElementById('login-error');errEl.textContent='';
-  if(!username||!password){errEl.textContent='Enter username and password.';return;}
+  if(!email||!password){errEl.textContent='Enter email and password.';return;}
   const btn=document.querySelector('#login-overlay .btn-p');if(btn){btn.disabled=true;btn.textContent='Signing in…';}
   try{
-    const hash=await sha256(password);
-    const user=await getUser(username);
-    if(!user){errEl.textContent='User not found. Check username.';return;}
-    if(user.password_hash!==hash){errEl.textContent='Incorrect password.';return;}
-    currentUser=userSessionFromRow(user);
+    authSession=await authSignIn(email,password);
+    sessionStorage.setItem(AUTH_SESSION_KEY,JSON.stringify(authSession));
+    const profile=await getProfile(authSession.user.id);
+    if(!profile){
+      sessionStorage.removeItem(AUTH_SESSION_KEY);
+      authSession=null;
+      errEl.textContent='Login worked, but no profile row exists for this Auth user.';
+      return;
+    }
+    currentUser=userSessionFromAuth(authSession.user,profile);
     completeLogin();
   }catch(e){
     errEl.textContent='Login error: '+errStr(e);
@@ -1521,14 +1550,23 @@ async function tryLogin(){
 }
 
 function completeLogin(){
-  sessionStorage.setItem('hs_user',JSON.stringify(currentUser));
   document.getElementById('login-overlay').style.display='none';
   if(isPhysician()&&currentUser.docId)S.ui.currentPhysId=currentUser.docId;
   updateHeaderForUser();
   // Load data and initialize the app after login
   loadData().then(()=>finishInit());
 }
-function logout(){sessionStorage.removeItem('hs_user');currentUser=null;location.reload();}
+async function logout(){
+  await authSignOut();
+  sessionStorage.removeItem(AUTH_SESSION_KEY);
+  authSession=null;
+  currentUser=null;
+  location.reload();
+}
+function showLogin(){
+  const overlay=document.getElementById('login-overlay');
+  if(overlay)overlay.style.display='flex';
+}
 
 function showChangePasswordModal(){
   showModal('Change My Password',
@@ -1543,37 +1581,22 @@ function showChangePasswordModal(){
       if(!o||!n||!con){e.textContent='All fields required.';return;}
       if(n.length<6){e.textContent='Minimum 6 characters.';return;}
       if(n!==con){e.textContent='Passwords do not match.';return;}
-      const user=await getUser(currentUser.username);
-      if(!user||user.password_hash!==await sha256(o)){e.textContent='Current password incorrect.';return;}
-      if(await updatePasswordInDB(currentUser.username,await sha256(n))){document.getElementById('modal').style.display='none';toast('Password changed','success');}
-      else e.textContent='Failed — try again.';
+      try{
+        authSession=await authSignIn(currentUser.email,o);
+        sessionStorage.setItem(AUTH_SESSION_KEY,JSON.stringify(authSession));
+        await authUpdatePassword(n);
+        document.getElementById('modal').style.display='none';
+        toast('Password changed','success');
+      }catch(err){
+        e.textContent='Password change failed: '+errStr(err);
+      }
     }
   );
 }
 
 async function adminResetPassword(docId){
   if(!isAdmin()){toast('Admin only','error');return;}
-  const doc=byId(docId);if(!doc)return;
-  let rows; try{rows=await _sbGet('users',{doc_id:docId});}catch(e){toast('No database: '+errStr(e),'error');return;}
-  rows=(rows||[]).filter(u=>!u.group_id||u.group_id===currentGroupId());
-  if(!rows||rows.length===0){toast('No account found','error');return;}
-  const data=rows[0];
-  const uname=data.username;
-  showModal(`🔑 Reset Password — ${dname(doc)}`,
-    `<div class="tx-sm mb">Reset password for <strong>${uname}</strong>.</div>
-     <div class="fg mb"><label>New Password</label><input type="password" id="rp-new" class="login-input" placeholder="New password (min 4 chars)"></div>
-     <div class="fg mb"><label>Confirm</label><input type="password" id="rp-confirm" class="login-input" placeholder="Confirm"></div>
-     <div class="login-error" id="rp-error"></div>`,
-    'Reset Password',
-    async()=>{
-      const n=document.getElementById('rp-new').value,con=document.getElementById('rp-confirm').value;
-      const e=document.getElementById('rp-error');
-      if(!n||n.length<4){e.textContent='Too short (min 4 chars).';return;}
-      if(n!==con){e.textContent='Passwords do not match.';return;}
-      if(await updatePasswordInDB(uname,await sha256(n))){document.getElementById('modal').style.display='none';toast(`Password reset for ${dname(doc)}`,'success');}
-      else e.textContent='Failed — try again.';
-    }
-  );
+  toast('Password resets now use Supabase Authentication. Use the Supabase dashboard until the secure invite/reset flow is added.','info',5000);
 }
 
 // loadData is now async (Supabase version above)
@@ -7029,50 +7052,30 @@ S.ui.adminReqQuarter=`${defReqY}-${defReqQ}`;
 async function appInit(){
   const statusEl=document.getElementById('supabase-status');
 
-  if(statusEl)statusEl.textContent='Connecting to database…';
+  if(statusEl)statusEl.textContent='Enter your Supabase Auth credentials';
 
-  // Quick connectivity check before trying session restore
-  try{
-    await _sbGet('schedule_data',{id:DATA_ROW_ID});
-    if(statusEl)statusEl.textContent='✓ Connected — enter your credentials';
-  }catch(e){
-    if(statusEl)statusEl.innerHTML='⚠ Database unreachable — <a href="https://supabase.com/dashboard" target="_blank" style="color:#1b4d8f">check if project is paused</a>';
-    console.error('DB connectivity check failed:',errStr(e));
-    // Still show the login form — user can try anyway
-  }
-
-  // Restore session — but VERIFY against database to prevent sessionStorage tampering
-  const saved=sessionStorage.getItem('hs_user');
+  // Restore Supabase Auth session.
+  const saved=sessionStorage.getItem(AUTH_SESSION_KEY);
   if(saved){
     try{
       let parsed=null;
       try{parsed=JSON.parse(saved);}catch(e){}
-      if(parsed&&parsed.username){
-        if(statusEl)statusEl.textContent='Verifying session for '+parsed.username+'…';
-        const dbUser=await getUser(parsed.username);
-        if(dbUser&&dbUser.role===parsed.role&&dbUser.doc_id===parsed.docId){
-          const verified=userSessionFromRow(dbUser);
-          if((parsed.groupId||DEFAULT_GROUP_ID)!==verified.groupId){
-            sessionStorage.removeItem('hs_user');
-            currentUser=null;
-            if(statusEl)statusEl.textContent='Session group changed — please sign in again';
-            return;
-          }
-          currentUser=verified;
-          document.getElementById('login-overlay').style.display='none';
-          if(statusEl)statusEl.textContent='Loading schedule data…';
-          await loadData();
-          finishInit();
-          return;
-        } else {
-          sessionStorage.removeItem('hs_user');
-          currentUser=null;
-          if(statusEl)statusEl.textContent='Session expired — please sign in again';
-        }
+      if(parsed&&parsed.refresh_token){
+        if(statusEl)statusEl.textContent='Restoring secure session...';
+        authSession=await authRefreshSession(parsed.refresh_token);
+        sessionStorage.setItem(AUTH_SESSION_KEY,JSON.stringify(authSession));
+        const profile=await getProfile(authSession.user.id);
+        if(!profile)throw new Error('No profile row exists for this Auth user.');
+        currentUser=userSessionFromAuth(authSession.user,profile);
+        document.getElementById('login-overlay').style.display='none';
+        if(statusEl)statusEl.textContent='Loading schedule data...';
+        await loadData();
+        finishInit();
+        return;
       }
     } catch(e){
       console.error('Session restore error:',errStr(e),e);
-      sessionStorage.removeItem('hs_user');
+      sessionStorage.removeItem(AUTH_SESSION_KEY);
       currentUser=null;
       if(statusEl)statusEl.textContent='Session error: '+errStr(e)+' — please sign in';
     }
