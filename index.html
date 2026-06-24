@@ -3747,11 +3747,22 @@ function strictWorkBlocksForDoc(doc,days,startD,phase){
 function chooseStrictSwingBlocks(pool,days,startD,phaseById,targetSwingForDay,candidateSeed,activeBlockIds=null){
   const swingCounts=days.map(()=>0);
   const selected=new Set();
+  const selectedBlocks=new Set();
   const selectedByDoc={};
-  const blocks=[];
+  const candidates=[];
   const totalTarget=days.reduce((sum,d,idx)=>sum+targetSwingForDay(dstrD(d),idx),0);
   const totalFte=pool.reduce((sum,d)=>sum+(parseFloat(d.fte)||1),0)||1;
   const targetPerFte=totalTarget/totalFte;
+  function swingCandidatesForBlock(block){
+    const fullId=block.id+'|full';
+    if(isSwingBlock(block.doc))return [{...block,id:fullId,baseId:block.id,swingDays:block.days}];
+    const tail2=block.days.filter(x=>x.pos>=5);
+    const tail1=block.days.filter(x=>x.pos>=6);
+    const out=[];
+    if(tail2.length)out.push({...block,id:block.id+'|tail2',baseId:block.id,swingDays:tail2});
+    if(tail1.length)out.push({...block,id:block.id+'|tail1',baseId:block.id,swingDays:tail1});
+    return out;
+  }
   pool.forEach(doc=>{
     const phase=phaseById[doc.id];
     if(phase===undefined)return;
@@ -3760,18 +3771,20 @@ function chooseStrictSwingBlocks(pool,days,startD,phaseById,targetSwingForDay,ca
       block.id=doc.id+'|'+block.startIdx+'|'+blockIdx;
       block.forced=continuing==='S'&&block.days.some(x=>x.idx===0);
       block.lockR=continuing==='R'&&block.days.some(x=>x.idx===0);
-      blocks.push(block);
+      swingCandidatesForBlock(block).forEach(c=>candidates.push(c));
     });
   });
-  blocks.forEach(block=>{
+  candidates.forEach(block=>{
     if(!block.forced)return;
+    if(selectedBlocks.has(block.baseId))return;
     selected.add(block.id);
-    selectedByDoc[block.doc.id]=(selectedByDoc[block.doc.id]||0)+block.days.length;
-    block.days.forEach(x=>{swingCounts[x.idx]++;});
+    selectedBlocks.add(block.baseId);
+    selectedByDoc[block.doc.id]=(selectedByDoc[block.doc.id]||0)+block.swingDays.length;
+    block.swingDays.forEach(x=>{swingCounts[x.idx]++;});
   });
   function errorWith(block=null){
     return days.reduce((sum,d,idx)=>{
-      const add=block&&block.days.some(x=>x.idx===idx)?1:0;
+      const add=block&&block.swingDays.some(x=>x.idx===idx)?1:0;
       const diff=(swingCounts[idx]+add)-targetSwingForDay(dstrD(d),idx);
       return sum+diff*diff;
     },0);
@@ -3785,14 +3798,15 @@ function chooseStrictSwingBlocks(pool,days,startD,phaseById,targetSwingForDay,ca
     improved=false;
     const base=errorWith();
     let best=null;
-    blocks.forEach(block=>{
+    candidates.forEach(block=>{
       if(selected.has(block.id)||block.lockR)return;
-      if(activeBlockIds&&activeBlockIds.size&&!activeBlockIds.has(block.id))return;
-      if(!block.days.length)return;
+      if(selectedBlocks.has(block.baseId))return;
+      if(activeBlockIds&&activeBlockIds.size&&!activeBlockIds.has(block.baseId))return;
+      if(!block.swingDays.length)return;
       const doc=block.doc;
       const target=Math.max(1,Math.round((parseFloat(doc.fte)||1)*targetPerFte));
       const current=selectedByDoc[doc.id]||0;
-      const blockDays=block.days.length;
+      const blockDays=block.swingDays.length;
       const after=current+blockDays;
       const fairnessPenalty=fairnessCost(after,target)-fairnessCost(current,target);
       const score=errorWith(block)+fairnessPenalty+current*1.5+_candidateUnit(candidateSeed,block.id+'|swing')*0.01;
@@ -3801,8 +3815,9 @@ function chooseStrictSwingBlocks(pool,days,startD,phaseById,targetSwingForDay,ca
     });
     if(best){
       selected.add(best.block.id);
-      selectedByDoc[best.block.doc.id]=(selectedByDoc[best.block.doc.id]||0)+best.block.days.length;
-      best.block.days.forEach(x=>{swingCounts[x.idx]++;});
+      selectedBlocks.add(best.block.baseId);
+      selectedByDoc[best.block.doc.id]=(selectedByDoc[best.block.doc.id]||0)+best.block.swingDays.length;
+      best.block.swingDays.forEach(x=>{swingCounts[x.idx]++;});
       improved=true;
     }
   }
@@ -3906,10 +3921,11 @@ function assignStrictBaseline({strictAll,swingOnly,days,startD,candidateSeed,str
       strictWorkBlocksForDoc(doc,days,startD,phase).forEach((block,blockIdx)=>{
         const blockId=doc.id+'|'+block.startIdx+'|'+blockIdx;
         if(!workBlocks.has(blockId))return;
-        const shift=swingBlocks.has(blockId)?'S':'R';
+        const wholeSwing=swingBlocks.has(blockId+'|full')||swingBlocks.has(blockId);
         block.days.forEach(x=>{
           if(!S.sched[doc.id])S.sched[doc.id]={};
-          S.sched[doc.id][x.ds]=shift;
+          const tailSwing=swingBlocks.has(blockId+'|tail2')&&x.pos>=5 || swingBlocks.has(blockId+'|tail1')&&x.pos>=6;
+          S.sched[doc.id][x.ds]=(wholeSwing||tailSwing)?'S':'R';
         });
       });
       days.forEach((d,idx)=>{
@@ -3929,7 +3945,9 @@ function assignStrictBaseline({strictAll,swingOnly,days,startD,candidateSeed,str
         if(!workBlocks.has(blockId))return;
         block.days.forEach(x=>{
           if(!workingByDate[x.ds])workingByDate[x.ds]=[];
-          workingByDate[x.ds].push({doc,preferS:swingBlocks.has(blockId)});
+          const wholeSwing=swingBlocks.has(blockId+'|full')||swingBlocks.has(blockId);
+          const tailSwing=swingBlocks.has(blockId+'|tail2')&&x.pos>=5 || swingBlocks.has(blockId+'|tail1')&&x.pos>=6;
+          workingByDate[x.ds].push({doc,preferS:wholeSwing||tailSwing});
         });
       });
       days.forEach(d=>{
@@ -4712,21 +4730,24 @@ function _generateQuarter(candidateSeed=0,finalize=true){
       return s.workInBlock+1<=s.maxWork;
     return false;
   }
+  function canBeS_lastResort(docId){
+    const s=state[docId];
+    if(!s||s.block!=='O') return false;
+    if(s.dayInBlock<MIN_R_HARD) return false;
+    return s.qS<=qSTarget(docId);
+  }
   function mustContinueR(docId){
     const s=state[docId];
     return s&&s.block==='W'&&s.lastShift==='R'
         &&s.runLen<Math.min(s.preferredR,SOFT_VARIABLE_WORK)&&s.workInBlock<SOFT_VARIABLE_WORK;
   }
   function mustContinueS_couplet(docId){
-    const s=state[docId];
-    if(!s||s.block!=='W'||s.lastShift!=='S'||s.workInBlock>=s.maxWork) return false;
-    return s.runLen===1 && s.runLen<MAX_S_BLOCK;
+    return false;
   }
   function canBeOff(docId){
     const s=state[docId];
     if(!s) return true;
     if(s.block==='W'&&s.lastShift==='R'&&s.runLen<MIN_R_HARD) return false;
-    if(s.block==='W'&&s.lastShift==='S'&&s.runLen<MAX_S_BLOCK&&s.workInBlock<s.maxWork) return false;
     return true;
   }
   function assign(docId,shift,month){
@@ -4906,14 +4927,23 @@ function _generateQuarter(candidateSeed=0,finalize=true){
       }
     });
 
-    // Helper: sort key for S candidates (monthly fairness first, then quarterly)
+    // Helper: prefer clean 5-6 day R blocks with a 1-2 day S tail, then fairness.
+    function sTailScore(docId){
+      const s=state[docId];
+      if(!s||s.block!=='W')return 9;
+      if(s.lastShift==='S')return 1;
+      if(s.lastShift==='R'&&(s.runLen===5||s.runLen===6))return 0;
+      if(s.lastShift==='R'&&s.runLen===7)return 2;
+      if(s.lastShift==='R'&&s.runLen>=3)return 4;
+      return 9;
+    }
     function sSortKey(docId){
       const s=state[docId];
       const rem=ytdRemaining[docId]||0;
       const target=qSTarget(docId)||1;
       // Normalize qS by FTE target so part-time providers aren't over-scheduled for S
       const normalizedQS = s.qS / target;
-      return [-rem, s.monthCount[month], normalizedQS];
+      return [sTailScore(docId), -rem, s.monthCount[month], normalizedQS];
     }
 
     // STEP 4a: Normal S — BELOW monthly target (strongest fairness tier)
@@ -4921,8 +4951,8 @@ function _generateQuarter(candidateSeed=0,finalize=true){
       const cands=rotation
         .filter(d=>!assigned.has(d.id)&&canBeS_normal(d.id)&&state[d.id].monthCount[month]<MONTHLY_S_TARGET)
         .sort((a,b)=>{
-          const [ar,am,aq]=sSortKey(a.id), [br,bm,bq]=sSortKey(b.id);
-          return ar!==br?ar-br:am!==bm?am-bm:aq!==bq?aq-bq:_candidateTie(candidateSeed,ds,a.id)-_candidateTie(candidateSeed,ds,b.id);
+          const [at,ar,am,aq]=sSortKey(a.id), [bt,br,bm,bq]=sSortKey(b.id);
+          return at!==bt?at-bt:ar!==br?ar-br:am!==bm?am-bm:aq!==bq?aq-bq:_candidateTie(candidateSeed,ds,a.id)-_candidateTie(candidateSeed,ds,b.id);
         });
       let i=0;
       while(needS>0&&i<cands.length){
@@ -4936,8 +4966,8 @@ function _generateQuarter(candidateSeed=0,finalize=true){
       const cands=rotation
         .filter(d=>!assigned.has(d.id)&&canBeS_normal(d.id))
         .sort((a,b)=>{
-          const [ar,am,aq]=sSortKey(a.id), [br,bm,bq]=sSortKey(b.id);
-          return ar!==br?ar-br:am!==bm?am-bm:aq!==bq?aq-bq:_candidateTie(candidateSeed,ds,a.id)-_candidateTie(candidateSeed,ds,b.id);
+          const [at,ar,am,aq]=sSortKey(a.id), [bt,br,bm,bq]=sSortKey(b.id);
+          return at!==bt?at-bt:ar!==br?ar-br:am!==bm?am-bm:aq!==bq?aq-bq:_candidateTie(candidateSeed,ds,a.id)-_candidateTie(candidateSeed,ds,b.id);
         });
       let i=0;
       while(needS>0&&i<cands.length){
@@ -4951,7 +4981,8 @@ function _generateQuarter(candidateSeed=0,finalize=true){
       const cands=rotation
         .filter(d=>!assigned.has(d.id)&&canBeS_emergency(d.id))
         .sort((a,b)=>{
-          const [ar,am,aq]=sSortKey(a.id), [br,bm,bq]=sSortKey(b.id);
+          const [at,ar,am,aq]=sSortKey(a.id), [bt,br,bm,bq]=sSortKey(b.id);
+          if(at!==bt) return at-bt;
           if(ar!==br) return ar-br;
           if(am!==bm) return am-bm;
           if(aq!==bq) return aq-bq;
@@ -4966,8 +4997,25 @@ function _generateQuarter(candidateSeed=0,finalize=true){
       }
     }
 
-    // Never start S from OFF. A visible coverage shortage is preferable to an
-    // isolated swing block that must be dismantled manually.
+    // STEP 4d: Last-resort isolated S from OFF. This is intentionally after all
+    // R-tail options so a standalone S is only used to avoid a coverage miss.
+    if(needS>0){
+      const cands=rotation
+        .filter(d=>!assigned.has(d.id)&&canBeS_lastResort(d.id))
+        .sort((a,b)=>{
+          const sa=state[a.id],sb=state[b.id];
+          const aTarget=qSTarget(a.id)||1,bTarget=qSTarget(b.id)||1;
+          const aNorm=sa.qS/aTarget,bNorm=sb.qS/bTarget;
+          if(aNorm!==bNorm) return aNorm-bNorm;
+          if(sa.monthCount[month]!==sb.monthCount[month]) return sa.monthCount[month]-sb.monthCount[month];
+          return sb.dayInBlock-sa.dayInBlock||_candidateTie(candidateSeed,ds,a.id)-_candidateTie(candidateSeed,ds,b.id);
+        });
+      let i=0;
+      while(needS>0&&i<cands.length){
+        const doc=cands[i];
+        S.sched[doc.id][ds]='S';assign(doc.id,'S',month);assigned.add(doc.id);needS--;i++;
+      }
+    }
 
     // STEP 5a: Normal R fill — candidates eligible by rest rules
     // Sort priority: continuing R > most annual budget remaining > fewest monthly > fewest qR > most rested
@@ -4975,10 +5023,14 @@ function _generateQuarter(candidateSeed=0,finalize=true){
       .filter(d=>!assigned.has(d.id)&&canBeR(d.id,di))
       .sort((a,b)=>{
         const sa=state[a.id],sb=state[b.id];
-        // Continue through day 7, then prefer a clean new block. Days 8-10
-        // remain available when coverage cannot be met otherwise.
-        const aCont=(sa.block==='W'&&sa.lastShift==='R')?(sa.workInBlock<SOFT_VARIABLE_WORK?0:2):1;
-        const bCont=(sb.block==='W'&&sb.lastShift==='R')?(sb.workInBlock<SOFT_VARIABLE_WORK?0:2):1;
+        // Continue until preferredR, then prefer swing tails or rested starts.
+        // Longer R stretches remain available when needed for coverage.
+        const aCont=(sa.block==='W'&&sa.lastShift==='R')
+          ?(sa.runLen<sa.preferredR?0:(sa.runLen<SOFT_VARIABLE_WORK?2:4))
+          :1;
+        const bCont=(sb.block==='W'&&sb.lastShift==='R')
+          ?(sb.runLen<sb.preferredR?0:(sb.runLen<SOFT_VARIABLE_WORK?2:4))
+          :1;
         if(aCont!==bCont) return aCont-bCont;
         // Annual fairness: providers with more remaining budget get priority
         const aRem=ytdRemaining[a.id]||0, bRem=ytdRemaining[b.id]||0;
