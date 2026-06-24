@@ -274,12 +274,13 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
 }
 .sheet thead th.name-col{
   text-align:left;padding:6px 10px;min-width:var(--name-col-w,180px);width:var(--name-col-w,180px);
-  background:var(--hdr2);position:sticky;left:0;z-index:10;
+  background:var(--hdr2)!important;position:sticky;left:0;z-index:35;
   font-family:'Source Sans 3',sans-serif;font-size:11px;text-transform:uppercase;
-  transform:translateZ(0);
+  transform:translateZ(0);background-clip:padding-box;
+  box-shadow:2px 0 0 var(--line2),8px 0 0 var(--hdr2);
 }
-.name-resizer{position:absolute;top:0;left:calc(var(--name-col-w,180px) - 8px);width:16px;height:var(--name-resizer-h,100%);cursor:col-resize;z-index:40;touch-action:none}
-.name-resizer:after{content:"";position:absolute;top:4px;bottom:4px;left:7px;width:2px;background:#b8c2cc;border-radius:2px}
+.name-resizer{position:absolute;top:0;left:calc(var(--name-col-w,180px) - 10px);width:20px;height:var(--name-resizer-h,100%);cursor:col-resize;z-index:60;touch-action:none;background:transparent}
+.name-resizer:after{content:"";position:absolute;top:4px;bottom:4px;left:9px;width:2px;background:transparent;border-radius:2px}
 .name-resizer:hover:after{background:#1b4d8f}
 .sheet thead th.month-sep{background:#dfe6ec;border-left:2px solid #999}
 .sheet thead th.weekend{background:#e8e8e8;color:var(--ink3)}
@@ -291,13 +292,14 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
 /* Row labels (physician names) */
 .sheet tbody td.name-col{
   text-align:left;padding:4px 10px;font-weight:600;font-size:12px;
-  background:#fff;position:sticky;left:0;z-index:2;
+  background:#fff!important;position:sticky;left:0;z-index:25;
   border-right:2px solid var(--line2);width:var(--name-col-w,180px);min-width:var(--name-col-w,180px);
-  cursor:pointer;transform:translateZ(0);
+  cursor:pointer;transform:translateZ(0);background-clip:padding-box;
+  box-shadow:8px 0 0 #fff;
 }
-.sheet tbody td.name-col:hover{background:#eef5fb;color:#1f5a99}
-.sheet tbody tr:nth-child(even) td.name-col{background:var(--paper)}
-.sheet tbody tr:nth-child(even) td.name-col:hover{background:#eef5fb}
+.sheet tbody td.name-col:hover{background:#eef5fb!important;color:#1f5a99;box-shadow:8px 0 0 #eef5fb}
+.sheet tbody tr:nth-child(even) td.name-col{background:var(--paper)!important;box-shadow:8px 0 0 var(--paper)}
+.sheet tbody tr:nth-child(even) td.name-col:hover{background:#eef5fb!important;box-shadow:8px 0 0 #eef5fb}
 
 /* Section headers in schedule grid */
 .section-hdr{font-size:11px;font-weight:700;padding:4px 8px!important;letter-spacing:.5px;text-transform:uppercase;cursor:default}
@@ -2833,7 +2835,8 @@ function startNameColResize(ev){
   ev.preventDefault();
   ev.stopPropagation();
   const wrap=ev.target.closest('.sheet-wrap');
-  const table=wrap?wrap.querySelector('.sheet'):ev.target.closest('.sheet');
+  const outer=ev.target.closest('.sheet-outer');
+  const table=wrap?wrap.querySelector('.sheet'):(outer?outer.querySelector('.sheet'):ev.target.closest('.sheet'));
   const current=parseInt((table&&table.style.getPropertyValue('--name-col-w'))||'',10)||getSavedNameColWidth()||220;
   const startX=eventClientX(ev);
   function onMove(e){e.preventDefault();saveNameColWidth(current+(eventClientX(e)-startX));}
@@ -2859,7 +2862,30 @@ function startNameColResize(ev){
   document.addEventListener('touchend',onUp);
   document.addEventListener('touchcancel',onUp);
 }
+function currentRenderedNameColWidth(outer){
+  const table=outer&&outer.querySelector('.sheet');
+  return getSavedNameColWidth()
+    ||parseInt((table&&table.style.getPropertyValue('--name-col-w'))||'',10)
+    ||parseInt((outer&&outer.style.getPropertyValue('--name-col-w'))||'',10)
+    ||220;
+}
 function bindNameColumnResizer(){
+  document.querySelectorAll('.sheet-outer').forEach(outer=>{
+    if(!outer.dataset.nameResizeBound){
+      outer.dataset.nameResizeBound='1';
+      outer.addEventListener('mousemove',ev=>{
+        const rect=outer.getBoundingClientRect();
+        const width=currentRenderedNameColWidth(outer);
+        outer.style.cursor=Math.abs(ev.clientX-(rect.left+width))<=8?'col-resize':'';
+      });
+      outer.addEventListener('mouseleave',()=>{outer.style.cursor='';});
+      outer.addEventListener('mousedown',ev=>{
+        const rect=outer.getBoundingClientRect();
+        const width=currentRenderedNameColWidth(outer);
+        if(Math.abs(ev.clientX-(rect.left+width))<=8)startNameColResize(ev);
+      });
+    }
+  });
   document.querySelectorAll('.sheet-wrap').forEach(wrap=>{
     const table=wrap.querySelector('.sheet');
     if(table)wrap.style.setProperty('--name-resizer-h',table.offsetHeight+'px');
