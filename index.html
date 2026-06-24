@@ -1012,6 +1012,12 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
           <div class="dm-help">
             Use this to build a new site from a qGenda Calendar by Task file. The import creates providers, detects shift names, and maps those shifts into the scheduler. Use it again after each quarter to account for the shifts actually worked and correct the historical schedule from qGenda.
           </div>
+          <div class="row" style="margin-top:12px">
+            <div class="fg"><label>Fairness Tracking Start</label><input type="date" id="c-fairness-start" style="width:165px" onchange="autoSaveCfg(true)"></div>
+          </div>
+          <div class="dm-help">
+            Set this to the first date this tool should use for workload fairness. Earlier imported qGenda history stays visible for reports, but is ignored when balancing yearly rounding and swing shifts. Use the site go-live date if older shifts may include voluntary extras.
+          </div>
         </div>
         <aside class="qg-guide-pane">
           <h4>Before You Start</h4>
@@ -1315,7 +1321,7 @@ let S = {
   announcement: '',        // admin message displayed in physician portal
   qgendaShiftMap: {},      // {qGenda task label: 'R'|'S'|'N'|'IGNORE'}
   staffingDismissals: {},  // {dateStr: true} admin-hidden staffing issue flags
-  cfg: {annual:182, R:13, S:3, maxReq:15, maxWeekendReq:6, maxRequired:5},
+  cfg: {annual:182, R:13, S:3, maxReq:15, maxWeekendReq:6, maxRequired:5, fairnessStartDate:''},
   ui: {
     role:'admin',          // 'admin' or 'phys'
     currentPhysId: null,       // physician viewing as
@@ -1375,7 +1381,7 @@ function freshAppState(){
     announcement: '',
     qgendaShiftMap: {},
     staffingDismissals: {},
-    cfg: {annual:182, R:13, S:3, maxReq:15, maxWeekendReq:6, maxRequired:5},
+    cfg: {annual:182, R:13, S:3, maxReq:15, maxWeekendReq:6, maxRequired:5, fairnessStartDate:''},
     ui: {
       role:'admin',
       currentPhysId: null,
@@ -2828,7 +2834,7 @@ function freshGroupState(){
     qgendaShiftMap: {},
     qgendaShiftDetails: {},
     staffingDismissals: {},
-    cfg: {...{annual:182, R:13, S:3, maxReq:15, maxWeekendReq:6, maxRequired:5}, ...shiftCfgDefaults()},
+    cfg: {...{annual:182, R:13, S:3, maxReq:15, maxWeekendReq:6, maxRequired:5, fairnessStartDate:''}, ...shiftCfgDefaults()},
     ui: {
       role:'admin',
       currentPhysId:null,
@@ -3161,7 +3167,7 @@ function shiftCfgDefaults(){
   };
 }
 function ensureShiftCfg(){
-  S.cfg={...{annual:182,R:13,S:3,maxReq:15,maxWeekendReq:6,maxRequired:5},...(S.cfg||{})};
+  S.cfg={...{annual:182,R:13,S:3,maxReq:15,maxWeekendReq:6,maxRequired:5,fairnessStartDate:''},...(S.cfg||{})};
   const d=shiftCfgDefaults();
   Object.keys(d).forEach(k=>{if(S.cfg[k]===undefined)S.cfg[k]=Array.isArray(d[k])?[...d[k]]:d[k];});
 }
@@ -3189,7 +3195,8 @@ function syncCfgInputs(){
     ['c-app-nx',S.cfg.appNocturnistCrossCover||0],
     ['c-max-req',S.cfg.maxReq],
     ['c-max-required',S.cfg.maxRequired||5],
-    ['c-max-wk',S.cfg.maxWeekendReq]
+    ['c-max-wk',S.cfg.maxWeekendReq],
+    ['c-fairness-start',S.cfg.fairnessStartDate||'']
   ];
   pairs.forEach(([id,val])=>{const el=document.getElementById(id);if(el)el.value=val;});
 }
@@ -3488,9 +3495,24 @@ function fteValue(doc){
   const v=parseFloat(doc&&doc.fte);
   return Number.isFinite(v)?Math.max(0,v):1;
 }
+function fairnessTrackingStartDate(){
+  const ds=String(S&&S.cfg&&S.cfg.fairnessStartDate||'').trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(ds)?ds:'';
+}
+function countsForFairness(ds){
+  const start=fairnessTrackingStartDate();
+  return !start||String(ds)>=start;
+}
 function quarterShiftTotal(doc,days,shift){
   return days.reduce((sum,d)=>{
     const ds=dstrD(d);
+    return sum+((S.sched[doc.id]&&S.sched[doc.id][ds])===shift?1:0);
+  },0);
+}
+function fairnessQuarterShiftTotal(doc,days,shift){
+  return days.reduce((sum,d)=>{
+    const ds=dstrD(d);
+    if(!countsForFairness(ds))return sum;
     return sum+((S.sched[doc.id]&&S.sched[doc.id][ds])===shift?1:0);
   },0);
 }
@@ -3562,7 +3584,7 @@ function _scoreScheduleCandidate(year,q){
   });
 
   const swingDocs=physicianSwingEligibleDocs(year).filter(d=>fteValue(d)>0);
-  const totalSwing=swingDocs.reduce((sum,d)=>sum+quarterShiftTotal(d,days,'S'),0);
+  const totalSwing=swingDocs.reduce((sum,d)=>sum+fairnessQuarterShiftTotal(d,days,'S'),0);
   const totalFte=swingDocs.reduce((sum,d)=>sum+fteValue(d),0)||1;
   const priorSwingByDoc={};
   swingDocs.forEach(doc=>{
@@ -3570,7 +3592,7 @@ function _scoreScheduleCandidate(year,q){
     for(let pq=1;pq<q;pq++){
       const pqKey=`${year}-${pq}`;
       const base=S.baseSchedule&&S.baseSchedule[pqKey]&&S.baseSchedule[pqKey][doc.id];
-      if(base)Object.values(base).forEach(sh=>{if(sh==='S')priorS++;});
+      if(base)Object.entries(base).forEach(([ds,sh])=>{if(countsForFairness(ds)&&sh==='S')priorS++;});
     }
     priorSwingByDoc[doc.id]=priorS;
   });
@@ -3578,7 +3600,7 @@ function _scoreScheduleCandidate(year,q){
   const yearToDateSwingTotal=priorSwingTotal+totalSwing;
   swingDocs.forEach(doc=>{
     const expected=yearToDateSwingTotal*(fteValue(doc)/totalFte);
-    const actual=(priorSwingByDoc[doc.id]||0)+quarterShiftTotal(doc,days,'S');
+    const actual=(priorSwingByDoc[doc.id]||0)+fairnessQuarterShiftTotal(doc,days,'S');
     const diff=actual-expected;
     swingImbalance+=diff*diff;
     if(diff>3)swingImbalance+=(diff-3)*(diff-3)*3;
@@ -4694,9 +4716,12 @@ function _generateQuarter(candidateSeed=0,finalize=true){
   if(!S.requests[qKey]) S.requests[qKey]={};
   const requests=S.requests[qKey];
 
-  // Clear schedule for the quarter — but PRESERVE days before today (imported historical data)
+  // Clear schedule for the quarter — but PRESERVE days before today (imported historical data).
+  // Exception: master/admin work inside the demo group needs to rebuild realistic
+  // prior demo quarters from scratch, including variable-provider days.
   const todayD=new Date(); todayD.setHours(0,0,0,0);
-  const todayDs=demoHistoryTodayOverride||dstrD(todayD);
+  const demoAdminCanRewriteHistory=isDemoGroup()&&isAdmin()&&!isDemoSessionUser();
+  const todayDs=demoHistoryTodayOverride||(demoAdminCanRewriteHistory?'1900-01-01':dstrD(todayD));
   allActive.forEach(d=>{
     if(!S.sched[d.id]) S.sched[d.id]={};
     if(!S.teams) S.teams={};
@@ -4732,7 +4757,8 @@ function _generateQuarter(candidateSeed=0,finalize=true){
       const pqKey=`${year}-${pq}`;
       const base=S.baseSchedule&&S.baseSchedule[pqKey]&&S.baseSchedule[pqKey][doc.id];
       if(!base) continue;
-      Object.values(base).forEach(sh=>{
+      Object.entries(base).forEach(([ds,sh])=>{
+        if(!countsForFairness(ds))return;
         if(sh==='R') bR++;
         else if(sh==='S') bS++;
         else if(sh==='N') bN++;
@@ -4912,7 +4938,7 @@ function _generateQuarter(candidateSeed=0,finalize=true){
     if(s.block==='W'&&s.lastShift==='R'&&s.runLen<MIN_R_HARD) return false;
     return true;
   }
-  function assign(docId,shift,month){
+  function assign(docId,shift,month,dateStr=null){
     const s=state[docId];
     if(shift==='R'||shift==='S'){
       if(s.block==='O'){
@@ -4924,7 +4950,7 @@ function _generateQuarter(candidateSeed=0,finalize=true){
       if(shift==='R') s.qR++; else s.qS++;
       s.monthCount[month]++;
       // Decrement annual remaining budget as shifts are assigned
-      if(ytdRemaining[docId]!==undefined && ytdRemaining[docId]>0) ytdRemaining[docId]--;
+      if((!dateStr||countsForFairness(dateStr))&&ytdRemaining[docId]!==undefined&&ytdRemaining[docId]>0) ytdRemaining[docId]--;
     } else {
       if(s.block==='W'&&s.workInBlock>0){
         s.lastWorkSize=s.workInBlock;
@@ -5051,7 +5077,7 @@ function _generateQuarter(candidateSeed=0,finalize=true){
     rotation.forEach(doc=>{
       if(doc.startDate&&doc.startDate>ds){S.sched[doc.id][ds]='OFF';assigned.add(doc.id);return;}
       if(hasRequiredRequest(doc.id,ds)){
-        S.sched[doc.id][ds]='OFF';assign(doc.id,'OFF',month);assigned.add(doc.id);
+        S.sched[doc.id][ds]='OFF';assign(doc.id,'OFF',month,ds);assigned.add(doc.id);
       }
     });
 
@@ -5070,14 +5096,14 @@ function _generateQuarter(candidateSeed=0,finalize=true){
       return rA-rB||_candidateTie(candidateSeed,ds,a.id)-_candidateTie(candidateSeed,ds,b.id);
     });
     optionalRequestDocs.forEach(doc=>{
-      S.sched[doc.id][ds]='OFF';assign(doc.id,'OFF',month);assigned.add(doc.id);
+      S.sched[doc.id][ds]='OFF';assign(doc.id,'OFF',month,ds);assigned.add(doc.id);
     });
 
     // STEP 2: Forced R continuations (must reach preferredR)
     rotation.forEach(doc=>{
       if(assigned.has(doc.id)) return;
       if(mustContinueR(doc.id)){
-        S.sched[doc.id][ds]='R';assign(doc.id,'R',month);needR--;assigned.add(doc.id);
+        S.sched[doc.id][ds]='R';assign(doc.id,'R',month,ds);needR--;assigned.add(doc.id);
       }
     });
 
@@ -5085,7 +5111,7 @@ function _generateQuarter(candidateSeed=0,finalize=true){
     rotation.forEach(doc=>{
       if(assigned.has(doc.id)) return;
       if(mustContinueS_couplet(doc.id)){
-        S.sched[doc.id][ds]='S';assign(doc.id,'S',month);needS--;assigned.add(doc.id);
+        S.sched[doc.id][ds]='S';assign(doc.id,'S',month,ds);needS--;assigned.add(doc.id);
       }
     });
 
@@ -5119,7 +5145,7 @@ function _generateQuarter(candidateSeed=0,finalize=true){
       let i=0;
       while(needS>0&&i<cands.length){
         const doc=cands[i];
-        S.sched[doc.id][ds]='S';assign(doc.id,'S',month);assigned.add(doc.id);needS--;i++;
+        S.sched[doc.id][ds]='S';assign(doc.id,'S',month,ds);assigned.add(doc.id);needS--;i++;
       }
     }
 
@@ -5134,7 +5160,7 @@ function _generateQuarter(candidateSeed=0,finalize=true){
       let i=0;
       while(needS>0&&i<cands.length){
         const doc=cands[i];
-        S.sched[doc.id][ds]='S';assign(doc.id,'S',month);assigned.add(doc.id);needS--;i++;
+        S.sched[doc.id][ds]='S';assign(doc.id,'S',month,ds);assigned.add(doc.id);needS--;i++;
       }
     }
 
@@ -5156,7 +5182,7 @@ function _generateQuarter(candidateSeed=0,finalize=true){
       let i=0;
       while(needS>0&&i<cands.length){
         const doc=cands[i];
-        S.sched[doc.id][ds]='S';assign(doc.id,'S',month);assigned.add(doc.id);needS--;i++;
+        S.sched[doc.id][ds]='S';assign(doc.id,'S',month,ds);assigned.add(doc.id);needS--;i++;
       }
     }
 
@@ -5175,7 +5201,7 @@ function _generateQuarter(candidateSeed=0,finalize=true){
       let i=0;
       while(needS>0&&i<cands.length){
         const doc=cands[i];
-        S.sched[doc.id][ds]='S';assign(doc.id,'S',month);assigned.add(doc.id);needS--;i++;
+        S.sched[doc.id][ds]='S';assign(doc.id,'S',month,ds);assigned.add(doc.id);needS--;i++;
       }
     }
 
@@ -5206,7 +5232,7 @@ function _generateQuarter(candidateSeed=0,finalize=true){
     let ri=0;
     while(needR>0&&ri<rCandidates.length){
       const doc=rCandidates[ri];
-      S.sched[doc.id][ds]='R';assign(doc.id,'R',month);assigned.add(doc.id);needR--;ri++;
+      S.sched[doc.id][ds]='R';assign(doc.id,'R',month,ds);assigned.add(doc.id);needR--;ri++;
     }
 
     // STEP 5b: Emergency R — relax rest requirement, allow rest ≥ MIN_R_HARD
@@ -5231,7 +5257,7 @@ function _generateQuarter(candidateSeed=0,finalize=true){
       let rei=0;
       while(needR>0&&rei<rEmerg.length){
         const doc=rEmerg[rei];
-        S.sched[doc.id][ds]='R';assign(doc.id,'R',month);assigned.add(doc.id);needR--;rei++;
+        S.sched[doc.id][ds]='R';assign(doc.id,'R',month,ds);assigned.add(doc.id);needR--;rei++;
       }
     }
 
@@ -5255,16 +5281,16 @@ function _generateQuarter(candidateSeed=0,finalize=true){
       let rli=0;
       while(needR>0&&rli<rLast.length){
         const doc=rLast[rli];
-        S.sched[doc.id][ds]='R';assign(doc.id,'R',month);assigned.add(doc.id);needR--;rli++;
+        S.sched[doc.id][ds]='R';assign(doc.id,'R',month,ds);assigned.add(doc.id);needR--;rli++;
       }
     }
 
     // STEP 6: Everyone else OFF (variable providers only — strict already pre-assigned)
     rotation.forEach(doc=>{
       if(assigned.has(doc.id)) return;
-      if(mustContinueR(doc.id)){S.sched[doc.id][ds]='R';assign(doc.id,'R',month);return;}
-      if(mustContinueS_couplet(doc.id)){S.sched[doc.id][ds]='S';assign(doc.id,'S',month);return;}
-      S.sched[doc.id][ds]='OFF';assign(doc.id,'OFF',month);
+      if(mustContinueR(doc.id)){S.sched[doc.id][ds]='R';assign(doc.id,'R',month,ds);return;}
+      if(mustContinueS_couplet(doc.id)){S.sched[doc.id][ds]='S';assign(doc.id,'S',month,ds);return;}
+      S.sched[doc.id][ds]='OFF';assign(doc.id,'OFF',month,ds);
     });
     // Part-time providers also get OFF if not already assigned
     partTime.forEach(doc=>{
@@ -5565,9 +5591,11 @@ function recheckFairness(){
     days.forEach(d=>{
       const ds=dstrD(d);
       const sh=(S.sched[doc.id]&&S.sched[doc.id][ds])||'OFF';
-      if(sh==='R'||sh==='S'||sh==='H') total++;
-      if(sh==='S'||sh==='H') swing++;
-      if((sh==='R'||sh==='S'||sh==='H')&&isWeekend(d)) weekends++;
+      if(countsForFairness(ds)){
+        if(sh==='R'||sh==='S'||sh==='H') total++;
+        if(sh==='S'||sh==='H') swing++;
+        if((sh==='R'||sh==='S'||sh==='H')&&isWeekend(d)) weekends++;
+      }
     });
     // Check required request conflicts
     const reqEntry=requests[doc.id];
@@ -5639,8 +5667,10 @@ function recheckFairness(){
 
   // ── Render ──
   const panel=document.getElementById('fairness-content');
-  const fteNote=fteDocs.length<stats.length
-    ? `<span class="tx-mu"> · Part-time providers compared at their FTE-prorated expected values</span>`:'';
+  const fairnessStart=fairnessTrackingStartDate();
+  const startNote=fairnessStart?` · fairness counted from ${fairnessStart}`:'';
+  const fteNote=(fteDocs.length<stats.length
+    ? `<span class="tx-mu"> · Part-time providers compared at their FTE-prorated expected values</span>`:'')+startNote;
   if(flags.length===0){
     panel.innerHTML=`
       <div style="background:#dff5e6;border:1px solid #a8d8b8;border-radius:4px;padding:12px 16px;color:#0a7044;font-weight:600">
@@ -7531,6 +7561,8 @@ function saveCfg(opts={}){
   S.cfg.maxReq=cfgInputInt('c-max-req',S.cfg.maxReq||15);
   S.cfg.maxRequired=cfgInputInt('c-max-required',S.cfg.maxRequired||5);
   S.cfg.maxWeekendReq=cfgInputInt('c-max-wk',S.cfg.maxWeekendReq||6);
+  const fairnessStartEl=document.getElementById('c-fairness-start');
+  S.cfg.fairnessStartDate=(fairnessStartEl&&fairnessStartEl.value)||'';
   renderFlexibleGuidance();
   saveData(silent);
   if(!silent)toast('Settings saved','success');
