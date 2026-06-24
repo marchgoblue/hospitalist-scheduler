@@ -8,7 +8,7 @@
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script>
 // ══════════════════════════════════════════════════════
-//  SUPABASE CONFIG — direct REST fetch (no client library, avoids DataCloneError)
+//  DATABASE CONFIG — direct REST fetch (no client library, avoids DataCloneError)
 // ══════════════════════════════════════════════════════
 const SUPABASE_URL  = 'https://wyvrtaqpakncaotlusdd.supabase.co';
 const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind5dnJ0YXFwYWtuY2FvdGx1c2RkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxMjgwMzIsImV4cCI6MjA5NDcwNDAzMn0.GSSZ9cY_rtJtL76mb2uChSXHrPbs3K8s05F1uX2Jpy4';
@@ -31,12 +31,13 @@ async function _sbFetch(path, opts={}){
       }
     });
   } catch(e){
-    // Network-level failure — most likely the Supabase project is paused or offline
-    throw new Error('Cannot reach database (project may be paused at supabase.com): ' + e.message);
+    console.warn('Database network error:', e);
+    throw new Error('Cannot reach database. Please try again later.');
   }
   if(!res.ok){
     const txt = await res.text().catch(()=>'');
-    throw new Error(`Supabase ${opts.method||'GET'} ${path}: HTTP ${res.status} ${txt}`);
+    console.warn('Database request failed:', opts.method||'GET', path, res.status, txt);
+    throw new Error(`Database request failed (${res.status}).`);
   }
   const txt = await res.text();
   return txt ? JSON.parse(txt) : null;
@@ -79,7 +80,8 @@ async function _authFetch(path, opts={}){
   });
   if(!res.ok){
     const txt = await res.text().catch(()=>'');
-    throw new Error(`Supabase Auth ${opts.method||'GET'} ${path}: HTTP ${res.status} ${txt}`);
+    console.warn('Authentication request failed:', opts.method||'GET', path, res.status, txt);
+    throw new Error(`Authentication request failed (${res.status}).`);
   }
   const txt = await res.text();
   return txt ? JSON.parse(txt) : null;
@@ -1092,7 +1094,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
     </div>
     <button class="btn btn-g btn-sm" onclick="createGroupAdmin()">Create Site</button>
     <div id="group-onboard-status" class="tx-xs tx-mu" style="margin-top:8px">
-      Creates a separate storage lane for a new hospitalist site. Additional admin logins now use Supabase Authentication.
+      Creates a separate storage lane for a new hospitalist site. Additional admin logins are managed through the secure user system.
     </div>
   </div>
 </div>
@@ -1827,7 +1829,7 @@ async function createGroupAdmin(){
       await loadData();
       finishInit();
     }
-    const msg=`Created ${name}. Auth user creation is now handled in Supabase Authentication. Add an Auth user and profile/membership row before giving another person access.`;
+    const msg=`Created ${name}. Add a secure login plus profile and membership row before giving another person access.`;
     if(status)status.textContent=msg;
     toast('Group created','success');
   }catch(e){
@@ -1913,10 +1915,10 @@ function showChangePasswordModal(){
 
 async function adminResetPassword(docId){
   if(!isAdmin()){toast('Admin only','error');return;}
-  toast('Password resets now use Supabase Authentication. Use the Supabase dashboard until the secure invite/reset flow is added.','info',5000);
+  toast('Password resets use the secure user system. Use the admin dashboard until the invite/reset flow is added here.','info',5000);
 }
 
-// loadData is now async (Supabase version above)
+// loadData is async and database-backed.
 // ════════════════════════════════════════════════════════
 //  QGENDA EXCEL IMPORT
 // ════════════════════════════════════════════════════════
@@ -2664,7 +2666,7 @@ async function runQgendaImport(records){
 }
 
 // ════════════════════════════════════════════════════════
-//  VERSIONING — named snapshots stored in Supabase
+//  VERSIONING — named snapshots stored in the database
 // ════════════════════════════════════════════════════════
 
 async function saveVersion(){
@@ -2695,12 +2697,8 @@ async function saveVersion(){
         }
         toast(`Snapshot "${name}" saved`,'success');
       }catch(e){
-        // Fallback: save to localStorage
-        const versions=JSON.parse(localStorage.getItem('hs_versions')||'[]');
-        versions.unshift({name, data:JSON.stringify(S), saved_at:new Date().toISOString(), saved_by:currentUser.username, group_id:currentGroupId()});
-        localStorage.setItem('hs_versions', JSON.stringify(versions.slice(0,20)));
-        toast(`Snapshot "${name}" saved locally`,'success');
-        console.warn('Version saved to localStorage (Supabase unavailable):', errStr(e));
+        console.error('saveVersion error:',errStr(e),e);
+        toast('Snapshot could not be saved to the database. Try again before making major changes.','error',5000);
       }
     }
   );
@@ -2720,11 +2718,9 @@ async function showVersions(){
       .filter(v=>(v.group_id||DEFAULT_GROUP_ID)===currentGroupId())
       .sort((a,b)=>new Date(b.saved_at)-new Date(a.saved_at));
   }catch(e){
-    // Fallback: load from localStorage
-    versions=JSON.parse(localStorage.getItem('hs_versions')||'[]')
-      .filter(v=>(v.group_id||DEFAULT_GROUP_ID)===currentGroupId())
-      .sort((a,b)=>new Date(b.saved_at)-new Date(a.saved_at));
-    console.warn('Versions from localStorage (Supabase unavailable):', errStr(e));
+    console.error('showVersions error:',errStr(e),e);
+    toast('Saved versions could not be loaded from the database.','error',5000);
+    return;
   }
 
   if(!versions.length){
@@ -2736,8 +2732,8 @@ async function showVersions(){
     const dateStr=d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric',hour:'2-digit',minute:'2-digit'});
     return `<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid var(--line);font-size:12px">
       <div style="flex:1">
-        <div style="font-weight:600">${v.name}</div>
-        <div style="color:var(--ink3);font-size:11px">${dateStr}${v.saved_by?' · by '+v.saved_by:''}</div>
+        <div style="font-weight:600">${qgEsc(v.name)}</div>
+        <div style="color:var(--ink3);font-size:11px">${qgEsc(dateStr)}${v.saved_by?' · by '+qgEsc(v.saved_by):''}</div>
       </div>
       <button class="btn btn-sm" style="font-size:11px;padding:3px 8px" onclick="confirmRestoreVersion(${i})">Restore</button>
     </div>`;
@@ -2745,7 +2741,7 @@ async function showVersions(){
 
   window._versionsList=versions;
   showModal('Restore Version',
-    `<div style="font-size:12px;color:var(--ink3);margin-bottom:10px">Showing saved versions for <strong>${currentGroupName()}</strong> only. Restoring a version replaces ALL current data for this group. Save the current state first if needed.</div>
+    `<div style="font-size:12px;color:var(--ink3);margin-bottom:10px">Showing saved versions for <strong>${qgEsc(currentGroupName())}</strong> only. Restoring a version replaces ALL current data for this group. Save the current state first if needed.</div>
      <div style="max-height:320px;overflow-y:auto;border:1px solid var(--line);border-radius:4px">${rows}</div>`,
     null, null
   );
@@ -2854,7 +2850,7 @@ function freshGroupState(){
 function confirmResetGroup(){
   if(!isMasterAdmin()){ toast('Master admin only','error'); return; }
   showModal('Reset Current Group',
-    `<div style="font-size:13px;margin-bottom:12px">This resets <strong>${currentGroupName()}</strong> to a blank slate in Supabase.</div>
+    `<div style="font-size:13px;margin-bottom:12px">This resets <strong>${qgEsc(currentGroupName())}</strong> to a blank slate in the database.</div>
      <ul style="font-size:12px;margin:0 0 12px 16px;line-height:1.8">
        <li>Deletes the physician roster for this group</li>
        <li>Deletes all schedules, requests, holidays, and settings for this group</li>
@@ -7504,9 +7500,9 @@ S.ui.adminReqQuarter=`${defReqY}-${defReqQ}`;
 async function appInit(){
   const statusEl=document.getElementById('supabase-status');
 
-  if(statusEl)statusEl.textContent='Enter your Supabase Auth credentials';
+  if(statusEl)statusEl.textContent='Enter your email and password';
 
-  // Restore Supabase Auth session.
+  // Restore secure session.
   const saved=sessionStorage.getItem(AUTH_SESSION_KEY);
   if(saved){
     try{
