@@ -990,10 +990,6 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
           <div class="fg"><label>Max Requests/Quarter</label><input type="number" id="c-max-req" value="15" style="width:90px" onchange="autoSaveCfg()" oninput="autoSaveCfg()"></div>
           <div class="fg"><label>Max Required Requests</label><input type="number" id="c-max-required" value="5" style="width:90px" onchange="autoSaveCfg()" oninput="autoSaveCfg()"></div>
           <div class="fg"><label>Max Weekend Requests</label><input type="number" id="c-max-wk" value="6" style="width:90px" onchange="autoSaveCfg()" oninput="autoSaveCfg()"></div>
-          <div class="fg"><label>Fairness Tracking Start</label><input type="date" id="c-fairness-start" style="width:145px" onchange="autoSaveCfg(true)"></div>
-        </div>
-        <div class="dm-help" style="margin-top:8px">
-          Set this to the first date this tool should use for workload fairness. Earlier imported qGenda history stays visible for reports, but is ignored when balancing yearly rounding and swing shifts. Use the site go-live date if older shifts may include voluntary extras.
         </div>
         <div id="flex-guidance" style="margin:10px 0;padding:10px;border:1px solid var(--line);border-radius:4px;background:#f8fafc;font-size:12px"></div>
       </div>
@@ -1015,6 +1011,12 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
           </div>
           <div class="dm-help">
             Use this to build a new site from a qGenda Calendar by Task file. The import creates providers, detects shift names, and maps those shifts into the scheduler. Use it again after each quarter to account for the shifts actually worked and correct the historical schedule from qGenda.
+          </div>
+          <div class="row" style="margin-top:12px">
+            <div class="fg"><label>Fairness Tracking Start</label><input type="date" id="c-fairness-start" style="width:165px" onchange="autoSaveCfg(true)"></div>
+          </div>
+          <div class="dm-help">
+            Set this to the first date this tool should use for workload fairness. Earlier imported qGenda history stays visible for reports, but is ignored when balancing yearly rounding and swing shifts. Use the site go-live date if older shifts may include voluntary extras.
           </div>
         </div>
         <aside class="qg-guide-pane">
