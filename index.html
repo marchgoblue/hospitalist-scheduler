@@ -4694,9 +4694,12 @@ function _generateQuarter(candidateSeed=0,finalize=true){
   if(!S.requests[qKey]) S.requests[qKey]={};
   const requests=S.requests[qKey];
 
-  // Clear schedule for the quarter — but PRESERVE days before today (imported historical data)
+  // Clear schedule for the quarter — but PRESERVE days before today (imported historical data).
+  // Exception: master/admin work inside the demo group needs to rebuild realistic
+  // prior demo quarters from scratch, including variable-provider days.
   const todayD=new Date(); todayD.setHours(0,0,0,0);
-  const todayDs=demoHistoryTodayOverride||dstrD(todayD);
+  const demoAdminCanRewriteHistory=isDemoGroup()&&isAdmin()&&!isDemoSessionUser();
+  const todayDs=demoHistoryTodayOverride||(demoAdminCanRewriteHistory?'1900-01-01':dstrD(todayD));
   allActive.forEach(d=>{
     if(!S.sched[d.id]) S.sched[d.id]={};
     if(!S.teams) S.teams={};
