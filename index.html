@@ -770,6 +770,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
         <option value="4">Q4 · Oct–Dec</option>
       </select>
       <button class="btn btn-p" id="gen-btn" onclick="tryGenerateQuarter()">Generate Schedule</button>
+      <button class="btn btn-sm" id="demo-requests-btn" onclick="fillDemoTimeOffRequests()" style="display:none">Fill Demo Requests</button>
       <button class="btn btn-sm" onclick="recheckFairness()" title="Check shift distribution fairness">Fairness Check</button>
     </div>
   </div>
@@ -4342,6 +4343,126 @@ function buildDemoRequests(year,q,docs,requiredCount,optionalCount,weekendBias,s
   });
   return requests;
 }
+function demoPagePickRequestBlocks(year,q,docId,count,kind,seed,blocked=new Set()){
+  if(count<=0)return [];
+  const days=quarterDays(year,q).map(dstrD);
+  const picked=new Set();
+  const protectedDays=new Set(blocked||[]);
+  const minGap=5;
+  const blockLens=kind==='required'?[3,3,4,4,5]:[3,4,4,5,6,7];
+  const candidates=days.map((ds,idx)=>{
+    const d=parseD(ds);
+    const weekendNear=[-2,-1,0,1,2].some(offset=>{
+      const near=days[idx+offset];
+      return near&&isWeekend(parseD(near));
+    });
+    const weekendBoost=weekendNear?0.25:0;
+    const edgePenalty=(idx<5||idx>days.length-6)?0.15:0;
+    return {ds,idx,score:_candidateUnit(seed,docId+'|demo-page|'+kind+'|'+ds)+weekendBoost-edgePenalty};
+  }).sort((a,b)=>b.score-a.score);
+  function isBlocked(idx){
+    const ds=days[idx];
+    if(protectedDays.has(ds)||picked.has(ds))return true;
+    for(let i=Math.max(0,idx-minGap);i<=Math.min(days.length-1,idx+minGap);i++){
+      if(picked.has(days[i])||protectedDays.has(days[i]))return true;
+    }
+    return false;
+  }
+  function tryBlock(startIdx,len,direction){
+    const block=[];
+    for(let step=0;step<len;step++){
+      const idx=startIdx+(step*direction);
+      if(idx<0||idx>=days.length)return [];
+      const ds=days[idx];
+      if(protectedDays.has(ds)||picked.has(ds))return [];
+      block.push({idx,ds});
+    }
+    if(block.length<3)return [];
+    const lo=Math.min(...block.map(x=>x.idx));
+    const hi=Math.max(...block.map(x=>x.idx));
+    for(let i=Math.max(0,lo-minGap);i<=Math.min(days.length-1,hi+minGap);i++){
+      if(block.some(x=>x.idx===i))continue;
+      if(picked.has(days[i])||protectedDays.has(days[i]))return [];
+    }
+    return block;
+  }
+  for(const cand of candidates){
+    if(picked.size>=count)break;
+    if(isBlocked(cand.idx))continue;
+    const remaining=count-picked.size;
+    const lens=blockLens.filter(len=>len<=remaining&&(remaining-len===0||remaining-len>=3));
+    if(!lens.length)break;
+    const len=lens[Math.floor(_candidateUnit(seed,cand.ds+'|demo-page|'+docId+'|'+kind+'|len')*lens.length)]||3;
+    const firstDir=_candidateUnit(seed,cand.ds+'|demo-page|'+docId+'|'+kind+'|dir')<0.5?-1:1;
+    let block=tryBlock(cand.idx,len,firstDir);
+    if(!block.length)block=tryBlock(cand.idx,len,-firstDir);
+    block.forEach(x=>picked.add(x.ds));
+  }
+  return [...picked].sort();
+}
+function demoPageVariableDocs(year){
+  return activeDocs(year).filter(doc=>doc.type==='standard'
+    &&!isMedicalDirectorDoc(doc)
+    &&!isAppProvider(doc)
+    &&doc.type!=='prn'
+    &&doc.type!=='nocturnist'
+    &&!isStrictStyle(doc)
+    &&fteValue(doc)>0)
+    .sort(providerSort);
+}
+function buildDemoPageRequests(year,q,docs,totalCount,requiredCount,seed){
+  const requests={};
+  docs.forEach((doc,idx)=>{
+    const docSeed=seed+(idx*97);
+    const required=demoPagePickRequestBlocks(year,q,doc.id,requiredCount,'required',docSeed);
+    const optionalCount=Math.max(0,totalCount-required.length);
+    const optional=demoPagePickRequestBlocks(year,q,doc.id,optionalCount,'optional',docSeed+7000,new Set(required));
+    requests[doc.id]={required,optional};
+  });
+  return requests;
+}
+async function fillDemoTimeOffRequests(){
+  if(!isDemoGroup()){
+    toast('Demo request fill is only available in the demo site.','error');
+    return;
+  }
+  if(!isAdmin()){
+    toast('Admin only','error');
+    return;
+  }
+  const year=parseInt(document.getElementById('yr-sel')?.value,10)||S.ui.year;
+  const q=parseInt(document.getElementById('q-sel')?.value,10)||S.ui.quarter;
+  const range=quarterRange(year,q);
+  const today=new Date();today.setHours(0,0,0,0);
+  if(isDemoSessionUser()&&range.start<=today){
+    toast('Demo history is prefilled through today. Choose a future quarter to fill demo requests.','info',4500);
+    updateGenButton();
+    return;
+  }
+  const docs=demoPageVariableDocs(year);
+  if(!docs.length){
+    toast('No variable providers found for this demo quarter.','error',4000);
+    return;
+  }
+  const maxReq=Math.max(0,parseInt(S.cfg&&S.cfg.maxReq,10)||0);
+  const maxRequired=Math.max(0,parseInt(S.cfg&&S.cfg.maxRequired,10)||0);
+  const totalCount=Math.ceil(maxReq*0.8);
+  let requiredCount=Math.min(totalCount,Math.ceil(maxRequired*0.8));
+  if(requiredCount>0&&requiredCount<3)requiredCount=0;
+  if(totalCount<3){
+    toast('Set a request cap in Schedule Parameters before filling demo requests.','error',4500);
+    return;
+  }
+  const qKey=`${year}-${q}`;
+  S.requests[qKey]=buildDemoPageRequests(year,q,docs,totalCount,requiredCount,24000+(year*10)+q);
+  S.requests[qKey+'_submitted']={};
+  docs.forEach(doc=>{S.requests[qKey+'_submitted'][doc.id]=new Date().toISOString();});
+  renderRequestsAdmin();
+  renderSchedule();
+  updateDemoModeUI();
+  await saveData();
+  toast(`Filled ${docs.length} variable providers with ${totalCount} requests each (${requiredCount} required, ${totalCount-requiredCount} optional).`,'success',5500);
+}
 function stressScheduleMetrics(year,q,stressDocs){
   const days=quarterDays(year,q);
   const quarterKey=`${year}-${q}`;
@@ -4446,10 +4567,12 @@ function updateDemoModeUI(){
   const bannerText=document.getElementById('demo-banner-text');
   const exitBtn=document.getElementById('demo-exit-btn');
   const saveBtn=document.getElementById('save-btn');
+  const demoReqBtn=document.getElementById('demo-requests-btn');
   if(banner)banner.style.display=on?'block':'none';
   if(bannerText)bannerText.textContent=(S.ui&&S.ui.demoSummary)||'Temporary schedule is showing. Real data has not been saved.';
   if(exitBtn)exitBtn.disabled=!on;
   if(saveBtn)saveBtn.disabled=on;
+  if(demoReqBtn)demoReqBtn.style.display=(isDemoGroup()&&isAdmin())?'inline-flex':'none';
   syncScheduleDemoScrollbar();
   if(on)setSyncStatus('demo');
 }
@@ -5274,10 +5397,20 @@ function updateGenButton(){
   const qKey=`${year}-${q}`;
   const exists=S.cycleStarts[qKey]&&S.cycleStarts[qKey].generated;
   const btn=document.getElementById('gen-btn');
+  const demoReqBtn=document.getElementById('demo-requests-btn');
+  if(demoReqBtn){
+    demoReqBtn.style.display=(isDemoGroup()&&isAdmin())?'inline-flex':'none';
+    demoReqBtn.disabled=false;
+    demoReqBtn.title='Fill demo time-off requests for variable providers.';
+  }
   if(!btn) return;
   const range=quarterRange(year,q);
   const today=new Date();today.setHours(0,0,0,0);
   if(isDemoSessionUser()&&range.start<=today){
+    if(demoReqBtn){
+      demoReqBtn.disabled=true;
+      demoReqBtn.title='Demo accounts cannot edit prefilled history quarters.';
+    }
     btn.textContent='Demo History Prefilled';
     btn.className='btn btn-quiet';
     btn.disabled=true;
