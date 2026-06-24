@@ -276,9 +276,16 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
   text-align:left;padding:6px 10px;min-width:var(--name-col-w,180px);width:var(--name-col-w,180px);
   background:var(--hdr2)!important;position:sticky;left:0;z-index:35;
   font-family:'Source Sans 3',sans-serif;font-size:11px;text-transform:uppercase;
-  transform:translateZ(0);background-clip:padding-box;
+  transform:translateZ(0);background-clip:padding-box;isolation:isolate;overflow:visible;
   box-shadow:2px 0 0 var(--line2),8px 0 0 var(--hdr2);
 }
+.sheet thead th.name-col:before,
+.sheet tbody td.name-col:before{
+  content:"";position:absolute;inset:-1px -10px -1px 0;
+  background:inherit;z-index:-1;pointer-events:none;
+}
+.sheet thead th.name-col>*,
+.sheet tbody td.name-col>*{position:relative;z-index:1}
 .name-resizer{position:absolute;top:0;left:calc(var(--name-col-w,180px) - 10px);width:20px;height:var(--name-resizer-h,100%);cursor:col-resize;z-index:60;touch-action:none;background:transparent}
 .name-resizer:after{content:"";position:absolute;top:4px;bottom:4px;left:9px;width:2px;background:transparent;border-radius:2px}
 .name-resizer:hover:after{background:#1b4d8f}
@@ -294,7 +301,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
   text-align:left;padding:4px 10px;font-weight:600;font-size:12px;
   background:#fff!important;position:sticky;left:0;z-index:25;
   border-right:2px solid var(--line2);width:var(--name-col-w,180px);min-width:var(--name-col-w,180px);
-  cursor:pointer;transform:translateZ(0);background-clip:padding-box;
+  cursor:pointer;transform:translateZ(0);background-clip:padding-box;isolation:isolate;overflow:visible;
   box-shadow:8px 0 0 #fff;
 }
 .sheet tbody td.name-col:hover{background:#eef5fb!important;color:#1f5a99;box-shadow:8px 0 0 #eef5fb}
@@ -1486,6 +1493,7 @@ async function loadData(){
         S={...S,...JSON.parse(stored)};
         setSyncStatus('session');
         applyMigrations();
+        if(ensureDemoHistoricalSchedule())sessionStorage.setItem(demoKey,JSON.stringify(S));
         return;
       }catch(e){
         console.error('demo session load error:',errStr(e),e);
@@ -1506,6 +1514,90 @@ async function loadData(){
     toast('Database load failed: ' + errStr(e), 'error');
   }
   applyMigrations();
+  if(demoKey&&ensureDemoHistoricalSchedule()){
+    sessionStorage.setItem(demoKey,JSON.stringify(S));
+    setSyncStatus('session');
+  }
+}
+
+function ensureDemoHistoricalSchedule(){
+  if(!isDemoGroup()||!S||!Array.isArray(S.docs)||!S.docs.length)return false;
+  const today=new Date();today.setHours(0,0,0,0);
+  const todayDs=dstrD(today);
+  const year=today.getFullYear();
+  const start=new Date(year,0,1);
+  const docs=activeDocs(year).filter(d=>d.type!=='prn').sort(providerSort);
+  if(!docs.length)return false;
+  docs.forEach((doc,idx)=>{doc._demoSeedIdx=idx;});
+  const mdDocs=docs.filter(d=>d.type==='standard'&&!isMedicalDirectorDoc(d)&&!isAppProvider(d));
+  const appDocs=docs.filter(d=>d.type==='standard'&&!isMedicalDirectorDoc(d)&&isAppProvider(d));
+  const noctDocs=docs.filter(d=>d.type==='nocturnist'&&!isAppProvider(d));
+  const appNoctDocs=docs.filter(d=>d.type==='nocturnist'&&isAppProvider(d));
+  const medDocs=docs.filter(isMedicalDirectorDoc);
+  const swingOnlyDocs=docs.filter(d=>d.type==='swing-only');
+  const mdWorkCount={};
+  const mdSwingCount={};
+  const appWorkCount={};
+  const appSwingCount={};
+  let changed=false;
+  function setShift(doc,ds,sh){
+    if(!S.sched[doc.id])S.sched[doc.id]={};
+    if(!S.teams)S.teams={};
+    if(!S.teams[doc.id])S.teams[doc.id]={};
+    if(S.sched[doc.id][ds]!==sh){S.sched[doc.id][ds]=sh;changed=true;}
+  }
+  function phaseFor(doc){return (doc._demoSeedIdx*7)%14;}
+  for(let d=new Date(start),di=0;d<=today;d=addD(d,1),di++){
+    const ds=dstrD(d);
+    const st=staffingForDate(ds);
+    docs.forEach(doc=>setShift(doc,ds,'OFF'));
+    medDocs.forEach(doc=>setShift(doc,ds,(d.getDay()>=1&&d.getDay()<=5)?'R':'OFF'));
+    swingOnlyDocs.forEach(doc=>{
+      if(strictIsWorkingOffset(di,phaseFor(doc)))setShift(doc,ds,'S');
+    });
+    noctDocs.forEach(doc=>{
+      if(strictIsWorkingOffset(di,phaseFor(doc)))setShift(doc,ds,'N');
+    });
+    appNoctDocs.forEach((doc,idx)=>{
+      if(!strictIsWorkingOffset(di,phaseFor(doc)))return;
+      const shift=idx%2===0?'APP_NS':'APP_NX';
+      setShift(doc,ds,shift);
+    });
+    const swingOnlyCount=swingOnlyDocs.filter(doc=>S.sched[doc.id]&&S.sched[doc.id][ds]==='S').length;
+    const mdWorkNeed=Math.max(0,(st.R||0)+(st.S||0)-swingOnlyCount);
+    const mdWorking=mdDocs.filter(doc=>strictIsWorkingOffset(di,phaseFor(doc)))
+      .sort((a,b)=>(mdWorkCount[a.id]||0)-(mdWorkCount[b.id]||0)||providerSort(a,b))
+      .slice(0,mdWorkNeed);
+    const mdSwingNeed=Math.max(0,(st.S||0)-swingOnlyCount);
+    const mdSwingDocs=mdWorking.slice()
+      .sort((a,b)=>(mdSwingCount[a.id]||0)-(mdSwingCount[b.id]||0)||providerSort(a,b))
+      .slice(0,mdSwingNeed);
+    const mdSwingSet=new Set(mdSwingDocs.map(d=>d.id));
+    mdWorking.forEach(doc=>{
+      const shift=mdSwingSet.has(doc.id)?'S':'R';
+      setShift(doc,ds,shift);
+      mdWorkCount[doc.id]=(mdWorkCount[doc.id]||0)+1;
+      if(shift==='S')mdSwingCount[doc.id]=(mdSwingCount[doc.id]||0)+1;
+    });
+    const appWorkNeed=Math.max(0,(st.appRounders||0)+(st.appAdmitters||0));
+    const appWorking=appDocs.filter(doc=>strictIsWorkingOffset(di,phaseFor(doc)))
+      .sort((a,b)=>(appWorkCount[a.id]||0)-(appWorkCount[b.id]||0)||providerSort(a,b))
+      .slice(0,appWorkNeed);
+    const appSwingNeed=Math.max(0,st.appAdmitters||0);
+    const appSwingDocs=appWorking.slice()
+      .sort((a,b)=>(appSwingCount[a.id]||0)-(appSwingCount[b.id]||0)||providerSort(a,b))
+      .slice(0,appSwingNeed);
+    const appSwingSet=new Set(appSwingDocs.map(d=>d.id));
+    appWorking.forEach(doc=>{
+      const shift=appSwingSet.has(doc.id)?'S':'R';
+      setShift(doc,ds,shift);
+      appWorkCount[doc.id]=(appWorkCount[doc.id]||0)+1;
+      if(shift==='S')appSwingCount[doc.id]=(appSwingCount[doc.id]||0)+1;
+    });
+  }
+  docs.forEach(doc=>delete doc._demoSeedIdx);
+  if(S.ui.demoYtdSeedDate!==todayDs){S.ui.demoYtdSeedDate=todayDs;changed=true;}
+  return changed;
 }
 
 async function loadGroups(){
@@ -5049,6 +5141,15 @@ function updateGenButton(){
   const exists=S.cycleStarts[qKey]&&S.cycleStarts[qKey].generated;
   const btn=document.getElementById('gen-btn');
   if(!btn) return;
+  const range=quarterRange(year,q);
+  const today=new Date();today.setHours(0,0,0,0);
+  if(isDemoGroup()&&range.start<=today){
+    btn.textContent='Demo History Prefilled';
+    btn.className='btn btn-quiet';
+    btn.disabled=true;
+    btn.title='Demo accounts show started quarters as prefilled history. Choose a future quarter to generate a new schedule.';
+    return;
+  }
   if(!activeDocs(year,(q-1)*3).length){
     btn.textContent='Generate Schedule';
     btn.className='btn btn-p';
@@ -5071,6 +5172,13 @@ async function tryGenerateQuarter(){
   if(!isAdmin()){ toast('View-only — admin access required','error'); return; }
   const year=parseInt(document.getElementById('yr-sel').value)||S.ui.year;
   const q=parseInt(document.getElementById('q-sel').value)||S.ui.quarter;
+  const range=quarterRange(year,q);
+  const today=new Date();today.setHours(0,0,0,0);
+  if(isDemoGroup()&&range.start<=today){
+    toast('Demo history is prefilled through today. Choose a future quarter to generate a new schedule.','info',4500);
+    updateGenButton();
+    return;
+  }
   if(!activeDocs(year,(q-1)*3).length){
     toast('Import qGenda or add physicians before generating a schedule.','error');
     return;
