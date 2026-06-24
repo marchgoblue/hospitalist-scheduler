@@ -3441,14 +3441,14 @@ function holName(key){
 //  Key fixes over v9:
 //    - MAX_S_BLOCK = 2: strictly limits consecutive S days to 2
 //      (v9 bug: S continuation had no cap → Raza/Rizvi 7-day S blocks)
-//    - Monthly S fairness: tiered selection (providers below monthly target first)
-//      Each provider targets ~quarterTargetS/3 S shifts per month
-//    - mustContinueS_couplet also checks runLen < MAX_S_BLOCK (belt-and-suspenders)
+//    - Monthly and year-to-date S fairness: tiered selection first favors
+//      providers behind their FTE-adjusted swing share from prior quarters
 //
 //  Swing fill layers (shortages remain visible when no clean tail is available):
 //    Layer 1 - Normal: preferredR met AND below monthly quota
 //    Layer 2 - Normal above-quota: preferredR met, but over monthly target (still fair)
 //    Layer 3 - Emergency: 5+ R (early transition when S supply is thin)
+//    Layer 4 - Last resort: isolated S from OFF only to avoid a coverage miss
 //
 //  Team numbers:
 //    Each R-shift doc gets team 1-13; persists through their block;
@@ -3563,9 +3563,21 @@ function _scoreScheduleCandidate(year,q){
   const swingDocs=physicianSwingEligibleDocs(year).filter(d=>fteValue(d)>0);
   const totalSwing=swingDocs.reduce((sum,d)=>sum+quarterShiftTotal(d,days,'S'),0);
   const totalFte=swingDocs.reduce((sum,d)=>sum+fteValue(d),0)||1;
+  const priorSwingByDoc={};
   swingDocs.forEach(doc=>{
-    const expected=totalSwing*(fteValue(doc)/totalFte);
-    const actual=quarterShiftTotal(doc,days,'S');
+    let priorS=0;
+    for(let pq=1;pq<q;pq++){
+      const pqKey=`${year}-${pq}`;
+      const base=S.baseSchedule&&S.baseSchedule[pqKey]&&S.baseSchedule[pqKey][doc.id];
+      if(base)Object.values(base).forEach(sh=>{if(sh==='S')priorS++;});
+    }
+    priorSwingByDoc[doc.id]=priorS;
+  });
+  const priorSwingTotal=swingDocs.reduce((sum,d)=>sum+(priorSwingByDoc[d.id]||0),0);
+  const yearToDateSwingTotal=priorSwingTotal+totalSwing;
+  swingDocs.forEach(doc=>{
+    const expected=yearToDateSwingTotal*(fteValue(doc)/totalFte);
+    const actual=(priorSwingByDoc[doc.id]||0)+quarterShiftTotal(doc,days,'S');
     const diff=actual-expected;
     swingImbalance+=diff*diff;
     if(diff>3)swingImbalance+=(diff-3)*(diff-3)*3;
@@ -3744,7 +3756,7 @@ function strictWorkBlocksForDoc(doc,days,startD,phase){
   if(current)blocks.push(current);
   return blocks;
 }
-function chooseStrictSwingBlocks(pool,days,startD,phaseById,targetSwingForDay,candidateSeed,activeBlockIds=null){
+function chooseStrictSwingBlocks(pool,days,startD,phaseById,targetSwingForDay,candidateSeed,activeBlockIds=null,priorSwingByDoc={},expectedPriorSwingByDoc={}){
   const swingCounts=days.map(()=>0);
   const selected=new Set();
   const selectedBlocks=new Set();
@@ -3793,6 +3805,11 @@ function chooseStrictSwingBlocks(pool,days,startD,phaseById,targetSwingForDay,ca
     const diff=count-target;
     return diff*diff*8+(diff>0?diff*diff*10:0);
   }
+  function swingFairnessPenalty(docId,current,after,target){
+    const prior=priorSwingByDoc[docId]||0;
+    const expectedPrior=expectedPriorSwingByDoc[docId]||0;
+    return fairnessCost(prior+after,expectedPrior+target)-fairnessCost(prior+current,expectedPrior+target);
+  }
   let improved=true;
   while(improved){
     improved=false;
@@ -3808,7 +3825,7 @@ function chooseStrictSwingBlocks(pool,days,startD,phaseById,targetSwingForDay,ca
       const current=selectedByDoc[doc.id]||0;
       const blockDays=block.swingDays.length;
       const after=current+blockDays;
-      const fairnessPenalty=fairnessCost(after,target)-fairnessCost(current,target);
+      const fairnessPenalty=swingFairnessPenalty(doc.id,current,after,target);
       const score=errorWith(block)+fairnessPenalty+current*1.5+_candidateUnit(candidateSeed,block.id+'|swing')*0.01;
       const gain=base-score;
       if(gain>0&&(!best||gain>best.gain))best={block,gain,score};
@@ -3883,7 +3900,7 @@ function chooseStrictFteWorkBlocks(pool,days,startD,phaseById,targetWorkForDay,c
   }
   return selected;
 }
-function assignStrictBaseline({strictAll,swingOnly,days,startD,candidateSeed,strictSwingShare=1}){
+function assignStrictBaseline({strictAll,swingOnly,days,startD,candidateSeed,strictSwingShare=1,priorSwingByDoc={},expectedPriorSwingByDoc={}}){
   const mdStrict=strictAll.filter(d=>!isAppProvider(d)).sort(providerSort);
   const appStrict=strictAll.filter(isAppProvider).sort(providerSort);
   const mdPhase=chooseStrictPhases(mdStrict,days,startD,(ds,idx)=>{
@@ -3909,7 +3926,7 @@ function assignStrictBaseline({strictAll,swingOnly,days,startD,candidateSeed,str
     const swingOnlyCount=strictSwingOnlyCountForOffset(swingOnly,startD,idx,ds);
     const target=Math.max(0,(st.S||0)-swingOnlyCount);
     return Math.max(0,Math.round(target*strictSwingShare));
-  },candidateSeed,mdWorkBlocks);
+  },candidateSeed,mdWorkBlocks,priorSwingByDoc,expectedPriorSwingByDoc);
   const appSwingBlocks=chooseStrictSwingBlocks(appStrict,days,startD,appPhase,(ds)=>{
     const st=staffingForDate(ds);
     return Math.max(0,st.appAdmitters||0);
@@ -4585,7 +4602,7 @@ function _generateQuarter(candidateSeed=0,finalize=true){
   // excluding any voluntary extra shifts they picked up.
   // The generator then uses this to equalize annual totals across providers.
   const ytdBase={};  // docId → {R:n, S:n, N:n, total:n}
-  rotation.forEach(doc=>{
+  physicianSwingPool.forEach(doc=>{
     let bR=0, bS=0, bN=0;
     // Count base schedule shifts from all quarters before this one
     for(let pq=1; pq<q; pq++){
@@ -4599,6 +4616,17 @@ function _generateQuarter(candidateSeed=0,finalize=true){
       });
     }
     ytdBase[doc.id]={R:bR, S:bS, N:bN, total:bR+bS+bN};
+  });
+
+  // Prior-year swing fairness: if a provider is behind their FTE-adjusted
+  // swing share from earlier quarters, prioritize them for S this quarter.
+  const priorSwingByDoc={};
+  const expectedPriorSwingByDoc={};
+  const priorSwingTotal=physicianSwingPool.reduce((sum,doc)=>sum+((ytdBase[doc.id]&&ytdBase[doc.id].S)||0),0);
+  const priorSwingFte=physicianSwingPool.reduce((sum,doc)=>sum+fteValue(doc),0)||1;
+  physicianSwingPool.forEach(doc=>{
+    priorSwingByDoc[doc.id]=(ytdBase[doc.id]&&ytdBase[doc.id].S)||0;
+    expectedPriorSwingByDoc[doc.id]=priorSwingTotal*(fteValue(doc)/priorSwingFte);
   });
 
   // Compute per-provider annual target and remaining budget
@@ -4709,12 +4737,23 @@ function _generateQuarter(candidateSeed=0,finalize=true){
     const baseQTarget=Math.round(avgAdmitterTarget(quarterDays(year,q)) * totalDays / (rotation.length + partTime.length + strictPhysicianCount || 1));
     return Math.max(1, Math.round(baseQTarget * fte));
   }
+  function swingCatchupDeficit(docId){
+    return Math.max(0,(expectedPriorSwingByDoc[docId]||0)-(priorSwingByDoc[docId]||0));
+  }
+  function swingQuarterCap(docId){
+    return qSTarget(docId)+Math.ceil(swingCatchupDeficit(docId));
+  }
+  function swingFairnessRatio(docId){
+    const s=state[docId]||{};
+    const expected=(expectedPriorSwingByDoc[docId]||0)+qSTarget(docId);
+    return ((priorSwingByDoc[docId]||0)+(s.qS||0))/Math.max(1,expected);
+  }
   function canBeS_normal(docId){
     const s=state[docId];
     if(!s||s.block!=='W') return false;
     if(s.workInBlock>=s.maxWork) return false;
-    // Cap: don't exceed this provider's pro-rated quarterly S target
-    if(s.qS >= qSTarget(docId)) return false;
+    // Cap: allow modest catch-up if prior quarters left this provider short on S
+    if(s.qS >= swingQuarterCap(docId)) return false;
     if(s.lastShift==='S') return s.runLen<MAX_S_BLOCK;
     if(s.lastShift==='R' && s.runLen>=MIN_R_HARD)
       return s.workInBlock+1<=s.maxWork;
@@ -4724,7 +4763,7 @@ function _generateQuarter(candidateSeed=0,finalize=true){
     const s=state[docId];
     if(!s||s.block!=='W') return false;
     if(s.workInBlock>=s.maxWork) return false;
-    if(s.qS >= qSTarget(docId)) return false;  // respect FTE-adjusted cap
+    if(s.qS >= swingQuarterCap(docId)) return false;  // respect FTE-adjusted cap plus catch-up
     if(s.lastShift==='S') return s.runLen<MAX_S_BLOCK;
     if(s.lastShift==='R' && s.runLen>=MIN_R_HARD)
       return s.workInBlock+1<=s.maxWork;
@@ -4734,7 +4773,7 @@ function _generateQuarter(candidateSeed=0,finalize=true){
     const s=state[docId];
     if(!s||s.block!=='O') return false;
     if(s.dayInBlock<MIN_R_HARD) return false;
-    return s.qS<=qSTarget(docId);
+    return s.qS<swingQuarterCap(docId);
   }
   function mustContinueR(docId){
     const s=state[docId];
@@ -4795,7 +4834,7 @@ function _generateQuarter(candidateSeed=0,finalize=true){
   // Strict providers are solved as a coverage baseline before variable fill.
   // The solver chooses 7-on/7-off phases using the 14-day prior-quarter tail
   // as a continuity constraint, then selects full 7-day work blocks for swing.
-  assignStrictBaseline({strictAll,swingOnly,days,startD,candidateSeed,strictSwingShare});
+  assignStrictBaseline({strictAll,swingOnly,days,startD,candidateSeed,strictSwingShare,priorSwingByDoc,expectedPriorSwingByDoc});
   assignNocturnistBaseline({nocturnists,days,startD,candidateSeed});
 
     // ──────── DAILY LOOP ────────
@@ -4940,10 +4979,10 @@ function _generateQuarter(candidateSeed=0,finalize=true){
     function sSortKey(docId){
       const s=state[docId];
       const rem=ytdRemaining[docId]||0;
-      const target=qSTarget(docId)||1;
-      // Normalize qS by FTE target so part-time providers aren't over-scheduled for S
-      const normalizedQS = s.qS / target;
-      return [sTailScore(docId), -rem, s.monthCount[month], normalizedQS];
+      // Normalize S by expected year-to-date share so prior-quarter swing deficits
+      // are corrected before providers who are already ahead receive extra S.
+      const normalizedYS = swingFairnessRatio(docId);
+      return [sTailScore(docId), normalizedYS, -rem, s.monthCount[month], s.qS];
     }
 
     // STEP 4a: Normal S — BELOW monthly target (strongest fairness tier)
@@ -4951,8 +4990,8 @@ function _generateQuarter(candidateSeed=0,finalize=true){
       const cands=rotation
         .filter(d=>!assigned.has(d.id)&&canBeS_normal(d.id)&&state[d.id].monthCount[month]<MONTHLY_S_TARGET)
         .sort((a,b)=>{
-          const [at,ar,am,aq]=sSortKey(a.id), [bt,br,bm,bq]=sSortKey(b.id);
-          return at!==bt?at-bt:ar!==br?ar-br:am!==bm?am-bm:aq!==bq?aq-bq:_candidateTie(candidateSeed,ds,a.id)-_candidateTie(candidateSeed,ds,b.id);
+          const [at,ay,ar,am,aq]=sSortKey(a.id), [bt,by,br,bm,bq]=sSortKey(b.id);
+          return at!==bt?at-bt:ay!==by?ay-by:ar!==br?ar-br:am!==bm?am-bm:aq!==bq?aq-bq:_candidateTie(candidateSeed,ds,a.id)-_candidateTie(candidateSeed,ds,b.id);
         });
       let i=0;
       while(needS>0&&i<cands.length){
@@ -4966,8 +5005,8 @@ function _generateQuarter(candidateSeed=0,finalize=true){
       const cands=rotation
         .filter(d=>!assigned.has(d.id)&&canBeS_normal(d.id))
         .sort((a,b)=>{
-          const [at,ar,am,aq]=sSortKey(a.id), [bt,br,bm,bq]=sSortKey(b.id);
-          return at!==bt?at-bt:ar!==br?ar-br:am!==bm?am-bm:aq!==bq?aq-bq:_candidateTie(candidateSeed,ds,a.id)-_candidateTie(candidateSeed,ds,b.id);
+          const [at,ay,ar,am,aq]=sSortKey(a.id), [bt,by,br,bm,bq]=sSortKey(b.id);
+          return at!==bt?at-bt:ay!==by?ay-by:ar!==br?ar-br:am!==bm?am-bm:aq!==bq?aq-bq:_candidateTie(candidateSeed,ds,a.id)-_candidateTie(candidateSeed,ds,b.id);
         });
       let i=0;
       while(needS>0&&i<cands.length){
@@ -4981,8 +5020,9 @@ function _generateQuarter(candidateSeed=0,finalize=true){
       const cands=rotation
         .filter(d=>!assigned.has(d.id)&&canBeS_emergency(d.id))
         .sort((a,b)=>{
-          const [at,ar,am,aq]=sSortKey(a.id), [bt,br,bm,bq]=sSortKey(b.id);
+          const [at,ay,ar,am,aq]=sSortKey(a.id), [bt,by,br,bm,bq]=sSortKey(b.id);
           if(at!==bt) return at-bt;
+          if(ay!==by) return ay-by;
           if(ar!==br) return ar-br;
           if(am!==bm) return am-bm;
           if(aq!==bq) return aq-bq;
@@ -5004,8 +5044,7 @@ function _generateQuarter(candidateSeed=0,finalize=true){
         .filter(d=>!assigned.has(d.id)&&canBeS_lastResort(d.id))
         .sort((a,b)=>{
           const sa=state[a.id],sb=state[b.id];
-          const aTarget=qSTarget(a.id)||1,bTarget=qSTarget(b.id)||1;
-          const aNorm=sa.qS/aTarget,bNorm=sb.qS/bTarget;
+          const aNorm=swingFairnessRatio(a.id),bNorm=swingFairnessRatio(b.id);
           if(aNorm!==bNorm) return aNorm-bNorm;
           if(sa.monthCount[month]!==sb.monthCount[month]) return sa.monthCount[month]-sb.monthCount[month];
           return sb.dayInBlock-sa.dayInBlock||_candidateTie(candidateSeed,ds,a.id)-_candidateTie(candidateSeed,ds,b.id);
