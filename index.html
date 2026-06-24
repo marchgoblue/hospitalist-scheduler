@@ -217,6 +217,7 @@ body{font-family:'Source Sans 3',-apple-system,Helvetica,Arial,sans-serif;backgr
 .master-only{display:none}
 .master-admin .master-only{display:block}
 .master-admin .master-only.fl{display:flex}
+.demo-group .demo-hide{display:none!important}
 .btn-lg{padding:10px 16px;font-size:13px;border-radius:4px}
 .btn-quiet{background:#fff;color:var(--ink);border-color:var(--line)}
 
@@ -987,7 +988,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
 <div class="pg" id="pg-cfg-data">
   <h1 class="mb">Data Management</h1>
   <div class="card">
-    <div class="dm-section">
+    <div class="dm-section demo-hide">
       <div class="dm-title">qGenda Import</div>
       <div class="qg-import-grid">
         <div>
@@ -1050,7 +1051,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
 <div class="pg" id="pg-cfg-roster">
   <h1 class="mb">Provider Roster</h1>
   <div class="g2">
-    <div class="card" style="grid-column:1/-1">
+    <div class="card demo-hide" style="grid-column:1/-1">
       <h3>Add Provider</h3>
       <div class="row">
         <div class="fg"><label>Last Name</label><input type="text" id="n-last" style="width:130px"></div>
@@ -1331,12 +1332,18 @@ let currentUser=null; // {userId,email,username,role,docId,groupId,groupName,isM
 let currentGroups=[];
 let currentMemberships=[];
 let isSaving=false,pendingSave=false;
+const DEMO_GROUP_ID='demo-hospitalists';
+const DEMO_LOGIN_EMAIL='demohospitalist@gmail.com';
 function isAdmin(){return currentUser&&currentUser.role==='admin';}
 function isPhysician(){return currentUser&&currentUser.role==='physician';}
 function isMasterAdmin(){return !!(currentUser&&currentUser.isMasterAdmin);}
 function currentGroupId(){return (currentUser&&currentUser.groupId)||DEFAULT_GROUP_ID;}
 function currentGroupName(){return (currentUser&&currentUser.groupName)||currentGroupId();}
 function currentScheduleRowId(){return currentGroupId()||DATA_ROW_ID;}
+function isDemoGroup(){
+  return currentGroupId()===DEMO_GROUP_ID||String(currentUser&&currentUser.email||'').toLowerCase()===DEMO_LOGIN_EMAIL;
+}
+function demoSessionKey(){return `hs_demo_session_${currentGroupId()||DEMO_GROUP_ID}`;}
 const SETTINGS_PAGES=new Set(['cfg-params','cfg-data','cfg-roster','cfg-stress','cfg-groups']);
 
 function freshAppState(){
@@ -1380,6 +1387,7 @@ function updateSettingsMenuVisibility(){
   const sm=document.getElementById('settings-menu');
   if(sm)sm.style.display=(isAdmin()&&S.ui.role==='admin')?'block':'none';
   document.body.classList.toggle('master-admin',isMasterAdmin());
+  document.body.classList.toggle('demo-group',isDemoGroup());
 }
 
 function toggleSettingsMenu(ev){
@@ -1438,6 +1446,18 @@ function updateHeaderForUser(){
 
 async function saveData(silent=false){
   if(!currentUser){toast('Not logged in','error');return;}
+  if(isDemoGroup()){
+    try{
+      sessionStorage.setItem(demoSessionKey(),JSON.stringify(S));
+      setSyncStatus('session');
+      if(!silent)toast('Demo changes saved for this browser session only.','info',3500);
+    }catch(e){
+      console.error('demo session save error:',errStr(e),e);
+      setSyncStatus('error');
+      toast('Demo session save failed: '+errStr(e),'error');
+    }
+    return;
+  }
   if(demoModeSnapshot){
     setSyncStatus('demo');
     if(!silent)toast('Demo mode is temporary. Exit Demo before saving real changes.','info',3500);
@@ -1456,12 +1476,27 @@ async function saveData(silent=false){
 async function loadData(){
   setSyncStatus('loading');
   S=freshAppState();
+  const demoKey=isDemoGroup()?demoSessionKey():null;
+  if(demoKey){
+    const stored=sessionStorage.getItem(demoKey);
+    if(stored){
+      try{
+        S={...S,...JSON.parse(stored)};
+        setSyncStatus('session');
+        applyMigrations();
+        return;
+      }catch(e){
+        console.error('demo session load error:',errStr(e),e);
+        sessionStorage.removeItem(demoKey);
+      }
+    }
+  }
   try{
     const rows = await _sbGet('schedule_data', {id: currentScheduleRowId()});
     if(rows && rows.length > 0 && rows[0].data){
       S = {...S, ...JSON.parse(rows[0].data)};
     }
-    setSyncStatus('synced');
+    setSyncStatus(isDemoGroup()?'session':'synced');
   } catch(e){
     console.error('loadData error:', errStr(e), e);
     setSyncStatus('error');
@@ -1553,14 +1588,14 @@ function applyMigrations(){
 
 function setSyncStatus(state){
   const el=document.getElementById('sync-status');if(!el)return;
-  const m={loading:'loading',saving:'saving',saved:'saved',synced:'synced',error:'error',demo:'demo'};
+  const m={loading:'loading',saving:'saving',saved:'saved',synced:'synced',error:'error',demo:'demo',session:'session'};
   el.textContent=m[state]||state;
-  el.style.color=state==='error'?'#a01918':state==='demo'?'#a85800':(state==='saved'||state==='synced')?'#0a7044':'var(--ink3)';
+  el.style.color=state==='error'?'#a01918':(state==='demo'||state==='session')?'#a85800':(state==='saved'||state==='synced')?'#0a7044':'var(--ink3)';
 }
 
 let lastSyncTime=0;
 async function pollForChanges(){
-  if(demoModeSnapshot)return;
+  if(demoModeSnapshot||isDemoGroup())return;
   try{
     const rows=await _sbGet('schedule_data',{id:currentScheduleRowId()});
     if(rows&&rows.length>0){
@@ -1942,6 +1977,7 @@ function qgGuideLayout(mainHtml, step, firstTime){
 
 function handleQgendaFile(file){
   if(!isAdmin()){ toast('Admin only','error'); return; }
+  if(isDemoGroup()){ toast('Demo accounts cannot import qGenda files or add providers.','error'); return; }
   if(!file) return;
   if(typeof XLSX==='undefined'){ toast('Excel parser did not load. Refresh and try again.','error',5000); return; }
   if(!/\.(xlsx|xls)$/i.test(file.name||'')){
@@ -1978,6 +2014,7 @@ function handleQgendaDrop(ev){
 // Main import entry point
 function importQgenda(){
   if(!isAdmin()){ toast('Admin only','error'); return; }
+  if(isDemoGroup()){ toast('Demo accounts cannot import qGenda files or add providers.','error'); return; }
   const inp=document.createElement('input');
   inp.type='file'; inp.accept='.xlsx,.xls';
   inp.onchange=e=>handleQgendaFile(e.target.files[0]);
@@ -3279,12 +3316,30 @@ function _candidateUnit(seed,key){
 function _candidateTie(seed,ds,docId){
   return _candidateUnit(seed,ds+'|'+docId);
 }
+function physicianSwingEligibleDocs(year){
+  return activeDocs(year).filter(d=>d.type==='standard'
+    &&!isMedicalDirectorDoc(d)
+    &&!isAppProvider(d)
+    &&d.type!=='prn'
+    &&d.type!=='nocturnist');
+}
+function fteValue(doc){
+  if(doc&&doc.type==='prn')return 0;
+  const v=parseFloat(doc&&doc.fte);
+  return Number.isFinite(v)?Math.max(0,v):1;
+}
+function quarterShiftTotal(doc,days,shift){
+  return days.reduce((sum,d)=>{
+    const ds=dstrD(d);
+    return sum+((S.sched[doc.id]&&S.sched[doc.id][ds])===shift?1:0);
+  },0);
+}
 function _scoreScheduleCandidate(year,q){
   const days=quarterDays(year,q);
   const qKey=`${year}-${q}`;
   const reqs=S.requests[qKey]||{};
   const docs=activeDocs(year).filter(d=>d.type==='standard'&&!isMedicalDirectorDoc(d)&&!isAppProvider(d)&&!isStrictStyle(d));
-  let requiredMisses=0,optionalMisses=0,structural=0,shortages=0,overages=0;
+  let requiredMisses=0,optionalMisses=0,structural=0,shortages=0,overages=0,swingImbalance=0;
   let longDays=0,restMismatch=0;
   const affectedRequired=new Set();
 
@@ -3346,12 +3401,24 @@ function _scoreScheduleCandidate(year,q){
     });
   });
 
+  const swingDocs=physicianSwingEligibleDocs(year).filter(d=>fteValue(d)>0);
+  const totalSwing=swingDocs.reduce((sum,d)=>sum+quarterShiftTotal(d,days,'S'),0);
+  const totalFte=swingDocs.reduce((sum,d)=>sum+fteValue(d),0)||1;
+  swingDocs.forEach(doc=>{
+    const expected=totalSwing*(fteValue(doc)/totalFte);
+    const actual=quarterShiftTotal(doc,days,'S');
+    const diff=actual-expected;
+    swingImbalance+=diff*diff;
+    if(diff>3)swingImbalance+=(diff-3)*(diff-3)*3;
+  });
+
   return requiredMisses*1000000000
     +structural*1000000
     +affectedRequired.size*100000
     +shortages*10000
     +optionalMisses*100
     +overages*20
+    +swingImbalance*15
     +longDays*5
     +restMismatch;
 }
@@ -3550,6 +3617,10 @@ function chooseStrictSwingBlocks(pool,days,startD,phaseById,targetSwingForDay,ca
       return sum+diff*diff;
     },0);
   }
+  function fairnessCost(count,target){
+    const diff=count-target;
+    return diff*diff*8+(diff>0?diff*diff*10:0);
+  }
   let improved=true;
   while(improved){
     improved=false;
@@ -3564,8 +3635,8 @@ function chooseStrictSwingBlocks(pool,days,startD,phaseById,targetSwingForDay,ca
       const current=selectedByDoc[doc.id]||0;
       const blockDays=block.days.length;
       const after=current+blockDays;
-      const fairnessPenalty=Math.max(0,after-target)*Math.max(0,after-target)*3;
-      const score=errorWith(block)+fairnessPenalty+current*0.5+_candidateUnit(candidateSeed,block.id+'|swing')*0.01;
+      const fairnessPenalty=fairnessCost(after,target)-fairnessCost(current,target);
+      const score=errorWith(block)+fairnessPenalty+current*1.5+_candidateUnit(candidateSeed,block.id+'|swing')*0.01;
       const gain=base-score;
       if(gain>0&&(!best||gain>best.gain))best={block,gain,score};
     });
@@ -3638,7 +3709,7 @@ function chooseStrictFteWorkBlocks(pool,days,startD,phaseById,targetWorkForDay,c
   }
   return selected;
 }
-function assignStrictBaseline({strictAll,swingOnly,days,startD,candidateSeed}){
+function assignStrictBaseline({strictAll,swingOnly,days,startD,candidateSeed,strictSwingShare=1}){
   const mdStrict=strictAll.filter(d=>!isAppProvider(d)).sort(providerSort);
   const appStrict=strictAll.filter(isAppProvider).sort(providerSort);
   const mdPhase=chooseStrictPhases(mdStrict,days,startD,(ds,idx)=>{
@@ -3662,7 +3733,8 @@ function assignStrictBaseline({strictAll,swingOnly,days,startD,candidateSeed}){
   const mdSwingBlocks=chooseStrictSwingBlocks(mdStrict,days,startD,mdPhase,(ds,idx)=>{
     const st=staffingForDate(ds);
     const swingOnlyCount=strictSwingOnlyCountForOffset(swingOnly,startD,idx,ds);
-    return Math.max(0,(st.S||0)-swingOnlyCount);
+    const target=Math.max(0,(st.S||0)-swingOnlyCount);
+    return Math.max(0,Math.round(target*strictSwingShare));
   },candidateSeed,mdWorkBlocks);
   const appSwingBlocks=chooseStrictSwingBlocks(appStrict,days,startD,appPhase,(ds)=>{
     const st=staffingForDate(ds);
@@ -4284,6 +4356,16 @@ function _generateQuarter(candidateSeed=0,finalize=true){
   const appStandard=allActive.filter(d=>d.type==='standard'&&!isMedicalDirectorDoc(d)&&isAppProvider(d));
   const strictAll=[...new Map([...strictMixed,...strictSwing,...appStandard].map(d=>[d.id,d])).values()];
   const strictPhysicianCount=strictAll.filter(d=>!isAppProvider(d)).length;
+  const physicianSwingPool=allActive.filter(d=>d.type==='standard'
+    &&!isMedicalDirectorDoc(d)
+    &&!isAppProvider(d)
+    &&d.type!=='prn'
+    &&d.type!=='nocturnist');
+  const strictPhysicianFte=strictAll
+    .filter(d=>!isAppProvider(d)&&d.type==='standard')
+    .reduce((sum,d)=>sum+fteValue(d),0);
+  const totalPhysicianSwingFte=physicianSwingPool.reduce((sum,d)=>sum+fteValue(d),0)||strictPhysicianFte||1;
+  const strictSwingShare=Math.max(0,Math.min(1,strictPhysicianFte/totalPhysicianSwingFte));
 
   // Variable providers: standard type only — PRN are NOT scheduled in generation
   const rotation=allActive.filter(d=>d.type==='standard'&&!isMedicalDirectorDoc(d)&&!isAppProvider(d)&&d.fte===1.0&&!isStrictStyle(d));
@@ -4533,7 +4615,7 @@ function _generateQuarter(candidateSeed=0,finalize=true){
   // Strict providers are solved as a coverage baseline before variable fill.
   // The solver chooses 7-on/7-off phases using the 14-day prior-quarter tail
   // as a continuity constraint, then selects full 7-day work blocks for swing.
-  assignStrictBaseline({strictAll,swingOnly,days,startD,candidateSeed});
+  assignStrictBaseline({strictAll,swingOnly,days,startD,candidateSeed,strictSwingShare});
   assignNocturnistBaseline({nocturnists,days,startD,candidateSeed});
 
     // ──────── DAILY LOOP ────────
@@ -6984,6 +7066,7 @@ function saveEditDoc(id){
   toast(`Updated ${dname(doc)}`,'success');
 }
 function addPhysician(){
+  if(isDemoGroup()){toast('Demo accounts use a fixed provider list.','info');return;}
   const last=document.getElementById('n-last').value.trim();
   const first=document.getElementById('n-first').value.trim();
   if(!last){toast('Last name required','error');return}
