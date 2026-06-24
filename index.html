@@ -214,6 +214,9 @@ body{font-family:'Source Sans 3',-apple-system,Helvetica,Arial,sans-serif;backgr
 .dm-section:first-of-type{border-top:none;padding-top:0;margin-top:0}
 .dm-title{font-size:11px;font-weight:700;color:var(--ink2);letter-spacing:.7px;text-transform:uppercase;margin-bottom:6px}
 .dm-help{font-size:12px;color:var(--ink3);line-height:1.45;max-width:720px;margin-top:7px}
+.master-only{display:none}
+.master-admin .master-only{display:block}
+.master-admin .master-only.fl{display:flex}
 .btn-lg{padding:10px 16px;font-size:13px;border-radius:4px}
 .btn-quiet{background:#fff;color:var(--ink);border-color:var(--line)}
 
@@ -712,7 +715,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
         <button onclick="navSettings('cfg-data')">Data Management</button>
         <button onclick="navSettings('cfg-roster')">Provider Roster</button>
         <button onclick="navSettings('cfg-stress')">Stress Test / Demo Mode</button>
-        <button onclick="navSettings('cfg-groups')">Group Onboarding</button>
+        <button class="master-only" onclick="navSettings('cfg-groups')">Group Onboarding</button>
       </div>
     </div>
   </div>
@@ -1019,21 +1022,27 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
       </div>
       <div class="dm-help">Versions are saved for the current group only and let you return to a known-good schedule before major edits.</div>
     </div>
+    <div class="dm-section master-only">
+      <div class="dm-title">Schedule Maintenance</div>
+      <div class="fl" style="flex-wrap:wrap;gap:6px">
+        <button class="btn btn-d btn-sm" onclick="confirmResetGroup()">Reset Group</button>
+      </div>
+      <div class="dm-help">Reset Group returns this site to a blank roster and schedule. Master admin only.</div>
+    </div>
     <div class="dm-section">
       <div class="dm-title">Schedule Maintenance</div>
       <div class="fl" style="flex-wrap:wrap;gap:6px">
         <button class="btn btn-d btn-sm" onclick="confirmClearSchedule()">Clear Schedule</button>
-        <button class="btn btn-d btn-sm" onclick="confirmResetGroup()">Reset Group</button>
       </div>
-      <div class="dm-help">Clear Schedule keeps the roster and settings. Reset Group returns this site to a blank roster and schedule.</div>
+      <div class="dm-help">Clear Schedule keeps the roster and settings, but removes generated shifts, requests, holidays, and cycle markers for this site.</div>
     </div>
-    <div class="dm-section">
+    <div class="dm-section master-only">
       <div class="dm-title">JSON Utilities</div>
       <div class="fl" style="flex-wrap:wrap;gap:6px">
         <button class="btn btn-sm" onclick="exportData()">Export JSON</button>
         <button class="btn btn-sm" onclick="importData()">Import JSON</button>
       </div>
-      <div class="dm-help">Low-frequency backup tools for moving raw app data manually.</div>
+      <div class="dm-help">Low-frequency backup tools for moving raw app data manually. Master admin only.</div>
     </div>
   </div>
 </div>
@@ -1063,7 +1072,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
   </div>
 </div>
 
-<div class="pg" id="pg-cfg-groups">
+<div class="pg master-only" id="pg-cfg-groups">
   <h1 class="mb">Group Onboarding</h1>
   <div class="card">
     <h3>Create New Site</h3>
@@ -1324,6 +1333,7 @@ let currentMemberships=[];
 let isSaving=false,pendingSave=false;
 function isAdmin(){return currentUser&&currentUser.role==='admin';}
 function isPhysician(){return currentUser&&currentUser.role==='physician';}
+function isMasterAdmin(){return !!(currentUser&&currentUser.isMasterAdmin);}
 function currentGroupId(){return (currentUser&&currentUser.groupId)||DEFAULT_GROUP_ID;}
 function currentGroupName(){return (currentUser&&currentUser.groupName)||currentGroupId();}
 function currentScheduleRowId(){return currentGroupId()||DATA_ROW_ID;}
@@ -1369,6 +1379,7 @@ function groupInitials(name){
 function updateSettingsMenuVisibility(){
   const sm=document.getElementById('settings-menu');
   if(sm)sm.style.display=(isAdmin()&&S.ui.role==='admin')?'block':'none';
+  document.body.classList.toggle('master-admin',isMasterAdmin());
 }
 
 function toggleSettingsMenu(ev){
@@ -1624,7 +1635,7 @@ function suggestGroupId(){
 }
 
 async function createGroupAdmin(){
-  if(!isAdmin()){toast('Admin only','error');return;}
+  if(!isMasterAdmin()){toast('Master admin only','error');return;}
   const name=(document.getElementById('g-name')?.value||'').trim();
   const groupId=slugifyGroupId(document.getElementById('g-id')?.value||name);
   const status=document.getElementById('group-onboard-status');
@@ -2567,16 +2578,29 @@ async function showVersions(){
 function confirmRestoreVersion(idx){
   const v=window._versionsList&&window._versionsList[idx];
   if(!v){ toast('Version not found','error'); return; }
-  if(!confirm(`Restore snapshot "${v.name}"?\n\nThis will replace ALL current data. This cannot be undone.`)) return;
-  try{
-    S={...S,...JSON.parse(v.data)};
-    saveData();
-    renderSchedule(); renderRoster(); renderDocList(); populatePhysPicker(); updateQuarterInfo();
-    document.getElementById('modal').style.display='none';
-    toast(`Restored "${v.name}"`,'success');
-  }catch(e){
-    toast('Restore failed: '+errStr(e),'error');
-  }
+  showModal('Confirm Restore',
+    `<div style="font-size:13px;margin-bottom:10px">Restore <strong>${qgEsc(v.name)}</strong> for <strong>${qgEsc(currentGroupName())}</strong>?</div>
+     <div style="font-size:12px;background:#fde2e2;color:#a01918;border:1px solid #c5221f;border-radius:4px;padding:8px 10px;margin-bottom:10px">
+       This replaces the current roster, schedule, requests, settings, and historical data for this site.
+     </div>
+     <div style="font-size:12px;color:#a01918;font-weight:700">Type RESTORE to confirm:</div>
+     <input id="restore-confirm-input" type="text" placeholder="RESTORE" style="width:100%;padding:6px 8px;border:1px solid #a01918;border-radius:4px;font-size:13px;margin-top:4px">`,
+    'Restore Version',
+    async ()=>{
+      const val=document.getElementById('restore-confirm-input')?.value?.trim();
+      if(val!=='RESTORE'){toast('Type RESTORE to confirm','error');return;}
+      try{
+        S={...freshAppState(),...JSON.parse(v.data)};
+        applyMigrations();
+        await saveData();
+        renderSchedule(); renderRoster(); renderDocList(); populatePhysPicker(); updateQuarterInfo();
+        document.getElementById('modal').style.display='none';
+        toast(`Restored "${v.name}"`,'success');
+      }catch(e){
+        toast('Restore failed: '+errStr(e),'error');
+      }
+    }
+  );
 }
 
 function confirmClearSchedule(){
@@ -2652,7 +2676,7 @@ function freshGroupState(){
 }
 
 function confirmResetGroup(){
-  if(!isAdmin()){ toast('Admin only','error'); return; }
+  if(!isMasterAdmin()){ toast('Master admin only','error'); return; }
   showModal('Reset Current Group',
     `<div style="font-size:13px;margin-bottom:12px">This resets <strong>${currentGroupName()}</strong> to a blank slate in Supabase.</div>
      <ul style="font-size:12px;margin:0 0 12px 16px;line-height:1.8">
@@ -2676,8 +2700,36 @@ function confirmResetGroup(){
   );
 }
 
-function exportData(){const b=new Blob([JSON.stringify(S,null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=`hospitalist-schedule-${new Date().toISOString().slice(0,10)}.json`;a.click();toast('Exported','success')}
-function importData(){const i=document.createElement('input');i.type='file';i.accept='.json';i.onchange=e=>{const r=new FileReader();r.onload=ev=>{try{S={...S,...JSON.parse(ev.target.result)};localStorage.setItem('hsq',JSON.stringify(S));location.reload()}catch(e){toast('Invalid file','error')}};r.readAsText(e.target.files[0])};i.click()}
+function exportData(){
+  if(!isMasterAdmin()){toast('Master admin only','error');return;}
+  const b=new Blob([JSON.stringify(S,null,2)],{type:'application/json'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(b);
+  a.download=`hospitalist-schedule-${currentGroupId()}-${new Date().toISOString().slice(0,10)}.json`;
+  a.click();
+  toast('Exported','success');
+}
+function importData(){
+  if(!isMasterAdmin()){toast('Master admin only','error');return;}
+  const i=document.createElement('input');
+  i.type='file';
+  i.accept='.json';
+  i.onchange=e=>{
+    const r=new FileReader();
+    r.onload=async ev=>{
+      try{
+        if(!confirm(`Import raw JSON into ${currentGroupName()}?\n\nThis can overwrite the current site data. Save a version first if needed.`))return;
+        S={...freshAppState(),...JSON.parse(ev.target.result)};
+        applyMigrations();
+        await saveData();
+        renderSchedule();renderRoster();renderDocList();populatePhysPicker();updateQuarterInfo();updateGenButton();
+        toast('Imported JSON','success');
+      }catch(e){toast('Invalid file: '+errStr(e),'error');}
+    };
+    r.readAsText(e.target.files[0]);
+  };
+  i.click();
+}
 
 // ════════════════════════════════════════════════════════
 //  HELPERS
@@ -7095,6 +7147,10 @@ function nav(p){
   if(SETTINGS_PAGES.has(p)&&!isAdmin()){
     toast('Admin only','error');
     p=S.ui.role==='phys'?'myreq':'sched';
+  }
+  if(p==='cfg-groups'&&!isMasterAdmin()){
+    toast('Master admin only','error');
+    p='sched';
   }
   const page=document.getElementById('pg-'+p);
   if(!page)return;
