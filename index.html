@@ -1331,7 +1331,7 @@ let S = {
 };
 let demoModeSnapshot = null;
 let demoHistoryTodayOverride = null;
-const DEMO_HISTORY_SEED_VERSION = 2;
+const DEMO_HISTORY_SEED_VERSION = 3;
 
 // ════════════════════════════════════════════════════════
 //  PERSISTENCE
@@ -1590,8 +1590,7 @@ function ensureDemoHistoricalSchedule(){
         S.teams=best.teams;
         S.baseSchedule=best.baseSchedule;
         S.teamHandoffs=best.teamHandoffs;
-        if(q===currentQ)trimDemoQuarterAfterDate(year,q,todayDs);
-        snapshotBaseSchedule(year,q,q===currentQ?todayDs:null);
+        snapshotBaseSchedule(year,q);
       }
     }
   }finally{
@@ -1601,24 +1600,49 @@ function ensureDemoHistoricalSchedule(){
     S.ui.year=originalUiYear;
     S.ui.quarter=originalUiQuarter;
   }
-  trimDemoQuarterAfterDate(year,currentQ,todayDs);
   S.ui.demoYtdSeedDate=todayDs;
   S.ui.demoYtdSeedVersion=DEMO_HISTORY_SEED_VERSION;
   const nextHistory=JSON.stringify({sched:S.sched||{},teams:S.teams||{},baseSchedule:S.baseSchedule||{}});
   return nextHistory!==priorHistory;
 }
 
-function trimDemoQuarterAfterDate(year,q,lastDateStr){
-  const days=quarterDays(year,q).map(d=>dstrD(d)).filter(ds=>ds>lastDateStr);
-  if(!days.length)return;
-  const daySet=new Set(days);
+function nextQuarterAfterDate(date=new Date()){
+  const y=date.getFullYear();
+  let q=Math.floor(date.getMonth()/3)+2;
+  let year=y;
+  if(q>4){q=1;year++;}
+  return {year,q};
+}
+
+function clearDemoQuarterForSession(year,q){
+  if(!isDemoSessionUser()||!S||!S.sched)return false;
+  const days=quarterDays(year,q).map(d=>dstrD(d));
+  let changed=false;
   activeDocs(year,(q-1)*3).forEach(doc=>{
-    if(S.sched&&S.sched[doc.id])days.forEach(ds=>delete S.sched[doc.id][ds]);
-    if(S.teams&&S.teams[doc.id])days.forEach(ds=>delete S.teams[doc.id][ds]);
-    if(S.baseSchedule&&S.baseSchedule[`${year}-${q}`]&&S.baseSchedule[`${year}-${q}`][doc.id]){
-      Object.keys(S.baseSchedule[`${year}-${q}`][doc.id]).forEach(ds=>{if(daySet.has(ds))delete S.baseSchedule[`${year}-${q}`][doc.id][ds];});
+    if(S.sched[doc.id]){
+      days.forEach(ds=>{if(S.sched[doc.id][ds]!==undefined){delete S.sched[doc.id][ds];changed=true;}});
+    }
+    if(S.teams&&S.teams[doc.id]){
+      days.forEach(ds=>{if(S.teams[doc.id][ds]!==undefined){delete S.teams[doc.id][ds];changed=true;}});
     }
   });
+  const qKey=`${year}-${q}`;
+  if(S.baseSchedule&&S.baseSchedule[qKey]){delete S.baseSchedule[qKey];changed=true;}
+  if(S.cycleStarts&&S.cycleStarts[qKey]){delete S.cycleStarts[qKey];changed=true;}
+  return changed;
+}
+
+function startDemoOnNextQuarter(){
+  if(!isDemoSessionUser())return;
+  const next=nextQuarterAfterDate(new Date());
+  const changed=clearDemoQuarterForSession(next.year,next.q);
+  const ySel=document.getElementById('yr-sel');
+  const qSel=document.getElementById('q-sel');
+  if(ySel)ySel.value=String(next.year);
+  if(qSel)qSel.value=String(next.q);
+  S.ui.year=next.year;
+  S.ui.quarter=next.q;
+  if(changed)sessionStorage.setItem(demoSessionKey(),JSON.stringify(S));
 }
 
 async function loadGroups(){
@@ -7518,6 +7542,7 @@ async function finishInit(){
   if(isPhysician()&&currentUser&&currentUser.docId){
     S.ui.currentPhysId=currentUser.docId;
   }
+  startDemoOnNextQuarter();
   updateHeaderForUser();
   setReadOnly(!isAdmin());
   syncCfgInputs();
