@@ -1330,6 +1330,8 @@ let S = {
   }
 };
 let demoModeSnapshot = null;
+let demoHistoryTodayOverride = null;
+const DEMO_HISTORY_SEED_VERSION = 2;
 
 // ════════════════════════════════════════════════════════
 //  PERSISTENCE
@@ -1530,79 +1532,93 @@ function ensureDemoHistoricalSchedule(){
   const today=new Date();today.setHours(0,0,0,0);
   const todayDs=dstrD(today);
   const year=today.getFullYear();
-  const start=new Date(year,0,1);
-  const docs=activeDocs(year).filter(d=>d.type!=='prn').sort(providerSort);
-  if(!docs.length)return false;
-  docs.forEach((doc,idx)=>{doc._demoSeedIdx=idx;});
-  const mdDocs=docs.filter(d=>d.type==='standard'&&!isMedicalDirectorDoc(d)&&!isAppProvider(d));
-  const appDocs=docs.filter(d=>d.type==='standard'&&!isMedicalDirectorDoc(d)&&isAppProvider(d));
-  const noctDocs=docs.filter(d=>d.type==='nocturnist'&&!isAppProvider(d));
-  const appNoctDocs=docs.filter(d=>d.type==='nocturnist'&&isAppProvider(d));
-  const medDocs=docs.filter(isMedicalDirectorDoc);
-  const swingOnlyDocs=docs.filter(d=>d.type==='swing-only');
-  const mdWorkCount={};
-  const mdSwingCount={};
-  const appWorkCount={};
-  const appSwingCount={};
-  let changed=false;
-  function setShift(doc,ds,sh){
+  const currentQ=Math.floor(today.getMonth()/3)+1;
+  if(S.ui.demoYtdSeedDate===todayDs&&S.ui.demoYtdSeedVersion===DEMO_HISTORY_SEED_VERSION)return false;
+  if(!activeDocs(year).filter(d=>d.type!=='prn').length)return false;
+  const originalYear=document.getElementById('yr-sel')?.value;
+  const originalQ=document.getElementById('q-sel')?.value;
+  const originalUiYear=S.ui.year;
+  const originalUiQuarter=S.ui.quarter;
+  const ySel=document.getElementById('yr-sel');
+  const qSel=document.getElementById('q-sel');
+  const priorHistory=JSON.stringify({sched:S.sched||{},teams:S.teams||{},baseSchedule:S.baseSchedule||{}});
+  const docs=activeDocs(year);
+  const jan1=dstr(year,0,1);
+  docs.forEach(doc=>{
     if(!S.sched[doc.id])S.sched[doc.id]={};
     if(!S.teams)S.teams={};
     if(!S.teams[doc.id])S.teams[doc.id]={};
-    if(S.sched[doc.id][ds]!==sh){S.sched[doc.id][ds]=sh;changed=true;}
+    Object.keys(S.sched[doc.id]).forEach(ds=>{if(ds>=jan1&&ds<=todayDs)delete S.sched[doc.id][ds];});
+    Object.keys(S.teams[doc.id]).forEach(ds=>{if(ds>=jan1&&ds<=todayDs)delete S.teams[doc.id][ds];});
+  });
+  if(!S.baseSchedule)S.baseSchedule={};
+  for(let q=1;q<=currentQ;q++)delete S.baseSchedule[`${year}-${q}`];
+  try{
+    demoHistoryTodayOverride='1900-01-01';
+    for(let q=1;q<=currentQ;q++){
+      if(ySel)ySel.value=String(year);
+      if(qSel)qSel.value=String(q);
+      S.ui.year=year;S.ui.quarter=q;
+      const beforeQuarter=JSON.stringify({
+        sched:S.sched||{},
+        teams:S.teams||{},
+        baseSchedule:S.baseSchedule||{},
+        teamHandoffs:S.teamHandoffs||{}
+      });
+      let best=null;
+      const candidates=12;
+      for(let seed=0;seed<candidates;seed++){
+        const snap=JSON.parse(beforeQuarter);
+        S.sched=snap.sched||{};
+        S.teams=snap.teams||{};
+        S.baseSchedule=snap.baseSchedule||{};
+        S.teamHandoffs=snap.teamHandoffs||{};
+        _generateQuarter(8100+q*100+seed,false);
+        const score=_scoreScheduleCandidate(year,q);
+        if(!best||score<best.score){
+          best={
+            score,
+            sched:JSON.parse(JSON.stringify(S.sched||{})),
+            teams:JSON.parse(JSON.stringify(S.teams||{})),
+            baseSchedule:JSON.parse(JSON.stringify(S.baseSchedule||{})),
+            teamHandoffs:JSON.parse(JSON.stringify(S.teamHandoffs||{}))
+          };
+        }
+      }
+      if(best){
+        S.sched=best.sched;
+        S.teams=best.teams;
+        S.baseSchedule=best.baseSchedule;
+        S.teamHandoffs=best.teamHandoffs;
+        if(q===currentQ)trimDemoQuarterAfterDate(year,q,todayDs);
+        snapshotBaseSchedule(year,q,q===currentQ?todayDs:null);
+      }
+    }
+  }finally{
+    demoHistoryTodayOverride=null;
+    if(ySel&&originalYear)ySel.value=originalYear;
+    if(qSel&&originalQ)qSel.value=originalQ;
+    S.ui.year=originalUiYear;
+    S.ui.quarter=originalUiQuarter;
   }
-  function phaseFor(doc){return (doc._demoSeedIdx*7)%14;}
-  for(let d=new Date(start),di=0;d<=today;d=addD(d,1),di++){
-    const ds=dstrD(d);
-    const st=staffingForDate(ds);
-    docs.forEach(doc=>setShift(doc,ds,'OFF'));
-    medDocs.forEach(doc=>setShift(doc,ds,(d.getDay()>=1&&d.getDay()<=5)?'R':'OFF'));
-    swingOnlyDocs.forEach(doc=>{
-      if(strictIsWorkingOffset(di,phaseFor(doc)))setShift(doc,ds,'S');
-    });
-    noctDocs.forEach(doc=>{
-      if(strictIsWorkingOffset(di,phaseFor(doc)))setShift(doc,ds,'N');
-    });
-    appNoctDocs.forEach((doc,idx)=>{
-      if(!strictIsWorkingOffset(di,phaseFor(doc)))return;
-      const shift=idx%2===0?'APP_NS':'APP_NX';
-      setShift(doc,ds,shift);
-    });
-    const swingOnlyCount=swingOnlyDocs.filter(doc=>S.sched[doc.id]&&S.sched[doc.id][ds]==='S').length;
-    const mdWorkNeed=Math.max(0,(st.R||0)+(st.S||0)-swingOnlyCount);
-    const mdWorking=mdDocs.filter(doc=>strictIsWorkingOffset(di,phaseFor(doc)))
-      .sort((a,b)=>(mdWorkCount[a.id]||0)-(mdWorkCount[b.id]||0)||providerSort(a,b))
-      .slice(0,mdWorkNeed);
-    const mdSwingNeed=Math.max(0,(st.S||0)-swingOnlyCount);
-    const mdSwingDocs=mdWorking.slice()
-      .sort((a,b)=>(mdSwingCount[a.id]||0)-(mdSwingCount[b.id]||0)||providerSort(a,b))
-      .slice(0,mdSwingNeed);
-    const mdSwingSet=new Set(mdSwingDocs.map(d=>d.id));
-    mdWorking.forEach(doc=>{
-      const shift=mdSwingSet.has(doc.id)?'S':'R';
-      setShift(doc,ds,shift);
-      mdWorkCount[doc.id]=(mdWorkCount[doc.id]||0)+1;
-      if(shift==='S')mdSwingCount[doc.id]=(mdSwingCount[doc.id]||0)+1;
-    });
-    const appWorkNeed=Math.max(0,(st.appRounders||0)+(st.appAdmitters||0));
-    const appWorking=appDocs.filter(doc=>strictIsWorkingOffset(di,phaseFor(doc)))
-      .sort((a,b)=>(appWorkCount[a.id]||0)-(appWorkCount[b.id]||0)||providerSort(a,b))
-      .slice(0,appWorkNeed);
-    const appSwingNeed=Math.max(0,st.appAdmitters||0);
-    const appSwingDocs=appWorking.slice()
-      .sort((a,b)=>(appSwingCount[a.id]||0)-(appSwingCount[b.id]||0)||providerSort(a,b))
-      .slice(0,appSwingNeed);
-    const appSwingSet=new Set(appSwingDocs.map(d=>d.id));
-    appWorking.forEach(doc=>{
-      const shift=appSwingSet.has(doc.id)?'S':'R';
-      setShift(doc,ds,shift);
-      appWorkCount[doc.id]=(appWorkCount[doc.id]||0)+1;
-      if(shift==='S')appSwingCount[doc.id]=(appSwingCount[doc.id]||0)+1;
-    });
-  }
-  docs.forEach(doc=>delete doc._demoSeedIdx);
-  if(S.ui.demoYtdSeedDate!==todayDs){S.ui.demoYtdSeedDate=todayDs;changed=true;}
-  return changed;
+  trimDemoQuarterAfterDate(year,currentQ,todayDs);
+  S.ui.demoYtdSeedDate=todayDs;
+  S.ui.demoYtdSeedVersion=DEMO_HISTORY_SEED_VERSION;
+  const nextHistory=JSON.stringify({sched:S.sched||{},teams:S.teams||{},baseSchedule:S.baseSchedule||{}});
+  return nextHistory!==priorHistory;
+}
+
+function trimDemoQuarterAfterDate(year,q,lastDateStr){
+  const days=quarterDays(year,q).map(d=>dstrD(d)).filter(ds=>ds>lastDateStr);
+  if(!days.length)return;
+  const daySet=new Set(days);
+  activeDocs(year,(q-1)*3).forEach(doc=>{
+    if(S.sched&&S.sched[doc.id])days.forEach(ds=>delete S.sched[doc.id][ds]);
+    if(S.teams&&S.teams[doc.id])days.forEach(ds=>delete S.teams[doc.id][ds]);
+    if(S.baseSchedule&&S.baseSchedule[`${year}-${q}`]&&S.baseSchedule[`${year}-${q}`][doc.id]){
+      Object.keys(S.baseSchedule[`${year}-${q}`][doc.id]).forEach(ds=>{if(daySet.has(ds))delete S.baseSchedule[`${year}-${q}`][doc.id][ds];});
+    }
+  });
 }
 
 async function loadGroups(){
@@ -4502,7 +4518,7 @@ function _generateQuarter(candidateSeed=0,finalize=true){
 
   // Clear schedule for the quarter — but PRESERVE days before today (imported historical data)
   const todayD=new Date(); todayD.setHours(0,0,0,0);
-  const todayDs=dstrD(todayD);
+  const todayDs=demoHistoryTodayOverride||dstrD(todayD);
   allActive.forEach(d=>{
     if(!S.sched[d.id]) S.sched[d.id]={};
     if(!S.teams) S.teams={};
@@ -5040,24 +5056,7 @@ function _generateQuarter(candidateSeed=0,finalize=true){
 
 function _finalizeGeneratedQuarter(year,q,best){
   const qKey=`${year}-${q}`;
-  const range=quarterRange(year,q);
-  const startD=range.start;
-  const totalDays=Math.floor((range.end-startD)/86400000)+1;
-  const allActive=activeDocs(year,range.months[0]);
-
-  // Save a snapshot of the generated base schedule for this quarter.
-  // This is used later to detect bonus/extra shifts when re-importing from qGenda.
-  if(!S.baseSchedule) S.baseSchedule={};
-  S.baseSchedule[qKey]={};
-  allActive.forEach(doc=>{
-    S.baseSchedule[qKey][doc.id]={};
-    for(let di2=0;di2<totalDays;di2++){
-      const ds2=dstrD(addD(startD,di2));
-      const sh=S.sched[doc.id]&&S.sched[doc.id][ds2];
-      if(sh) S.baseSchedule[qKey][doc.id][ds2]=sh;
-    }
-  });
-
+  snapshotBaseSchedule(year,q);
   S.cycleStarts[qKey]={generated:new Date().toISOString()};
   saveData();
   renderSchedule();
@@ -5065,6 +5064,25 @@ function _finalizeGeneratedQuarter(year,q,best){
   updateGenButton();
   toast(`Generated Q${q} ${year} from 48 candidates (best variant ${best.seed+1})`,'success');
   setTimeout(recheckFairness, 100);  // auto-check fairness after generation
+}
+
+function snapshotBaseSchedule(year,q,lastDateStr=null){
+  const qKey=`${year}-${q}`;
+  const range=quarterRange(year,q);
+  const startD=range.start;
+  const totalDays=Math.floor((range.end-startD)/86400000)+1;
+  const allActive=activeDocs(year,range.months[0]);
+  if(!S.baseSchedule) S.baseSchedule={};
+  S.baseSchedule[qKey]={};
+  allActive.forEach(doc=>{
+    S.baseSchedule[qKey][doc.id]={};
+    for(let di2=0;di2<totalDays;di2++){
+      const ds2=dstrD(addD(startD,di2));
+      if(lastDateStr&&ds2>lastDateStr)continue;
+      const sh=S.sched[doc.id]&&S.sched[doc.id][ds2];
+      if(sh) S.baseSchedule[qKey][doc.id][ds2]=sh;
+    }
+  });
 }
 
 // Assign persistent rounding team labels.
