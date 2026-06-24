@@ -770,6 +770,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
         <option value="4">Q4 · Oct–Dec</option>
       </select>
       <button class="btn btn-p" id="gen-btn" onclick="tryGenerateQuarter()">Generate Schedule</button>
+      <button class="btn btn-sm" id="demo-requests-btn" onclick="fillDemoTimeOffRequests()" style="display:none">Fill Demo Requests</button>
       <button class="btn btn-sm" onclick="recheckFairness()" title="Check shift distribution fairness">Fairness Check</button>
     </div>
   </div>
@@ -3441,14 +3442,14 @@ function holName(key){
 //  Key fixes over v9:
 //    - MAX_S_BLOCK = 2: strictly limits consecutive S days to 2
 //      (v9 bug: S continuation had no cap → Raza/Rizvi 7-day S blocks)
-//    - Monthly S fairness: tiered selection (providers below monthly target first)
-//      Each provider targets ~quarterTargetS/3 S shifts per month
-//    - mustContinueS_couplet also checks runLen < MAX_S_BLOCK (belt-and-suspenders)
+//    - Monthly and year-to-date S fairness: tiered selection first favors
+//      providers behind their FTE-adjusted swing share from prior quarters
 //
 //  Swing fill layers (shortages remain visible when no clean tail is available):
 //    Layer 1 - Normal: preferredR met AND below monthly quota
 //    Layer 2 - Normal above-quota: preferredR met, but over monthly target (still fair)
 //    Layer 3 - Emergency: 5+ R (early transition when S supply is thin)
+//    Layer 4 - Last resort: isolated S from OFF only to avoid a coverage miss
 //
 //  Team numbers:
 //    Each R-shift doc gets team 1-13; persists through their block;
@@ -3563,9 +3564,21 @@ function _scoreScheduleCandidate(year,q){
   const swingDocs=physicianSwingEligibleDocs(year).filter(d=>fteValue(d)>0);
   const totalSwing=swingDocs.reduce((sum,d)=>sum+quarterShiftTotal(d,days,'S'),0);
   const totalFte=swingDocs.reduce((sum,d)=>sum+fteValue(d),0)||1;
+  const priorSwingByDoc={};
   swingDocs.forEach(doc=>{
-    const expected=totalSwing*(fteValue(doc)/totalFte);
-    const actual=quarterShiftTotal(doc,days,'S');
+    let priorS=0;
+    for(let pq=1;pq<q;pq++){
+      const pqKey=`${year}-${pq}`;
+      const base=S.baseSchedule&&S.baseSchedule[pqKey]&&S.baseSchedule[pqKey][doc.id];
+      if(base)Object.values(base).forEach(sh=>{if(sh==='S')priorS++;});
+    }
+    priorSwingByDoc[doc.id]=priorS;
+  });
+  const priorSwingTotal=swingDocs.reduce((sum,d)=>sum+(priorSwingByDoc[d.id]||0),0);
+  const yearToDateSwingTotal=priorSwingTotal+totalSwing;
+  swingDocs.forEach(doc=>{
+    const expected=yearToDateSwingTotal*(fteValue(doc)/totalFte);
+    const actual=(priorSwingByDoc[doc.id]||0)+quarterShiftTotal(doc,days,'S');
     const diff=actual-expected;
     swingImbalance+=diff*diff;
     if(diff>3)swingImbalance+=(diff-3)*(diff-3)*3;
@@ -3744,7 +3757,7 @@ function strictWorkBlocksForDoc(doc,days,startD,phase){
   if(current)blocks.push(current);
   return blocks;
 }
-function chooseStrictSwingBlocks(pool,days,startD,phaseById,targetSwingForDay,candidateSeed,activeBlockIds=null){
+function chooseStrictSwingBlocks(pool,days,startD,phaseById,targetSwingForDay,candidateSeed,activeBlockIds=null,priorSwingByDoc={},expectedPriorSwingByDoc={}){
   const swingCounts=days.map(()=>0);
   const selected=new Set();
   const selectedBlocks=new Set();
@@ -3793,6 +3806,11 @@ function chooseStrictSwingBlocks(pool,days,startD,phaseById,targetSwingForDay,ca
     const diff=count-target;
     return diff*diff*8+(diff>0?diff*diff*10:0);
   }
+  function swingFairnessPenalty(docId,current,after,target){
+    const prior=priorSwingByDoc[docId]||0;
+    const expectedPrior=expectedPriorSwingByDoc[docId]||0;
+    return fairnessCost(prior+after,expectedPrior+target)-fairnessCost(prior+current,expectedPrior+target);
+  }
   let improved=true;
   while(improved){
     improved=false;
@@ -3808,7 +3826,7 @@ function chooseStrictSwingBlocks(pool,days,startD,phaseById,targetSwingForDay,ca
       const current=selectedByDoc[doc.id]||0;
       const blockDays=block.swingDays.length;
       const after=current+blockDays;
-      const fairnessPenalty=fairnessCost(after,target)-fairnessCost(current,target);
+      const fairnessPenalty=swingFairnessPenalty(doc.id,current,after,target);
       const score=errorWith(block)+fairnessPenalty+current*1.5+_candidateUnit(candidateSeed,block.id+'|swing')*0.01;
       const gain=base-score;
       if(gain>0&&(!best||gain>best.gain))best={block,gain,score};
@@ -3883,7 +3901,7 @@ function chooseStrictFteWorkBlocks(pool,days,startD,phaseById,targetWorkForDay,c
   }
   return selected;
 }
-function assignStrictBaseline({strictAll,swingOnly,days,startD,candidateSeed,strictSwingShare=1}){
+function assignStrictBaseline({strictAll,swingOnly,days,startD,candidateSeed,strictSwingShare=1,priorSwingByDoc={},expectedPriorSwingByDoc={}}){
   const mdStrict=strictAll.filter(d=>!isAppProvider(d)).sort(providerSort);
   const appStrict=strictAll.filter(isAppProvider).sort(providerSort);
   const mdPhase=chooseStrictPhases(mdStrict,days,startD,(ds,idx)=>{
@@ -3909,7 +3927,7 @@ function assignStrictBaseline({strictAll,swingOnly,days,startD,candidateSeed,str
     const swingOnlyCount=strictSwingOnlyCountForOffset(swingOnly,startD,idx,ds);
     const target=Math.max(0,(st.S||0)-swingOnlyCount);
     return Math.max(0,Math.round(target*strictSwingShare));
-  },candidateSeed,mdWorkBlocks);
+  },candidateSeed,mdWorkBlocks,priorSwingByDoc,expectedPriorSwingByDoc);
   const appSwingBlocks=chooseStrictSwingBlocks(appStrict,days,startD,appPhase,(ds)=>{
     const st=staffingForDate(ds);
     return Math.max(0,st.appAdmitters||0);
@@ -4325,6 +4343,126 @@ function buildDemoRequests(year,q,docs,requiredCount,optionalCount,weekendBias,s
   });
   return requests;
 }
+function demoPagePickRequestBlocks(year,q,docId,count,kind,seed,blocked=new Set()){
+  if(count<=0)return [];
+  const days=quarterDays(year,q).map(dstrD);
+  const picked=new Set();
+  const protectedDays=new Set(blocked||[]);
+  const minGap=5;
+  const blockLens=kind==='required'?[3,3,4,4,5]:[3,4,4,5,6,7];
+  const candidates=days.map((ds,idx)=>{
+    const d=parseD(ds);
+    const weekendNear=[-2,-1,0,1,2].some(offset=>{
+      const near=days[idx+offset];
+      return near&&isWeekend(parseD(near));
+    });
+    const weekendBoost=weekendNear?0.25:0;
+    const edgePenalty=(idx<5||idx>days.length-6)?0.15:0;
+    return {ds,idx,score:_candidateUnit(seed,docId+'|demo-page|'+kind+'|'+ds)+weekendBoost-edgePenalty};
+  }).sort((a,b)=>b.score-a.score);
+  function isBlocked(idx){
+    const ds=days[idx];
+    if(protectedDays.has(ds)||picked.has(ds))return true;
+    for(let i=Math.max(0,idx-minGap);i<=Math.min(days.length-1,idx+minGap);i++){
+      if(picked.has(days[i])||protectedDays.has(days[i]))return true;
+    }
+    return false;
+  }
+  function tryBlock(startIdx,len,direction){
+    const block=[];
+    for(let step=0;step<len;step++){
+      const idx=startIdx+(step*direction);
+      if(idx<0||idx>=days.length)return [];
+      const ds=days[idx];
+      if(protectedDays.has(ds)||picked.has(ds))return [];
+      block.push({idx,ds});
+    }
+    if(block.length<3)return [];
+    const lo=Math.min(...block.map(x=>x.idx));
+    const hi=Math.max(...block.map(x=>x.idx));
+    for(let i=Math.max(0,lo-minGap);i<=Math.min(days.length-1,hi+minGap);i++){
+      if(block.some(x=>x.idx===i))continue;
+      if(picked.has(days[i])||protectedDays.has(days[i]))return [];
+    }
+    return block;
+  }
+  for(const cand of candidates){
+    if(picked.size>=count)break;
+    if(isBlocked(cand.idx))continue;
+    const remaining=count-picked.size;
+    const lens=blockLens.filter(len=>len<=remaining&&(remaining-len===0||remaining-len>=3));
+    if(!lens.length)break;
+    const len=lens[Math.floor(_candidateUnit(seed,cand.ds+'|demo-page|'+docId+'|'+kind+'|len')*lens.length)]||3;
+    const firstDir=_candidateUnit(seed,cand.ds+'|demo-page|'+docId+'|'+kind+'|dir')<0.5?-1:1;
+    let block=tryBlock(cand.idx,len,firstDir);
+    if(!block.length)block=tryBlock(cand.idx,len,-firstDir);
+    block.forEach(x=>picked.add(x.ds));
+  }
+  return [...picked].sort();
+}
+function demoPageVariableDocs(year){
+  return activeDocs(year).filter(doc=>doc.type==='standard'
+    &&!isMedicalDirectorDoc(doc)
+    &&!isAppProvider(doc)
+    &&doc.type!=='prn'
+    &&doc.type!=='nocturnist'
+    &&!isStrictStyle(doc)
+    &&fteValue(doc)>0)
+    .sort(providerSort);
+}
+function buildDemoPageRequests(year,q,docs,totalCount,requiredCount,seed){
+  const requests={};
+  docs.forEach((doc,idx)=>{
+    const docSeed=seed+(idx*97);
+    const required=demoPagePickRequestBlocks(year,q,doc.id,requiredCount,'required',docSeed);
+    const optionalCount=Math.max(0,totalCount-required.length);
+    const optional=demoPagePickRequestBlocks(year,q,doc.id,optionalCount,'optional',docSeed+7000,new Set(required));
+    requests[doc.id]={required,optional};
+  });
+  return requests;
+}
+async function fillDemoTimeOffRequests(){
+  if(!isDemoGroup()){
+    toast('Demo request fill is only available in the demo site.','error');
+    return;
+  }
+  if(!isAdmin()){
+    toast('Admin only','error');
+    return;
+  }
+  const year=parseInt(document.getElementById('yr-sel')?.value,10)||S.ui.year;
+  const q=parseInt(document.getElementById('q-sel')?.value,10)||S.ui.quarter;
+  const range=quarterRange(year,q);
+  const today=new Date();today.setHours(0,0,0,0);
+  if(isDemoSessionUser()&&range.start<=today){
+    toast('Demo history is prefilled through today. Choose a future quarter to fill demo requests.','info',4500);
+    updateGenButton();
+    return;
+  }
+  const docs=demoPageVariableDocs(year);
+  if(!docs.length){
+    toast('No variable providers found for this demo quarter.','error',4000);
+    return;
+  }
+  const maxReq=Math.max(0,parseInt(S.cfg&&S.cfg.maxReq,10)||0);
+  const maxRequired=Math.max(0,parseInt(S.cfg&&S.cfg.maxRequired,10)||0);
+  const totalCount=Math.ceil(maxReq*0.8);
+  let requiredCount=Math.min(totalCount,Math.ceil(maxRequired*0.8));
+  if(requiredCount>0&&requiredCount<3)requiredCount=0;
+  if(totalCount<3){
+    toast('Set a request cap in Schedule Parameters before filling demo requests.','error',4500);
+    return;
+  }
+  const qKey=`${year}-${q}`;
+  S.requests[qKey]=buildDemoPageRequests(year,q,docs,totalCount,requiredCount,24000+(year*10)+q);
+  S.requests[qKey+'_submitted']={};
+  docs.forEach(doc=>{S.requests[qKey+'_submitted'][doc.id]=new Date().toISOString();});
+  renderRequestsAdmin();
+  renderSchedule();
+  updateDemoModeUI();
+  await saveData();
+  toast(`Filled ${docs.length} variable providers with ${totalCount} requests each (${requiredCount} required, ${totalCount-requiredCount} optional).`,'success',5500);
+}
 function stressScheduleMetrics(year,q,stressDocs){
   const days=quarterDays(year,q);
   const quarterKey=`${year}-${q}`;
@@ -4429,10 +4567,12 @@ function updateDemoModeUI(){
   const bannerText=document.getElementById('demo-banner-text');
   const exitBtn=document.getElementById('demo-exit-btn');
   const saveBtn=document.getElementById('save-btn');
+  const demoReqBtn=document.getElementById('demo-requests-btn');
   if(banner)banner.style.display=on?'block':'none';
   if(bannerText)bannerText.textContent=(S.ui&&S.ui.demoSummary)||'Temporary schedule is showing. Real data has not been saved.';
   if(exitBtn)exitBtn.disabled=!on;
   if(saveBtn)saveBtn.disabled=on;
+  if(demoReqBtn)demoReqBtn.style.display=(isDemoGroup()&&isAdmin())?'inline-flex':'none';
   syncScheduleDemoScrollbar();
   if(on)setSyncStatus('demo');
 }
@@ -4585,7 +4725,7 @@ function _generateQuarter(candidateSeed=0,finalize=true){
   // excluding any voluntary extra shifts they picked up.
   // The generator then uses this to equalize annual totals across providers.
   const ytdBase={};  // docId → {R:n, S:n, N:n, total:n}
-  rotation.forEach(doc=>{
+  physicianSwingPool.forEach(doc=>{
     let bR=0, bS=0, bN=0;
     // Count base schedule shifts from all quarters before this one
     for(let pq=1; pq<q; pq++){
@@ -4599,6 +4739,17 @@ function _generateQuarter(candidateSeed=0,finalize=true){
       });
     }
     ytdBase[doc.id]={R:bR, S:bS, N:bN, total:bR+bS+bN};
+  });
+
+  // Prior-year swing fairness: if a provider is behind their FTE-adjusted
+  // swing share from earlier quarters, prioritize them for S this quarter.
+  const priorSwingByDoc={};
+  const expectedPriorSwingByDoc={};
+  const priorSwingTotal=physicianSwingPool.reduce((sum,doc)=>sum+((ytdBase[doc.id]&&ytdBase[doc.id].S)||0),0);
+  const priorSwingFte=physicianSwingPool.reduce((sum,doc)=>sum+fteValue(doc),0)||1;
+  physicianSwingPool.forEach(doc=>{
+    priorSwingByDoc[doc.id]=(ytdBase[doc.id]&&ytdBase[doc.id].S)||0;
+    expectedPriorSwingByDoc[doc.id]=priorSwingTotal*(fteValue(doc)/priorSwingFte);
   });
 
   // Compute per-provider annual target and remaining budget
@@ -4709,12 +4860,23 @@ function _generateQuarter(candidateSeed=0,finalize=true){
     const baseQTarget=Math.round(avgAdmitterTarget(quarterDays(year,q)) * totalDays / (rotation.length + partTime.length + strictPhysicianCount || 1));
     return Math.max(1, Math.round(baseQTarget * fte));
   }
+  function swingCatchupDeficit(docId){
+    return Math.max(0,(expectedPriorSwingByDoc[docId]||0)-(priorSwingByDoc[docId]||0));
+  }
+  function swingQuarterCap(docId){
+    return qSTarget(docId)+Math.ceil(swingCatchupDeficit(docId));
+  }
+  function swingFairnessRatio(docId){
+    const s=state[docId]||{};
+    const expected=(expectedPriorSwingByDoc[docId]||0)+qSTarget(docId);
+    return ((priorSwingByDoc[docId]||0)+(s.qS||0))/Math.max(1,expected);
+  }
   function canBeS_normal(docId){
     const s=state[docId];
     if(!s||s.block!=='W') return false;
     if(s.workInBlock>=s.maxWork) return false;
-    // Cap: don't exceed this provider's pro-rated quarterly S target
-    if(s.qS >= qSTarget(docId)) return false;
+    // Cap: allow modest catch-up if prior quarters left this provider short on S
+    if(s.qS >= swingQuarterCap(docId)) return false;
     if(s.lastShift==='S') return s.runLen<MAX_S_BLOCK;
     if(s.lastShift==='R' && s.runLen>=MIN_R_HARD)
       return s.workInBlock+1<=s.maxWork;
@@ -4724,7 +4886,7 @@ function _generateQuarter(candidateSeed=0,finalize=true){
     const s=state[docId];
     if(!s||s.block!=='W') return false;
     if(s.workInBlock>=s.maxWork) return false;
-    if(s.qS >= qSTarget(docId)) return false;  // respect FTE-adjusted cap
+    if(s.qS >= swingQuarterCap(docId)) return false;  // respect FTE-adjusted cap plus catch-up
     if(s.lastShift==='S') return s.runLen<MAX_S_BLOCK;
     if(s.lastShift==='R' && s.runLen>=MIN_R_HARD)
       return s.workInBlock+1<=s.maxWork;
@@ -4734,7 +4896,7 @@ function _generateQuarter(candidateSeed=0,finalize=true){
     const s=state[docId];
     if(!s||s.block!=='O') return false;
     if(s.dayInBlock<MIN_R_HARD) return false;
-    return s.qS<=qSTarget(docId);
+    return s.qS<swingQuarterCap(docId);
   }
   function mustContinueR(docId){
     const s=state[docId];
@@ -4795,7 +4957,7 @@ function _generateQuarter(candidateSeed=0,finalize=true){
   // Strict providers are solved as a coverage baseline before variable fill.
   // The solver chooses 7-on/7-off phases using the 14-day prior-quarter tail
   // as a continuity constraint, then selects full 7-day work blocks for swing.
-  assignStrictBaseline({strictAll,swingOnly,days,startD,candidateSeed,strictSwingShare});
+  assignStrictBaseline({strictAll,swingOnly,days,startD,candidateSeed,strictSwingShare,priorSwingByDoc,expectedPriorSwingByDoc});
   assignNocturnistBaseline({nocturnists,days,startD,candidateSeed});
 
     // ──────── DAILY LOOP ────────
@@ -4940,10 +5102,10 @@ function _generateQuarter(candidateSeed=0,finalize=true){
     function sSortKey(docId){
       const s=state[docId];
       const rem=ytdRemaining[docId]||0;
-      const target=qSTarget(docId)||1;
-      // Normalize qS by FTE target so part-time providers aren't over-scheduled for S
-      const normalizedQS = s.qS / target;
-      return [sTailScore(docId), -rem, s.monthCount[month], normalizedQS];
+      // Normalize S by expected year-to-date share so prior-quarter swing deficits
+      // are corrected before providers who are already ahead receive extra S.
+      const normalizedYS = swingFairnessRatio(docId);
+      return [sTailScore(docId), normalizedYS, -rem, s.monthCount[month], s.qS];
     }
 
     // STEP 4a: Normal S — BELOW monthly target (strongest fairness tier)
@@ -4951,8 +5113,8 @@ function _generateQuarter(candidateSeed=0,finalize=true){
       const cands=rotation
         .filter(d=>!assigned.has(d.id)&&canBeS_normal(d.id)&&state[d.id].monthCount[month]<MONTHLY_S_TARGET)
         .sort((a,b)=>{
-          const [at,ar,am,aq]=sSortKey(a.id), [bt,br,bm,bq]=sSortKey(b.id);
-          return at!==bt?at-bt:ar!==br?ar-br:am!==bm?am-bm:aq!==bq?aq-bq:_candidateTie(candidateSeed,ds,a.id)-_candidateTie(candidateSeed,ds,b.id);
+          const [at,ay,ar,am,aq]=sSortKey(a.id), [bt,by,br,bm,bq]=sSortKey(b.id);
+          return at!==bt?at-bt:ay!==by?ay-by:ar!==br?ar-br:am!==bm?am-bm:aq!==bq?aq-bq:_candidateTie(candidateSeed,ds,a.id)-_candidateTie(candidateSeed,ds,b.id);
         });
       let i=0;
       while(needS>0&&i<cands.length){
@@ -4966,8 +5128,8 @@ function _generateQuarter(candidateSeed=0,finalize=true){
       const cands=rotation
         .filter(d=>!assigned.has(d.id)&&canBeS_normal(d.id))
         .sort((a,b)=>{
-          const [at,ar,am,aq]=sSortKey(a.id), [bt,br,bm,bq]=sSortKey(b.id);
-          return at!==bt?at-bt:ar!==br?ar-br:am!==bm?am-bm:aq!==bq?aq-bq:_candidateTie(candidateSeed,ds,a.id)-_candidateTie(candidateSeed,ds,b.id);
+          const [at,ay,ar,am,aq]=sSortKey(a.id), [bt,by,br,bm,bq]=sSortKey(b.id);
+          return at!==bt?at-bt:ay!==by?ay-by:ar!==br?ar-br:am!==bm?am-bm:aq!==bq?aq-bq:_candidateTie(candidateSeed,ds,a.id)-_candidateTie(candidateSeed,ds,b.id);
         });
       let i=0;
       while(needS>0&&i<cands.length){
@@ -4981,8 +5143,9 @@ function _generateQuarter(candidateSeed=0,finalize=true){
       const cands=rotation
         .filter(d=>!assigned.has(d.id)&&canBeS_emergency(d.id))
         .sort((a,b)=>{
-          const [at,ar,am,aq]=sSortKey(a.id), [bt,br,bm,bq]=sSortKey(b.id);
+          const [at,ay,ar,am,aq]=sSortKey(a.id), [bt,by,br,bm,bq]=sSortKey(b.id);
           if(at!==bt) return at-bt;
+          if(ay!==by) return ay-by;
           if(ar!==br) return ar-br;
           if(am!==bm) return am-bm;
           if(aq!==bq) return aq-bq;
@@ -5004,8 +5167,7 @@ function _generateQuarter(candidateSeed=0,finalize=true){
         .filter(d=>!assigned.has(d.id)&&canBeS_lastResort(d.id))
         .sort((a,b)=>{
           const sa=state[a.id],sb=state[b.id];
-          const aTarget=qSTarget(a.id)||1,bTarget=qSTarget(b.id)||1;
-          const aNorm=sa.qS/aTarget,bNorm=sb.qS/bTarget;
+          const aNorm=swingFairnessRatio(a.id),bNorm=swingFairnessRatio(b.id);
           if(aNorm!==bNorm) return aNorm-bNorm;
           if(sa.monthCount[month]!==sb.monthCount[month]) return sa.monthCount[month]-sb.monthCount[month];
           return sb.dayInBlock-sa.dayInBlock||_candidateTie(candidateSeed,ds,a.id)-_candidateTie(candidateSeed,ds,b.id);
@@ -5235,10 +5397,20 @@ function updateGenButton(){
   const qKey=`${year}-${q}`;
   const exists=S.cycleStarts[qKey]&&S.cycleStarts[qKey].generated;
   const btn=document.getElementById('gen-btn');
+  const demoReqBtn=document.getElementById('demo-requests-btn');
+  if(demoReqBtn){
+    demoReqBtn.style.display=(isDemoGroup()&&isAdmin())?'inline-flex':'none';
+    demoReqBtn.disabled=false;
+    demoReqBtn.title='Fill demo time-off requests for variable providers.';
+  }
   if(!btn) return;
   const range=quarterRange(year,q);
   const today=new Date();today.setHours(0,0,0,0);
   if(isDemoSessionUser()&&range.start<=today){
+    if(demoReqBtn){
+      demoReqBtn.disabled=true;
+      demoReqBtn.title='Demo accounts cannot edit prefilled history quarters.';
+    }
     btn.textContent='Demo History Prefilled';
     btn.className='btn btn-quiet';
     btn.disabled=true;
