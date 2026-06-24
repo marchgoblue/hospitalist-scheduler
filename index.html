@@ -1350,7 +1350,10 @@ function currentGroupId(){return (currentUser&&currentUser.groupId)||DEFAULT_GRO
 function currentGroupName(){return (currentUser&&currentUser.groupName)||currentGroupId();}
 function currentScheduleRowId(){return currentGroupId()||DATA_ROW_ID;}
 function isDemoGroup(){
-  return currentGroupId()===DEMO_GROUP_ID||String(currentUser&&currentUser.email||'').toLowerCase()===DEMO_LOGIN_EMAIL;
+  return currentGroupId()===DEMO_GROUP_ID;
+}
+function isDemoSessionUser(){
+  return String(currentUser&&currentUser.email||'').toLowerCase()===DEMO_LOGIN_EMAIL&&!isMasterAdmin();
 }
 function demoSessionKey(){return `hs_demo_session_${currentGroupId()||DEMO_GROUP_ID}`;}
 const SETTINGS_PAGES=new Set(['cfg-params','cfg-data','cfg-roster','cfg-stress','cfg-groups']);
@@ -1396,7 +1399,7 @@ function updateSettingsMenuVisibility(){
   const sm=document.getElementById('settings-menu');
   if(sm)sm.style.display=(isAdmin()&&S.ui.role==='admin')?'block':'none';
   document.body.classList.toggle('master-admin',isMasterAdmin());
-  document.body.classList.toggle('demo-group',isDemoGroup());
+  document.body.classList.toggle('demo-group',isDemoSessionUser());
 }
 
 function toggleSettingsMenu(ev){
@@ -1455,7 +1458,7 @@ function updateHeaderForUser(){
 
 async function saveData(silent=false){
   if(!currentUser){toast('Not logged in','error');return;}
-  if(isDemoGroup()){
+  if(isDemoSessionUser()){
     try{
       sessionStorage.setItem(demoSessionKey(),JSON.stringify(S));
       setSyncStatus('session');
@@ -1485,7 +1488,7 @@ async function saveData(silent=false){
 async function loadData(){
   setSyncStatus('loading');
   S=freshAppState();
-  const demoKey=isDemoGroup()?demoSessionKey():null;
+  const demoKey=isDemoSessionUser()?demoSessionKey():null;
   if(demoKey){
     const stored=sessionStorage.getItem(demoKey);
     if(stored){
@@ -1506,7 +1509,7 @@ async function loadData(){
     if(rows && rows.length > 0 && rows[0].data){
       S = {...S, ...JSON.parse(rows[0].data)};
     }
-    setSyncStatus(isDemoGroup()?'session':'synced');
+    setSyncStatus(isDemoSessionUser()?'session':'synced');
   } catch(e){
     console.error('loadData error:', errStr(e), e);
     setSyncStatus('error');
@@ -1514,9 +1517,11 @@ async function loadData(){
     toast('Database load failed: ' + errStr(e), 'error');
   }
   applyMigrations();
-  if(demoKey&&ensureDemoHistoricalSchedule()){
-    sessionStorage.setItem(demoKey,JSON.stringify(S));
-    setSyncStatus('session');
+  if(isDemoGroup()&&ensureDemoHistoricalSchedule()){
+    if(demoKey){
+      sessionStorage.setItem(demoKey,JSON.stringify(S));
+      setSyncStatus('session');
+    }
   }
 }
 
@@ -1689,7 +1694,7 @@ function setSyncStatus(state){
 
 let lastSyncTime=0;
 async function pollForChanges(){
-  if(demoModeSnapshot||isDemoGroup())return;
+  if(demoModeSnapshot||isDemoSessionUser())return;
   try{
     const rows=await _sbGet('schedule_data',{id:currentScheduleRowId()});
     if(rows&&rows.length>0){
@@ -2071,7 +2076,7 @@ function qgGuideLayout(mainHtml, step, firstTime){
 
 function handleQgendaFile(file){
   if(!isAdmin()){ toast('Admin only','error'); return; }
-  if(isDemoGroup()){ toast('Demo accounts cannot import qGenda files or add providers.','error'); return; }
+  if(isDemoSessionUser()){ toast('Demo accounts cannot import qGenda files or add providers.','error'); return; }
   if(!file) return;
   if(typeof XLSX==='undefined'){ toast('Excel parser did not load. Refresh and try again.','error',5000); return; }
   if(!/\.(xlsx|xls)$/i.test(file.name||'')){
@@ -2108,7 +2113,7 @@ function handleQgendaDrop(ev){
 // Main import entry point
 function importQgenda(){
   if(!isAdmin()){ toast('Admin only','error'); return; }
-  if(isDemoGroup()){ toast('Demo accounts cannot import qGenda files or add providers.','error'); return; }
+  if(isDemoSessionUser()){ toast('Demo accounts cannot import qGenda files or add providers.','error'); return; }
   const inp=document.createElement('input');
   inp.type='file'; inp.accept='.xlsx,.xls';
   inp.onchange=e=>handleQgendaFile(e.target.files[0]);
@@ -5143,7 +5148,7 @@ function updateGenButton(){
   if(!btn) return;
   const range=quarterRange(year,q);
   const today=new Date();today.setHours(0,0,0,0);
-  if(isDemoGroup()&&range.start<=today){
+  if(isDemoSessionUser()&&range.start<=today){
     btn.textContent='Demo History Prefilled';
     btn.className='btn btn-quiet';
     btn.disabled=true;
@@ -5174,7 +5179,7 @@ async function tryGenerateQuarter(){
   const q=parseInt(document.getElementById('q-sel').value)||S.ui.quarter;
   const range=quarterRange(year,q);
   const today=new Date();today.setHours(0,0,0,0);
-  if(isDemoGroup()&&range.start<=today){
+  if(isDemoSessionUser()&&range.start<=today){
     toast('Demo history is prefilled through today. Choose a future quarter to generate a new schedule.','info',4500);
     updateGenButton();
     return;
@@ -7200,7 +7205,7 @@ function saveEditDoc(id){
   toast(`Updated ${dname(doc)}`,'success');
 }
 function addPhysician(){
-  if(isDemoGroup()){toast('Demo accounts use a fixed provider list.','info');return;}
+  if(isDemoSessionUser()){toast('Demo accounts use a fixed provider list.','info');return;}
   const last=document.getElementById('n-last').value.trim();
   const first=document.getElementById('n-first').value.trim();
   if(!last){toast('Last name required','error');return}
