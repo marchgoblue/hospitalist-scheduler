@@ -1320,6 +1320,7 @@ let demoModeSnapshot = null;
 // ════════════════════════════════════════════════════════
 let currentUser=null; // {userId,email,username,role,docId,groupId,groupName,isMasterAdmin}
 let currentGroups=[];
+let currentMemberships=[];
 let isSaving=false,pendingSave=false;
 function isAdmin(){return currentUser&&currentUser.role==='admin';}
 function isPhysician(){return currentUser&&currentUser.role==='physician';}
@@ -1460,8 +1461,8 @@ async function loadData(){
 }
 
 async function loadGroups(){
-  if(!currentUser||!currentUser.isMasterAdmin){
-    currentGroups=[{id:currentGroupId(),name:currentGroupName()}];
+  if(!currentUser){
+    currentGroups=[];
     return;
   }
   try{
@@ -1469,9 +1470,19 @@ async function loadGroups(){
     currentGroups=(rows||[])
       .map(g=>({id:g.id,name:g.name||g.id}))
       .sort((a,b)=>String(a.name).localeCompare(String(b.name)));
+    if(!currentUser.isMasterAdmin&&currentMemberships.length){
+      const allowed=new Set(currentMemberships.map(m=>m.group_id));
+      currentGroups=currentGroups.filter(g=>allowed.has(g.id));
+      currentMemberships.forEach(m=>{
+        if(!currentGroups.some(g=>g.id===m.group_id))currentGroups.push({id:m.group_id,name:m.group_id});
+      });
+      currentGroups.sort((a,b)=>String(a.name).localeCompare(String(b.name)));
+    }
     if(!currentGroups.some(g=>g.id===currentGroupId())){
       currentGroups.unshift({id:currentGroupId(),name:currentGroupName()});
     }
+    const activeGroup=currentGroups.find(g=>g.id===currentGroupId());
+    if(activeGroup)currentUser.groupName=activeGroup.name||activeGroup.id;
   }catch(e){
     console.error('loadGroups error:',errStr(e),e);
     currentGroups=[{id:currentGroupId(),name:currentGroupName()}];
@@ -1482,22 +1493,28 @@ async function loadGroups(){
 function renderSitePicker(){
   const sel=document.getElementById('site-pick');
   if(!sel)return;
-  if(!currentUser||!currentUser.isMasterAdmin){
+  if(!currentUser){
     sel.style.display='none';
     return;
   }
   const groups=currentGroups.length?currentGroups:[{id:currentGroupId(),name:currentGroupName()}];
   sel.innerHTML=groups.map(g=>`<option value="${qgEsc(g.id)}" ${g.id===currentGroupId()?'selected':''}>${qgEsc(g.name||g.id)}</option>`).join('');
-  sel.style.display='inline-block';
+  sel.style.display=(currentUser.isMasterAdmin||groups.length>1)?'inline-block':'none';
 }
 
 async function onSitePick(){
   const sel=document.getElementById('site-pick');
-  if(!sel||!currentUser||!currentUser.isMasterAdmin)return;
+  if(!sel||!currentUser)return;
   const groupId=sel.value||DEFAULT_GROUP_ID;
   const group=currentGroups.find(g=>g.id===groupId)||{id:groupId,name:groupId};
+  if(!currentUser.isMasterAdmin&&!currentMemberships.some(m=>m.group_id===group.id)){
+    toast('You do not have access to that site.','error');
+    renderSitePicker();
+    return;
+  }
   currentUser.groupId=group.id;
   currentUser.groupName=group.name||group.id;
+  applyCurrentMembership();
   closeStaffingPopover();
   S=freshAppState();
   updateHeaderForUser();
@@ -1554,18 +1571,39 @@ async function getProfile(userId){
   try{const rows=await _sbGet('profiles',{user_id:userId});return(rows&&rows.length>0)?rows[0]:null;}
   catch(e){console.error('getProfile:',errStr(e));return null;}
 }
-function userSessionFromAuth(authUser,profile){
+async function getMemberships(userId){
+  try{
+    const rows=await _sbGet('memberships',{user_id:userId});
+    return (rows||[]).sort((a,b)=>String(a.group_id).localeCompare(String(b.group_id)));
+  }catch(e){
+    console.error('getMemberships:',errStr(e));
+    return [];
+  }
+}
+function membershipForGroup(groupId){
+  return currentMemberships.find(m=>m.group_id===groupId)||null;
+}
+function applyCurrentMembership(){
+  if(!currentUser||currentUser.isMasterAdmin)return;
+  const membership=membershipForGroup(currentUser.groupId);
+  if(!membership)return;
+  currentUser.role=membership.role;
+  currentUser.docId=membership.doc_id||null;
+}
+function userSessionFromAuth(authUser,profile,memberships=[]){
   const email=(authUser&&authUser.email)||profile?.email||'';
   const name=profile?.display_name||email||'User';
   const master=!!profile?.is_master_admin;
+  const firstMembership=memberships[0]||null;
+  if(!master&&!firstMembership)throw new Error('No site membership exists for this Auth user.');
   return {
     userId:authUser.id,
     email,
     username:name,
-    role:master?'admin':'physician',
-    docId:profile?.doc_id||null,
-    groupId:profile?.group_id||DEFAULT_GROUP_ID,
-    groupName:profile?.group_name||profile?.group_id||DEFAULT_GROUP_ID,
+    role:master?'admin':firstMembership.role,
+    docId:master?(profile?.doc_id||null):(firstMembership.doc_id||null),
+    groupId:master?(profile?.group_id||DEFAULT_GROUP_ID):firstMembership.group_id,
+    groupName:master?(profile?.group_name||profile?.group_id||DEFAULT_GROUP_ID):firstMembership.group_id,
     isMasterAdmin:master
   };
 }
@@ -1631,7 +1669,8 @@ async function tryLogin(){
       errEl.textContent='Login worked, but no profile row exists for this Auth user.';
       return;
     }
-    currentUser=userSessionFromAuth(authSession.user,profile);
+    currentMemberships=await getMemberships(authSession.user.id);
+    currentUser=userSessionFromAuth(authSession.user,profile,currentMemberships);
     await completeLogin();
   }catch(e){
     errEl.textContent='Login error: '+errStr(e);
@@ -1652,6 +1691,8 @@ async function logout(){
   sessionStorage.removeItem(AUTH_SESSION_KEY);
   authSession=null;
   currentUser=null;
+  currentGroups=[];
+  currentMemberships=[];
   location.reload();
 }
 function showLogin(){
@@ -7157,7 +7198,8 @@ async function appInit(){
         sessionStorage.setItem(AUTH_SESSION_KEY,JSON.stringify(authSession));
         const profile=await getProfile(authSession.user.id);
         if(!profile)throw new Error('No profile row exists for this Auth user.');
-        currentUser=userSessionFromAuth(authSession.user,profile);
+        currentMemberships=await getMemberships(authSession.user.id);
+        currentUser=userSessionFromAuth(authSession.user,profile,currentMemberships);
         document.getElementById('login-overlay').style.display='none';
         await loadGroups();
         if(statusEl)statusEl.textContent='Loading schedule data...';
