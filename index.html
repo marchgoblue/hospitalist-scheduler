@@ -1340,7 +1340,8 @@ let S = {
 };
 let demoModeSnapshot = null;
 let demoHistoryTodayOverride = null;
-const DEMO_HISTORY_SEED_VERSION = 3;
+let demoHistorySeedMode = false;
+const DEMO_HISTORY_SEED_VERSION = 4;
 
 // ════════════════════════════════════════════════════════
 //  PERSISTENCE
@@ -1507,6 +1508,23 @@ async function loadData(){
         S={...S,...JSON.parse(stored)};
         setSyncStatus('session');
         applyMigrations();
+        try{
+          const rows=await _sbGet('schedule_data',{id: currentScheduleRowId()});
+          if(rows&&rows.length>0&&rows[0].data){
+            const serverData=JSON.parse(rows[0].data);
+            const serverStart=serverData&&serverData.cfg&&serverData.cfg.fairnessStartDate;
+            if(serverStart&&serverStart!==S.cfg.fairnessStartDate){
+              if(!S.cfg)S.cfg={};
+              S.cfg.fairnessStartDate=serverStart;
+              if(S.ui){
+                S.ui.demoYtdSeedVersion=null;
+                S.ui.demoYtdSeedFairnessStart=null;
+              }
+            }
+          }
+        }catch(e){
+          console.warn('demo config refresh skipped:',errStr(e));
+        }
         if(ensureDemoHistoricalSchedule())sessionStorage.setItem(demoKey,JSON.stringify(S));
         return;
       }catch(e){
@@ -1542,7 +1560,10 @@ function ensureDemoHistoricalSchedule(){
   const todayDs=dstrD(today);
   const year=today.getFullYear();
   const currentQ=Math.floor(today.getMonth()/3)+1;
-  if(S.ui.demoYtdSeedDate===todayDs&&S.ui.demoYtdSeedVersion===DEMO_HISTORY_SEED_VERSION)return false;
+  const fairnessStart=fairnessTrackingStartDate();
+  if(S.ui.demoYtdSeedDate===todayDs
+    &&S.ui.demoYtdSeedVersion===DEMO_HISTORY_SEED_VERSION
+    &&S.ui.demoYtdSeedFairnessStart===fairnessStart)return false;
   if(!activeDocs(year).filter(d=>d.type!=='prn').length)return false;
   const originalYear=document.getElementById('yr-sel')?.value;
   const originalQ=document.getElementById('q-sel')?.value;
@@ -1564,6 +1585,7 @@ function ensureDemoHistoricalSchedule(){
   for(let q=1;q<=currentQ;q++)delete S.baseSchedule[`${year}-${q}`];
   try{
     demoHistoryTodayOverride='1900-01-01';
+    demoHistorySeedMode=true;
     for(let q=1;q<=currentQ;q++){
       if(ySel)ySel.value=String(year);
       if(qSel)qSel.value=String(q);
@@ -1604,6 +1626,7 @@ function ensureDemoHistoricalSchedule(){
     }
   }finally{
     demoHistoryTodayOverride=null;
+    demoHistorySeedMode=false;
     if(ySel&&originalYear)ySel.value=originalYear;
     if(qSel&&originalQ)qSel.value=originalQ;
     S.ui.year=originalUiYear;
@@ -1611,6 +1634,7 @@ function ensureDemoHistoricalSchedule(){
   }
   S.ui.demoYtdSeedDate=todayDs;
   S.ui.demoYtdSeedVersion=DEMO_HISTORY_SEED_VERSION;
+  S.ui.demoYtdSeedFairnessStart=fairnessStart;
   const nextHistory=JSON.stringify({sched:S.sched||{},teams:S.teams||{},baseSchedule:S.baseSchedule||{}});
   return nextHistory!==priorHistory;
 }
@@ -4704,7 +4728,14 @@ function _generateQuarter(candidateSeed=0,finalize=true){
     .filter(d=>!isAppProvider(d)&&d.type==='standard')
     .reduce((sum,d)=>sum+fteValue(d),0);
   const totalPhysicianSwingFte=physicianSwingPool.reduce((sum,d)=>sum+fteValue(d),0)||strictPhysicianFte||1;
-  const strictSwingShare=Math.max(0,Math.min(1,strictPhysicianFte/totalPhysicianSwingFte));
+  let strictSwingShare=Math.max(0,Math.min(1,strictPhysicianFte/totalPhysicianSwingFte));
+  if(demoHistorySeedMode){
+    const strictSwingFte=strictSwing
+      .filter(d=>!isAppProvider(d)&&d.type==='standard')
+      .reduce((sum,d)=>sum+fteValue(d),0);
+    const historicalStrictSwingShare=totalPhysicianSwingFte?strictSwingFte/totalPhysicianSwingFte:0;
+    strictSwingShare=Math.max(0,Math.min(strictSwingShare,historicalStrictSwingShare));
+  }
 
   // Variable providers: standard type only — PRN are NOT scheduled in generation
   const rotation=allActive.filter(d=>d.type==='standard'&&!isMedicalDirectorDoc(d)&&!isAppProvider(d)&&d.fte===1.0&&!isStrictStyle(d));
