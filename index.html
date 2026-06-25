@@ -639,6 +639,9 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
 .login-input{width:100%;padding:10px 12px;border:1.5px solid var(--line);border-radius:4px;font-size:14px;font-family:inherit;margin-bottom:10px;outline:none}
 .login-input:focus{border-color:#1b4d8f;box-shadow:0 0 0 2px #1b4d8f22}
 .login-error{color:#a01918;font-size:12px;margin-bottom:10px;min-height:16px}
+.login-progress{display:none;margin-top:14px;text-align:left}
+.login-progress-label{font-size:12px;color:var(--ink2);font-weight:700;margin-bottom:6px}
+.login-progress-note{font-size:11px;color:var(--ink3);margin-top:6px;line-height:1.35}
 .readonly-banner{background:#fff5dc;border-bottom:2px solid #f0c040;padding:6px 16px;font-size:12px;font-weight:600;color:#7a5000;text-align:center;display:none}
 .readonly-banner.on{display:block}
 #sync-status{font-size:11px;color:#c7d6e8;font-family:'JetBrains Mono',monospace}
@@ -702,6 +705,11 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
     <input class="login-input" id="pw-input" type="password" placeholder="Password" autocomplete="current-password" onkeydown="if(event.key==='Enter')tryLogin()">
     <div class="login-error" id="login-error"></div>
     <button class="btn btn-p" style="width:100%;padding:10px;font-size:14px" onclick="tryLogin()">Sign In</button>
+    <div class="login-progress" id="login-progress">
+      <div class="login-progress-label" id="login-progress-label">Loading schedule...</div>
+      <div class="qg-progress"><div class="qg-progress-bar" id="login-progress-bar" style="width:0%"></div></div>
+      <div class="login-progress-note" id="login-progress-note">This can take a moment for demo accounts.</div>
+    </div>
     <div id="supabase-status" style="margin-top:14px;font-size:11px;color:var(--ink3)">Connecting to database…</div>
   </div>
 </div>
@@ -1525,7 +1533,7 @@ async function loadData(){
         }catch(e){
           console.warn('demo config refresh skipped:',errStr(e));
         }
-        if(ensureDemoHistoricalSchedule())sessionStorage.setItem(demoKey,JSON.stringify(S));
+        if(await ensureDemoHistoricalSchedule())sessionStorage.setItem(demoKey,JSON.stringify(S));
         return;
       }catch(e){
         console.error('demo session load error:',errStr(e),e);
@@ -1546,7 +1554,7 @@ async function loadData(){
     toast('Database load failed: ' + errStr(e), 'error');
   }
   applyMigrations();
-  if(isDemoGroup()&&ensureDemoHistoricalSchedule()){
+  if(isDemoGroup()&&await ensureDemoHistoricalSchedule()){
     if(demoKey){
       sessionStorage.setItem(demoKey,JSON.stringify(S));
       setSyncStatus('session');
@@ -1554,7 +1562,7 @@ async function loadData(){
   }
 }
 
-function ensureDemoHistoricalSchedule(){
+async function ensureDemoHistoricalSchedule(){
   if(!isDemoGroup()||!S||!Array.isArray(S.docs)||!S.docs.length)return false;
   const today=new Date();today.setHours(0,0,0,0);
   const todayDs=dstrD(today);
@@ -1565,6 +1573,10 @@ function ensureDemoHistoricalSchedule(){
     &&S.ui.demoYtdSeedVersion===DEMO_HISTORY_SEED_VERSION
     &&S.ui.demoYtdSeedFairnessStart===fairnessStart)return false;
   if(!activeDocs(year).filter(d=>d.type!=='prn').length)return false;
+  if(isDemoSessionUser()){
+    setLoginProgress('Preparing demo history...',40,'Filling prior quarters so the demo starts with realistic year-to-date data.');
+    await generationSleep();
+  }
   const originalYear=document.getElementById('yr-sel')?.value;
   const originalQ=document.getElementById('q-sel')?.value;
   const originalUiYear=S.ui.year;
@@ -1587,6 +1599,11 @@ function ensureDemoHistoricalSchedule(){
     demoHistoryTodayOverride='1900-01-01';
     demoHistorySeedMode=true;
     for(let q=1;q<=currentQ;q++){
+      if(isDemoSessionUser()){
+        const pct=40+Math.round(((q-1)/Math.max(1,currentQ))*50);
+        setLoginProgress(`Preparing demo history: Q${q} of ${currentQ}`,pct,'This only happens when the demo template changes or the browser session is new.');
+        await generationSleep();
+      }
       if(ySel)ySel.value=String(year);
       if(qSel)qSel.value=String(q);
       S.ui.year=year;S.ui.quarter=q;
@@ -1599,6 +1616,12 @@ function ensureDemoHistoricalSchedule(){
       let best=null;
       const candidates=12;
       for(let seed=0;seed<candidates;seed++){
+        if(isDemoSessionUser()&&(seed===0||seed%3===2)){
+          const quarterBase=(q-1)/Math.max(1,currentQ);
+          const candidateProgress=(seed+1)/candidates/Math.max(1,currentQ);
+          setLoginProgress(`Preparing demo history: Q${q} candidate ${seed+1} of ${candidates}`,40+Math.round((quarterBase+candidateProgress)*50),'Testing schedule options for a realistic demo.');
+          await generationSleep();
+        }
         const snap=JSON.parse(beforeQuarter);
         S.sched=snap.sched||{};
         S.teams=snap.teams||{};
@@ -1615,6 +1638,10 @@ function ensureDemoHistoricalSchedule(){
             teamHandoffs:JSON.parse(JSON.stringify(S.teamHandoffs||{}))
           };
         }
+      }
+      if(isDemoSessionUser()){
+        setLoginProgress(`Finishing Q${q} demo history`,40+Math.round((q/Math.max(1,currentQ))*50),'Selecting the best demo schedule candidate.');
+        await generationSleep();
       }
       if(best){
         S.sched=best.sched;
@@ -1891,18 +1918,26 @@ async function tryLogin(){
     currentUser=userSessionFromAuth(authSession.user,profile,currentMemberships);
     await completeLogin();
   }catch(e){
+    clearLoginProgress();
     errEl.textContent='Login error: '+errStr(e);
     console.error('tryLogin error:', errStr(e), e);
   }finally{if(btn){btn.disabled=false;btn.textContent='Sign In';}}
 }
 
 async function completeLogin(){
-  document.getElementById('login-overlay').style.display='none';
+  showLogin();
+  setLoginProgress('Loading your site...',15,'Preparing schedule data.');
   if(isPhysician()&&currentUser.docId)S.ui.currentPhysId=currentUser.docId;
+  setLoginProgress('Loading available sites...',25,'Checking your site access.');
   await loadGroups();
   updateHeaderForUser();
+  setLoginProgress(isDemoSessionUser()?'Preparing demo schedule...':'Loading schedule...',35,isDemoSessionUser()?'Building demo history for this browser session.':'Loading saved group data.');
   await loadData();
   finishInit();
+  setLoginProgress('Ready',100,'Opening schedule.');
+  await generationSleep();
+  clearLoginProgress();
+  document.getElementById('login-overlay').style.display='none';
 }
 async function logout(){
   await authSignOut();
@@ -1916,6 +1951,22 @@ async function logout(){
 function showLogin(){
   const overlay=document.getElementById('login-overlay');
   if(overlay)overlay.style.display='flex';
+}
+function setLoginProgress(label='',pct=null,note=''){
+  const box=document.getElementById('login-progress');
+  const lbl=document.getElementById('login-progress-label');
+  const bar=document.getElementById('login-progress-bar');
+  const nt=document.getElementById('login-progress-note');
+  if(box)box.style.display='block';
+  if(lbl&&label)lbl.textContent=label;
+  if(bar&&pct!==null)bar.style.width=Math.max(0,Math.min(100,Math.round(pct)))+'%';
+  if(nt&&note)nt.textContent=note;
+}
+function clearLoginProgress(){
+  const box=document.getElementById('login-progress');
+  const bar=document.getElementById('login-progress-bar');
+  if(box)box.style.display='none';
+  if(bar)bar.style.width='0%';
 }
 
 function showChangePasswordModal(){
@@ -7803,14 +7854,20 @@ async function appInit(){
         if(!profile)throw new Error('No profile row exists for this Auth user.');
         currentMemberships=await getMemberships(authSession.user.id);
         currentUser=userSessionFromAuth(authSession.user,profile,currentMemberships);
-        document.getElementById('login-overlay').style.display='none';
+        setLoginProgress('Restoring session...',20,'Loading your saved access.');
         await loadGroups();
+        setLoginProgress(isDemoSessionUser()?'Preparing demo schedule...':'Loading schedule...',35,isDemoSessionUser()?'Building demo history for this browser session.':'Loading saved group data.');
         if(statusEl)statusEl.textContent='Loading schedule data...';
         await loadData();
         finishInit();
+        setLoginProgress('Ready',100,'Opening schedule.');
+        await generationSleep();
+        clearLoginProgress();
+        document.getElementById('login-overlay').style.display='none';
         return;
       }
     } catch(e){
+      clearLoginProgress();
       console.error('Session restore error:',errStr(e),e);
       sessionStorage.removeItem(AUTH_SESSION_KEY);
       currentUser=null;
