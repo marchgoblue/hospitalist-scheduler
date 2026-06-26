@@ -68,6 +68,23 @@ async function _sbPatch(table, eq, data){
   });
 }
 
+async function trackEvent(eventName, metadata={}){
+  if(!currentUser||!authSession||!eventName)return;
+  try{
+    await _sbUpsert('activity_events',{
+      user_id: currentUser.userId,
+      group_id: currentGroupId(),
+      role: currentUser.role||null,
+      event_name: String(eventName).slice(0,80),
+      page_path: location.pathname||'/',
+      metadata: metadata&&typeof metadata==='object'?metadata:{},
+      user_agent: navigator.userAgent||''
+    });
+  }catch(e){
+    console.warn('Activity tracking failed:', eventName, errStr(e));
+  }
+}
+
 async function _authFetch(path, opts={}){
   const res = await fetch(SUPABASE_URL + path, {
     ...opts,
@@ -1890,6 +1907,7 @@ async function createGroupAdmin(){
     const msg=`Created ${name}. Add a secure login plus profile and membership row before giving another person access.`;
     if(status)status.textContent=msg;
     toast('Group created','success');
+    trackEvent('group_created',{group_id:groupId});
   }catch(e){
     console.error('createGroupAdmin error:',errStr(e),e);
     const msg='Could not create group: '+errStr(e);
@@ -1938,8 +1956,10 @@ async function completeLogin(){
   await generationSleep();
   clearLoginProgress();
   document.getElementById('login-overlay').style.display='none';
+  trackEvent('login',{group_id:currentGroupId(),role:currentUser&&currentUser.role});
 }
 async function logout(){
+  await trackEvent('logout',{group_id:currentGroupId()});
   await authSignOut();
   sessionStorage.removeItem(AUTH_SESSION_KEY);
   authSession=null;
@@ -2744,6 +2764,7 @@ async function runQgendaImport(records){
   if(document.getElementById('pg-myreq')?.classList.contains('on'))renderMyRequestCal();
   if(document.getElementById('pg-myschd')?.classList.contains('on'))renderMySchedule();
   toast(`Imported ${imported} shifts${newCount?' + '+newCount+' new providers':''}`,'success');
+  trackEvent('qgenda_imported',{imported_shifts:imported,new_providers:newCount,unmatched});
   setTimeout(()=>{ document.getElementById('modal').style.display='none'; }, 2500);
 }
 
@@ -2778,6 +2799,7 @@ async function saveVersion(){
           await _sbUpsert('versions',legacyRow);
         }
         toast(`Snapshot "${name}" saved`,'success');
+        trackEvent('version_saved',{name,group_id:currentGroupId()});
       }catch(e){
         console.error('saveVersion error:',errStr(e),e);
         toast('Snapshot could not be saved to the database. Try again before making major changes.','error',5000);
@@ -2850,6 +2872,7 @@ function confirmRestoreVersion(idx){
         renderSchedule(); renderRoster(); renderDocList(); populatePhysPicker(); updateQuarterInfo();
         document.getElementById('modal').style.display='none';
         toast(`Restored "${v.name}"`,'success');
+        trackEvent('version_restored',{name:v.name,group_id:currentGroupId()});
       }catch(e){
         toast('Restore failed: '+errStr(e),'error');
       }
@@ -2892,6 +2915,7 @@ function confirmClearSchedule(){
       renderSchedule(); renderRoster(); renderDocList(); populatePhysPicker(); updateQuarterInfo(); updateGenButton();
       document.getElementById('modal').style.display='none';
       toast('Schedule cleared — roster and settings preserved','success');
+      trackEvent('schedule_cleared',{group_id:currentGroupId()});
     }
   );
 }
@@ -2950,6 +2974,7 @@ function confirmResetGroup(){
       renderSchedule(); renderRoster(); renderDocList(); populatePhysPicker(); updateQuarterInfo(); updateGenButton();
       document.getElementById('modal').style.display='none';
       toast('Group reset to blank slate','success');
+      trackEvent('group_reset',{group_id:currentGroupId()});
     }
   );
 }
@@ -2962,6 +2987,7 @@ function exportData(){
   a.download=`hospitalist-schedule-${currentGroupId()}-${new Date().toISOString().slice(0,10)}.json`;
   a.click();
   toast('Exported','success');
+  trackEvent('json_exported',{group_id:currentGroupId()});
 }
 function importData(){
   if(!isMasterAdmin()){toast('Master admin only','error');return;}
@@ -2978,6 +3004,7 @@ function importData(){
         await saveData();
         renderSchedule();renderRoster();renderDocList();populatePhysPicker();updateQuarterInfo();updateGenButton();
         toast('Imported JSON','success');
+        trackEvent('json_imported',{group_id:currentGroupId()});
       }catch(e){toast('Invalid file: '+errStr(e),'error');}
     };
     r.readAsText(e.target.files[0]);
@@ -5405,6 +5432,7 @@ function _finalizeGeneratedQuarter(year,q,best){
   updateQuarterInfo();
   updateGenButton();
   toast(`Generated Q${q} ${year} from 48 candidates (best variant ${best.seed+1})`,'success');
+  trackEvent('schedule_generated',{year,quarter:q,candidate_count:48,best_variant:best.seed+1});
   setTimeout(recheckFairness, 100);  // auto-check fairness after generation
 }
 
@@ -6610,6 +6638,7 @@ function submitMyRequests(){
   saveData();
   document.getElementById('submit-status').textContent=`✓ Submitted ${total} dates (${req.length} required, ${opt.length} optional) for ${dname(doc)}`;
   toast(`Submitted ${total} dates for ${dname(doc)}`,'success');
+  trackEvent('requests_submitted',{quarter:qKey,total_dates:total,required_dates:req.length,optional_dates:opt.length});
 }
 
 function clearMyRequests(){
@@ -6618,6 +6647,7 @@ function clearMyRequests(){
   if(S.requests[qKey]) S.requests[qKey][S.ui.currentPhysId]={required:[],optional:[]};
   renderMyRequestCal();
   toast('Cleared','info');
+  trackEvent('requests_cleared',{quarter:qKey});
 }
 
 // ════════════════════════════════════════════════════════
@@ -7648,6 +7678,7 @@ function saveCfg(opts={}){
   renderFlexibleGuidance();
   saveData(silent);
   if(!silent)toast('Settings saved','success');
+  if(!silent)trackEvent('settings_saved',{group_id:currentGroupId()});
 }
 
 // ════════════════════════════════════════════════════════
@@ -7788,6 +7819,7 @@ function nav(p){
   if(SETTINGS_PAGES.has(p)){ renderShiftParamFields(); renderStaffingOverrides(); renderFlexibleGuidance(); renderRoster(); renderStressSummary(); }
   if(p==='myreq'){ populatePhysPicker(); renderMyRequestCal(); }
   if(p==='myschd'){ populatePhysPicker(); renderMySchedule(); }
+  trackEvent('page_view',{page:p});
 }
 
 // Navigate from the schedule grid to a physician's detail page
@@ -7864,6 +7896,7 @@ async function appInit(){
         await generationSleep();
         clearLoginProgress();
         document.getElementById('login-overlay').style.display='none';
+        trackEvent('session_restored',{group_id:currentGroupId(),role:currentUser&&currentUser.role});
         return;
       }
     } catch(e){
