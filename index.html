@@ -71,13 +71,15 @@ async function _sbPatch(table, eq, data){
 async function trackEvent(eventName, metadata={}){
   if(!currentUser||!authSession||!eventName)return;
   try{
+    const eventMetadata=metadata&&typeof metadata==='object'?{...metadata}:{};
+    eventMetadata.is_demo_session=isDemoSessionUser();
     await _sbUpsert('activity_events',{
       user_id: currentUser.userId,
       group_id: currentGroupId(),
       role: currentUser.role||null,
       event_name: String(eventName).slice(0,80),
       page_path: location.pathname||'/',
-      metadata: metadata&&typeof metadata==='object'?metadata:{},
+      metadata: eventMetadata,
       user_agent: navigator.userAgent||''
     });
   }catch(e){
@@ -1934,6 +1936,7 @@ async function tryLogin(){
     }
     currentMemberships=await getMemberships(authSession.user.id);
     currentUser=userSessionFromAuth(authSession.user,profile,currentMemberships);
+    await trackEvent('login_started',{group_id:currentGroupId(),role:currentUser.role});
     await completeLogin();
   }catch(e){
     clearLoginProgress();
@@ -1956,7 +1959,7 @@ async function completeLogin(){
   await generationSleep();
   clearLoginProgress();
   document.getElementById('login-overlay').style.display='none';
-  trackEvent('login',{group_id:currentGroupId(),role:currentUser&&currentUser.role});
+  await trackEvent('login',{group_id:currentGroupId(),role:currentUser&&currentUser.role});
 }
 async function logout(){
   await trackEvent('logout',{group_id:currentGroupId()});
@@ -7886,6 +7889,7 @@ async function appInit(){
         if(!profile)throw new Error('No profile row exists for this Auth user.');
         currentMemberships=await getMemberships(authSession.user.id);
         currentUser=userSessionFromAuth(authSession.user,profile,currentMemberships);
+        await trackEvent('session_restore_started',{group_id:currentGroupId(),role:currentUser.role});
         setLoginProgress('Restoring session...',20,'Loading your saved access.');
         await loadGroups();
         setLoginProgress(isDemoSessionUser()?'Preparing demo schedule...':'Loading schedule...',35,isDemoSessionUser()?'Building demo history for this browser session.':'Loading saved group data.');
@@ -7896,7 +7900,7 @@ async function appInit(){
         await generationSleep();
         clearLoginProgress();
         document.getElementById('login-overlay').style.display='none';
-        trackEvent('session_restored',{group_id:currentGroupId(),role:currentUser&&currentUser.role});
+        await trackEvent('session_restored',{group_id:currentGroupId(),role:currentUser&&currentUser.role});
         return;
       }
     } catch(e){
