@@ -151,3 +151,75 @@ create policy versions_write_admin
 on versions for all
 using (public.is_group_admin(group_id))
 with check (public.is_group_admin(group_id));
+
+create table if not exists activity_events (
+  id bigint generated always as identity primary key,
+  created_at timestamptz not null default now(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  group_id text,
+  role text,
+  event_name text not null,
+  page_path text,
+  metadata jsonb not null default '{}'::jsonb,
+  user_agent text
+);
+
+create index if not exists activity_events_created_at_idx on activity_events(created_at desc);
+create index if not exists activity_events_user_id_idx on activity_events(user_id);
+create index if not exists activity_events_group_id_idx on activity_events(group_id);
+create index if not exists activity_events_event_name_idx on activity_events(event_name);
+
+alter table activity_events enable row level security;
+
+drop policy if exists activity_events_insert_own on activity_events;
+create policy activity_events_insert_own
+on activity_events for insert
+to authenticated
+with check (auth.uid() is not null and auth.uid() = user_id);
+
+drop policy if exists activity_events_select_master_admin on activity_events;
+create policy activity_events_select_master_admin
+on activity_events for select
+to authenticated
+using (public.is_master_admin());
+
+create or replace function public.log_activity_event(
+  p_event_name text,
+  p_group_id text default null,
+  p_role text default null,
+  p_page_path text default null,
+  p_metadata jsonb default '{}'::jsonb,
+  p_user_agent text default null
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if auth.uid() is null then
+    raise exception 'Not authenticated';
+  end if;
+
+  insert into activity_events (
+    user_id,
+    group_id,
+    role,
+    event_name,
+    page_path,
+    metadata,
+    user_agent
+  )
+  values (
+    auth.uid(),
+    p_group_id,
+    p_role,
+    left(coalesce(p_event_name, 'unknown'), 80),
+    p_page_path,
+    coalesce(p_metadata, '{}'::jsonb),
+    p_user_agent
+  );
+end;
+$$;
+
+grant execute on function public.log_activity_event(text,text,text,text,jsonb,text) to authenticated;

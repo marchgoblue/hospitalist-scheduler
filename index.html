@@ -70,20 +70,66 @@ async function _sbPatch(table, eq, data){
 
 async function trackEvent(eventName, metadata={}){
   if(!currentUser||!authSession||!eventName)return;
+  const eventMetadata=metadata&&typeof metadata==='object'?{...metadata}:{};
+  eventMetadata.is_demo_session=isDemoSessionUser();
+  const payload={
+    p_event_name: String(eventName).slice(0,80),
+    p_group_id: currentGroupId(),
+    p_role: currentUser.role||null,
+    p_page_path: location.pathname||'/',
+    p_metadata: eventMetadata,
+    p_user_agent: navigator.userAgent||''
+  };
   try{
-    const eventMetadata=metadata&&typeof metadata==='object'?{...metadata}:{};
-    eventMetadata.is_demo_session=isDemoSessionUser();
-    await _sbUpsert('activity_events',{
-      user_id: currentUser.userId,
-      group_id: currentGroupId(),
-      role: currentUser.role||null,
-      event_name: String(eventName).slice(0,80),
-      page_path: location.pathname||'/',
-      metadata: eventMetadata,
-      user_agent: navigator.userAgent||''
+    await _sbFetch('/rest/v1/rpc/log_activity_event',{
+      method:'POST',
+      body:JSON.stringify(payload)
     });
-  }catch(e){
-    console.warn('Activity tracking failed:', eventName, errStr(e));
+  }catch(rpcErr){
+    try{
+      await _sbUpsert('activity_events',{
+        user_id: currentUser.userId,
+        group_id: payload.p_group_id,
+        role: payload.p_role,
+        event_name: payload.p_event_name,
+        page_path: payload.p_page_path,
+        metadata: eventMetadata,
+        user_agent: payload.p_user_agent
+      });
+    }catch(e){
+      console.warn('Activity tracking failed:', eventName, errStr(rpcErr), errStr(e));
+    }
+  }
+}
+
+async function trackAuthEvent(eventName, authUser, metadata={}){
+  if(!authUser||!authSession||!eventName)return;
+  try{
+    await _sbFetch('/rest/v1/rpc/log_activity_event',{
+      method:'POST',
+      body:JSON.stringify({
+        p_event_name: String(eventName).slice(0,80),
+        p_group_id: metadata.group_id||null,
+        p_role: metadata.role||null,
+        p_page_path: location.pathname||'/',
+        p_metadata: metadata&&typeof metadata==='object'?metadata:{},
+        p_user_agent: navigator.userAgent||''
+      })
+    });
+  }catch(rpcErr){
+    try{
+      await _sbUpsert('activity_events',{
+        user_id: authUser.id,
+        group_id: metadata.group_id||null,
+        role: metadata.role||null,
+        event_name: String(eventName).slice(0,80),
+        page_path: location.pathname||'/',
+        metadata: metadata&&typeof metadata==='object'?metadata:{},
+        user_agent: navigator.userAgent||''
+      });
+    }catch(e){
+      console.warn('Auth activity tracking failed:', eventName, errStr(rpcErr), errStr(e));
+    }
   }
 }
 
@@ -1927,6 +1973,7 @@ async function tryLogin(){
   try{
     authSession=await authSignIn(email,password);
     sessionStorage.setItem(AUTH_SESSION_KEY,JSON.stringify(authSession));
+    await trackAuthEvent('auth_signin_success',authSession.user,{is_demo_email:email===DEMO_LOGIN_EMAIL});
     const profile=await getProfile(authSession.user.id);
     if(!profile){
       sessionStorage.removeItem(AUTH_SESSION_KEY);
@@ -7885,6 +7932,7 @@ async function appInit(){
         if(statusEl)statusEl.textContent='Restoring secure session...';
         authSession=await authRefreshSession(parsed.refresh_token);
         sessionStorage.setItem(AUTH_SESSION_KEY,JSON.stringify(authSession));
+        await trackAuthEvent('auth_session_refresh_success',authSession.user,{});
         const profile=await getProfile(authSession.user.id);
         if(!profile)throw new Error('No profile row exists for this Auth user.');
         currentMemberships=await getMemberships(authSession.user.id);
