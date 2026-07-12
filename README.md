@@ -104,11 +104,12 @@ Host `index.html` on any static host (GitHub Pages, Netlify, S3, a hospital intr
 
 ## Project status
 
-Functional and in active use; currently being hardened for broader rollout. Known issues and the prioritized fix list live in [OPUS-FIX-INSTRUCTIONS.md](OPUS-FIX-INSTRUCTIONS.md). Notable near-term items:
+Functional and in active use; currently being hardened for broader rollout. The prioritized fix list in [OPUS-FIX-INSTRUCTIONS.md](OPUS-FIX-INSTRUCTIONS.md) has been applied (see the status header in that file). Notable recent changes:
 
-- Move physician request submission to its own table (RLS currently limits `schedule_data` writes to admins)
-- Generate quarter/year dropdowns dynamically (hardcoded lists end at 2026 Q4)
-- Apply manual name-match corrections in the qGenda import for already-auto-matched providers
+- Physician request submission now writes to its own `time_off_requests` table (RLS limits `schedule_data` writes to admins); rows are merged into app state on load
+- Quarter/year dropdowns are generated dynamically from the current date (the old hardcoded lists ended at 2026 Q4)
+- Saves now use optimistic concurrency (a concurrent admin's save triggers a reload instead of being silently overwritten), and saving is blocked after a failed load so defaults can never overwrite real data
+- **Deployments must re-run `supabase-security-current.sql`**: it adds the `time_off_requests` table and — critically — column-level grants on `profiles` that close a privilege-escalation hole (any authenticated user could previously set their own `is_master_admin` flag via the REST API)
 
 ## Development notes
 

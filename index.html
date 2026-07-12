@@ -6,7 +6,7 @@
 <title>Hospitalist Scheduler</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23102a4c'/%3E%3Crect x='7' y='9' width='18' height='16' rx='2' fill='none' stroke='%23ffffff' stroke-width='2'/%3E%3Cline x1='7' y1='14' x2='25' y2='14' stroke='%23ffffff' stroke-width='2'/%3E%3Cline x1='11' y1='6' x2='11' y2='10' stroke='%23ffffff' stroke-width='2' stroke-linecap='round'/%3E%3Cline x1='21' y1='6' x2='21' y2='10' stroke='%23ffffff' stroke-width='2' stroke-linecap='round'/%3E%3Crect x='11' y='17' width='4' height='4' fill='%237fb3ff'/%3E%3C/svg%3E">
 <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js" integrity="sha384-EnyY0/GSHQGSxSgMwaIPzSESbqoOLSexfnSMN2AP+39Ckmn92stwABZynq1JyzdT" crossorigin="anonymous"></script>
 <script>
 // ══════════════════════════════════════════════════════
 //  DATABASE CONFIG — direct REST fetch (no client library, avoids DataCloneError)
@@ -179,36 +179,6 @@ async function authSignOut(){
   try{await _authFetch('/auth/v1/logout',{method:'POST'});}catch(e){console.warn('Auth signout warning:',errStr(e));}
 }
 
-// getSB() returns a compatibility shim so all existing call sites work unchanged
-function getSB(){
-  return {
-    from(table){
-      return {
-        select(){ return {
-          eq(col,val){ return {
-            async single(){
-              try {
-                const rows = await _sbGet(table, {[col]:val});
-                if(!rows||rows.length===0) return {data:null,error:{code:'PGRST116',message:'Not found'}};
-                return {data:rows[0], error:null};
-              } catch(e){ return {data:null, error:{message:e.message}}; }
-            }
-          }}
-        }},
-        async upsert(data){
-          try { await _sbUpsert(table, data); return {error:null}; }
-          catch(e){ return {error:{message:e.message}}; }
-        },
-        update(data){ return {
-          eq(col,val){ return (async()=>{
-            try { await _sbPatch(table,{[col]:val},data); return {error:null}; }
-            catch(e){ return {error:{message:e.message}}; }
-          })(); }
-        }}
-      };
-    }
-  };
-}
 // Safe error stringifier — handles Error objects, Supabase error objects, strings
 function errStr(e){
   if(!e) return 'unknown error';
@@ -746,7 +716,22 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
   .qg-import-grid,.qg-guide-layout{grid-template-columns:1fr}
 }
 
-/* PRINT *//* PRINT */
+/* MOBILE — physician portal pages are opened on phones */
+@media(max-width:640px){
+  .pg{padding:12px 10px}
+  .g2{grid-template-columns:1fr}
+  .phys-page-hdr{margin:-12px -10px 16px -10px;padding:12px 14px;gap:10px}
+  .phys-page-hdr-nav{width:100%}
+  .phys-nav-btn{flex:1;padding:8px 10px;font-size:12px}
+  .phys-page-hdr-right{width:100%;justify-content:flex-start!important}
+  .req-cal-day{min-height:38px;padding:4px 2px}
+  .doc-cal-row{grid-template-columns:1fr}
+  #hdr{padding:0 10px}
+  .brand{min-width:0;padding-right:10px}
+}
+
+/* PRINT */
+@page{size:landscape}
 @media print{
   body{background:#fff!important}
   #hdr,.no-print,.toolbar{display:none!important}
@@ -825,7 +810,6 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
       <button class="on" id="r-admin" onclick="switchRole('admin')">Admin</button>
       <button id="r-phys" onclick="switchRole('phys')">Physician</button>
     </div>
-    <select id="phys-pick" style="display:none;width:160px" onchange="onPhysPick()"></select>
     <select id="site-pick" style="display:none;width:190px" onchange="onSitePick()" title="Select hospitalist site"></select>
     <button class="btn btn-sm" onclick="window.print()">Print</button>
     <span id="user-display" style="font-size:12px;color:#d6e2f0;font-weight:600;margin-right:4px"></span>
@@ -846,9 +830,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
       <p class="tx-sm tx-mu" id="quarter-info">Select a quarter and generate.</p>
     </div>
     <div class="fl">
-      <select id="yr-sel" style="width:90px" onchange="updateQuarterInfo()">
-        <option>2025</option><option>2026</option><option>2027</option>
-      </select>
+      <select id="yr-sel" style="width:90px" onchange="updateQuarterInfo()"></select>
       <select id="q-sel" style="width:150px" onchange="updateQuarterInfo()">
         <option value="1">Q1 · Jan–Mar</option>
         <option value="2">Q2 · Apr–Jun</option>
@@ -894,13 +876,13 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
     </div>
     <div class="tb-group">
       <span class="tb-label">Legend</span>
-      <span class="sh sh-R">R</span><span class="tx-xs tx-mu">Rounding 7a–5p</span>
-      <span class="sh sh-S">S</span><span class="tx-xs tx-mu">Swing 3p–1a</span>
+      <span class="sh sh-R">R</span><span class="tx-xs tx-mu">Rounding</span>
+      <span class="sh sh-S">S</span><span class="tx-xs tx-mu">Swing / Admit</span>
       <span class="sh sh-H">H</span><span class="tx-xs tx-mu">Holiday</span>
       <span class="sh" style="background:#e8f0fe;color:#244b7a;border:1px solid #b8c8e8">X</span><span class="tx-xs tx-mu">Cross Coverage</span>
     </div>
     <div class="tb-group" style="margin-left:auto">
-      <span class="tb-label" id="fill-mode-label">Click cell to cycle R→S→N→OFF · Double-click name to open</span>
+      <span class="tb-label" id="fill-mode-label">Click cell to cycle R→S→N→X→OFF · Double-click name to open</span>
     </div>
   </div>
 
@@ -960,16 +942,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
       <p class="tx-sm tx-mu">Review submitted requests for the upcoming quarter.</p>
     </div>
     <div class="fl">
-      <select id="req-q-sel" onchange="renderRequestsAdmin()">
-        <option value="2025-1">2025 Q1</option>
-        <option value="2025-2">2025 Q2</option>
-        <option value="2025-3">2025 Q3</option>
-        <option value="2025-4">2025 Q4</option>
-        <option value="2026-1">2026 Q1</option>
-        <option value="2026-2">2026 Q2</option>
-        <option value="2026-3">2026 Q3</option>
-        <option value="2026-4">2026 Q4</option>
-      </select>
+      <select id="req-q-sel" onchange="renderRequestsAdmin()"></select>
     </div>
   </div>
 
@@ -1010,9 +983,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
   <div class="fb mb">
     <h1>Holiday Assignments</h1>
     <div class="fl">
-      <select id="hol-yr" onchange="renderHolidayTable()">
-        <option selected>2026</option><option>2027</option><option>2028</option>
-      </select>
+      <select id="hol-yr" onchange="renderHolidayTable()"></select>
       <button class="btn btn-p btn-sm" onclick="autoAssignHolidays()">Auto-Assign</button>
     </div>
   </div>
@@ -1285,16 +1256,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
       <p class="tx-sm tx-mu">Select dates you <strong>cannot work</strong> in the upcoming quarter. Use <strong style="color:#a01918">Required</strong> for must-honor requests and <strong style="color:#806000">Optional</strong> for flexible preferences.</p>
     </div>
     <div class="fl">
-      <select id="myq-sel" onchange="renderMyRequestCal()">
-        <option value="2025-1">2025 Q1 (Jan–Mar)</option>
-        <option value="2025-2">2025 Q2 (Apr–Jun)</option>
-        <option value="2025-3">2025 Q3 (Jul–Sep)</option>
-        <option value="2025-4">2025 Q4 (Oct–Dec)</option>
-        <option value="2026-1">2026 Q1 (Jan–Mar)</option>
-        <option value="2026-2">2026 Q2 (Apr–Jun)</option>
-        <option value="2026-3">2026 Q3 (Jul–Sep)</option>
-        <option value="2026-4">2026 Q4 (Oct–Dec)</option>
-      </select>
+      <select id="myq-sel" onchange="renderMyRequestCal()"></select>
     </div>
   </div>
 
@@ -1326,9 +1288,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
           <span><strong>OPTIONAL</strong> — flexible, honor if possible</span>
         </label>
       </div>
-      <div class="tx-xs tx-mu mb">
-        <strong>Rules:</strong> Maximum <strong>20 OFF dates per quarter</strong>. Of those, no more than <strong>6 can span weekends</strong>. Required dates count toward both limits.
-      </div>
+      <div class="tx-xs tx-mu mb" id="req-rules-text"></div>
       <div id="my-req-list"><div class="tx-mu tx-sm">No dates selected yet. Choose Required or Optional above, then click days on the calendar.</div></div>
       <div class="fl mt" id="req-action-area">
         <button class="btn btn-p btn-sm" onclick="submitMyRequests()">Submit Requests</button>
@@ -1367,8 +1327,8 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
   </div>
   <span style="display:none" id="my-name-lbl"></span>
   <div id="my-schd-content"><div class="tx-mu tx-sm" style="padding:40px;text-align:center">Schedule not generated yet. Ask your admin to generate the schedule.</div></div>
-  <div style="padding:16px 24px;border-top:1px solid rgba(255,255,255,.2)">
-    <button class="phys-nav-btn" onclick="showChangePasswordModal()" style="font-size:12px;padding:6px 14px">Change My Password</button>
+  <div style="padding:16px 24px;border-top:1px solid var(--line)">
+    <button class="btn btn-sm" onclick="showChangePasswordModal()">Change My Password</button>
   </div>
 </div>
 
@@ -1518,7 +1478,11 @@ document.addEventListener('click',ev=>{
   if(pop&&pop.style.display!=='none'&&!pop.contains(ev.target)&&!ev.target.closest('.col-hdr'))closeStaffingPopover();
 });
 document.addEventListener('keydown',ev=>{
-  if(ev.key==='Escape')closeStaffingPopover();
+  if(ev.key==='Escape'){
+    closeStaffingPopover();
+    const modal=document.getElementById('modal');
+    if(modal&&modal.style.display!=='none')modal.style.display='none';
+  }
 });
 
 function navSettings(p){
@@ -1550,10 +1514,21 @@ function updateHeaderForUser(){
   if(brand)brand.textContent=group;
   if(mark)mark.textContent=groupInitials(group);
   el.textContent=isAdmin()?`${currentUser.username} (Admin)`:`${currentUser.username}`;
+  // Physician logins stay in the physician portal — no admin-view browsing
+  const roleSwitch=document.querySelector('.role-switch');
+  if(roleSwitch)roleSwitch.style.display=isPhysician()?'none':'flex';
   updateSettingsMenuVisibility();
   renderSitePicker();
 }
 
+// Guard rails around the shared state blob:
+// - loadFailed blocks saves after a failed load so a near-empty default state
+//   can never overwrite a group's real data.
+// - lastLoadedUpdatedAt enables optimistic concurrency: the save only lands if
+//   nobody else wrote the row since we last read it (last-writer-wins otherwise
+//   silently destroys a concurrent admin's edits).
+let loadFailed=false;
+let lastLoadedUpdatedAt=null;
 async function saveData(silent=false){
   if(!currentUser){toast('Not logged in','error');return;}
   if(isDemoSessionUser()){
@@ -1573,14 +1548,85 @@ async function saveData(silent=false){
     if(!silent)toast('Demo mode is temporary. Exit Demo before saving real changes.','info',3500);
     return;
   }
+  if(loadFailed){
+    setSyncStatus('error');
+    toast('Saving is disabled because the last data load failed — saving now could erase this site\'s data. Reload the page to try again.','error',7000);
+    return;
+  }
   if(isSaving){pendingSave=true;return;}
   isSaving=true;setSyncStatus('saving');
   try{
-    await _sbUpsert('schedule_data',{id:currentScheduleRowId(),data:JSON.stringify(S),updated_at:new Date().toISOString()});
+    const rowId=currentScheduleRowId();
+    const body=JSON.stringify(S);
+    const now=new Date().toISOString();
+    let rows;
+    if(lastLoadedUpdatedAt){
+      rows=await _sbFetch(`/rest/v1/schedule_data?id=eq.${encodeURIComponent(rowId)}&updated_at=eq.${encodeURIComponent(lastLoadedUpdatedAt)}`,{
+        method:'PATCH',
+        headers:{'Prefer':'return=representation'},
+        body:JSON.stringify({data:body,updated_at:now})
+      });
+      if(!rows||!rows.length){
+        // Someone else saved since our last load — reload rather than clobber.
+        setSyncStatus('error');
+        toast('Another session saved changes to this site. Loading the latest data — please reapply your last edit.','error',8000);
+        await loadData();
+        renderSchedule();
+        return;
+      }
+    }else{
+      rows=await _sbFetch('/rest/v1/schedule_data',{
+        method:'POST',
+        headers:{'Prefer':'resolution=merge-duplicates,return=representation'},
+        body:JSON.stringify({id:rowId,data:body,updated_at:now})
+      });
+    }
+    if(rows&&rows.length&&rows[0].updated_at){
+      lastLoadedUpdatedAt=rows[0].updated_at;
+      lastSyncTime=new Date(rows[0].updated_at).getTime();
+    }
     setSyncStatus('saved');
     if(isAdmin()&&!silent)toast('Saved','success');
   }catch(e){console.error('saveData error:',errStr(e),e);setSyncStatus('error');toast('Save failed: '+errStr(e),'error');}
   finally{isSaving=false;if(pendingSave){pendingSave=false;saveData(silent);}}
+}
+
+// Physician time-off requests live in their own table (RLS: physicians write
+// their own rows) because schedule_data is admin-write-only. Rows are merged
+// into S.requests on load so all rendering/generation code is untouched.
+async function savePhysicianRequestRow(quarterKey,docId,required,optional,submittedAt=new Date().toISOString()){
+  await _sbUpsert('time_off_requests',{
+    user_id:currentUser.userId,
+    group_id:currentGroupId(),
+    doc_id:docId,
+    quarter_key:quarterKey,
+    required,
+    optional,
+    submitted_at:submittedAt
+  });
+}
+async function loadPhysicianRequestRows(){
+  try{
+    const rows=await _sbGet('time_off_requests',{group_id:currentGroupId()});
+    (rows||[]).forEach(row=>{
+      if(!row||!row.quarter_key||!row.doc_id)return;
+      if(!S.requests[row.quarter_key])S.requests[row.quarter_key]={};
+      S.requests[row.quarter_key][row.doc_id]={
+        required:Array.isArray(row.required)?row.required:[],
+        optional:Array.isArray(row.optional)?row.optional:[]
+      };
+      const subKey=row.quarter_key+'_submitted';
+      if(row.submitted_at){
+        if(!S.requests[subKey])S.requests[subKey]={};
+        S.requests[subKey][row.doc_id]=row.submitted_at;
+      }else if(S.requests[subKey]){
+        delete S.requests[subKey][row.doc_id];
+      }
+    });
+  }catch(e){
+    // Table may not exist in older deployments — degrade to blob-only requests.
+    console.warn('time_off_requests load skipped:',errStr(e));
+  }
 }
 
 async function loadData(){
@@ -1623,14 +1669,21 @@ async function loadData(){
     const rows = await _sbGet('schedule_data', {id: currentScheduleRowId()});
     if(rows && rows.length > 0 && rows[0].data){
       S = {...S, ...JSON.parse(rows[0].data)};
+      lastLoadedUpdatedAt = rows[0].updated_at || null;
+    } else {
+      lastLoadedUpdatedAt = null;
     }
+    loadFailed = false;
     setSyncStatus(isDemoSessionUser()?'session':'synced');
   } catch(e){
     console.error('loadData error:', errStr(e), e);
+    // Block saves until a successful reload — otherwise the next autosave
+    // would overwrite the group's real data with this default/empty state.
+    loadFailed = true;
     setSyncStatus('error');
-    // Non-fatal — proceed with default/empty state so app still loads
-    toast('Database load failed: ' + errStr(e), 'error');
+    toast('Database load failed: ' + errStr(e) + ' — viewing defaults; saving is disabled until reload.', 'error', 8000);
   }
+  if(!loadFailed && currentUser && !isDemoSessionUser()) await loadPhysicianRequestRows();
   applyMigrations();
   if(isDemoGroup()&&await ensureDemoHistoricalSchedule()){
     if(demoKey){
@@ -1856,8 +1909,6 @@ function applyMigrations(){
   if(!S.ui)S.ui={};
   if(S.ui.currentPhysId&&!S.docs.find(d=>d.id===S.ui.currentPhysId))S.ui.currentPhysId=null;
   S.ui.selectedRow=null;S.ui.selectedCols=new Set();S.ui.fillMode=null;
-  const u={odeyinka:{first:'Oladipo'},chapagain:{first:'Sudeep'},walls:{type:'nocturnist',title:'Nocturnist'},ahmadani:{type:'nocturnist',title:'Nocturnist'},tahir:{type:'weekday-only'}};
-  Object.entries(u).forEach(([id,p])=>{const d=S.docs.find(d=>d.id===id);if(d)Object.assign(d,p);});
   S.docs.forEach(d=>{d.role=normalizeRole(d.role);});
   S.docs.forEach(normalizeProviderDefaults);
   S.ui.staffingFocus=null;
@@ -1886,7 +1937,7 @@ async function pollForChanges(){
       }
       lastSyncTime=t;
     }
-  }catch(e){}
+  }catch(e){console.warn('pollForChanges failed:',errStr(e));}
 }
 setInterval(pollForChanges,30000);
 
@@ -2368,12 +2419,14 @@ function parseQgendaWorkbook(wb, filename){
         }
       }
 
-      // Read data rows until the next "Monday" row or "Athens" group header
+      // Read data rows until the next "Monday" row or a section/group header
+      // (a row where only the first cell is populated, e.g. a site name).
       let j=i+2;
       while(j<rows.length){
         const dRow=rows[j];
         const first=String(dRow[0]||'').trim();
-        if(first==='Monday'||first==='Athens') break;
+        if(first==='Monday') break;
+        if(first&&dRow.slice(1).every(c=>!String(c||'').trim())) break;
 
         // Each day: cols [d*2] = shift name, [d*2+1] = provider name
         for(let d=0;d<7;d++){
@@ -2542,7 +2595,7 @@ function showQgendaMapModal(records, filename, totalParsed, totalIgnored, unknow
     const addOpt=(isUnmatched||onboardingEmptyRoster)?`<option value="__add__" ${onboardingEmptyRoster?'selected':''} style="color:#0a7044;font-weight:700">+ Add as new provider</option>`:'';
     const opts=addOpt+`<option value="">— skip —</option>`+
       S.docs.filter(d=>d.active).sort((a,b)=>providerGridRank(a)-providerGridRank(b)||providerSort(a,b))
-        .map(d=>`<option value="${d.id}" ${matched===d.id?'selected':''}>${d.last}, ${d.first}</option>`).join('');
+        .map(d=>`<option value="${qgEsc(d.id)}" ${matched===d.id?'selected':''}>${qgEsc(d.last)}, ${qgEsc(d.first)}</option>`).join('');
     const cls=(matched||onboardingEmptyRoster)?'matched':'unmatched';
     const count=displayRecords.filter(r=>r.rawName===rawName).length;
     const safeId=rawName.replace(/[^a-zA-Z0-9]/g,'_');
@@ -2570,7 +2623,7 @@ function showQgendaMapModal(records, filename, totalParsed, totalIgnored, unknow
         </select>
         <span style="color:#555">FTE:</span>
         <input type="number" class="qg-new-fte" data-raw="${rawName.replace(/"/g,'&quot;')}" value="${defaultFte}" min="0.0" max="1.0" step="0.1">
-        <span class="qg-new-name">(${defFirst} ${defLast})</span>
+        <span class="qg-new-name">(${qgEsc(defFirst)} ${qgEsc(defLast)})</span>
       </div>
     </div>`;
   }).join('');
@@ -2641,7 +2694,8 @@ function previewQgendaImport(){
   const records=window._qgRecords;
   if(!records){toast('No data loaded','error');return;}
 
-  // Apply manual corrections from modal
+  // Apply manual corrections from modal. Every dropdown's value wins over the
+  // auto-match — including "— skip —" (empty), which drops the name entirely.
   const corrections={};
   document.querySelectorAll('#qg-match-container .qg-match-sel').forEach(sel=>{
     const raw=sel.getAttribute('data-raw');
@@ -2654,7 +2708,7 @@ function previewQgendaImport(){
 
   records.forEach(rec=>{
     if(rec.date>=today) return; // skip future
-    const docId=rec.docId||corrections[rec.rawName];
+    const docId=Object.prototype.hasOwnProperty.call(corrections,rec.rawName)?corrections[rec.rawName]:rec.docId;
     if(!docId) return;
     let previewDocId=docId;
     let doc=byId(docId);
@@ -2728,7 +2782,9 @@ function previewQgendaImport(){
 }
 
 async function runQgendaImport(records){
-  // Read match selections — handle corrections, new providers, and skips
+  // Read match selections — every dropdown's value overrides the auto-match,
+  // including "— skip —" (empty), so wrong fuzzy matches can be corrected or
+  // dropped. New providers get their generated id filled in below.
   const corrections={};
   const newProviders={};
 
@@ -2751,8 +2807,8 @@ async function runQgendaImport(records){
         preferences:defaultPreferencesForType(type),
         teamColor:''
       };
-    } else if(val){
-      corrections[raw]=val;
+    } else {
+      corrections[raw]=val||null;
     }
   });
 
@@ -2766,7 +2822,7 @@ async function runQgendaImport(records){
     corrections[rawName]=uid;
   }
 
-  records.forEach(r=>{ if(!r.docId&&corrections[r.rawName]) r.docId=corrections[r.rawName]; });
+  records.forEach(r=>{ if(Object.prototype.hasOwnProperty.call(corrections,r.rawName)) r.docId=corrections[r.rawName]; });
 
   const progDiv=document.getElementById('qg-import-progress');
   const bar=document.getElementById('qg-bar');
@@ -2839,10 +2895,10 @@ async function saveVersion(){
   if(!isAdmin()){ toast('Admin only','error'); return; }
   const defaultName=`v${new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'2-digit'})} – ${S.cycleStarts&&Object.keys(S.cycleStarts).length?Object.keys(S.cycleStarts).sort().pop():'manual'}`;
   showModal('Save Version',
-    `<div style="margin-bottom:8px;font-size:13px">Save a named snapshot of the current schedule and settings for <strong>${currentGroupName()}</strong>. You can restore it later from "Restore Version".</div>
-     <div style="margin-bottom:12px;font-size:12px;color:var(--ink3);background:#f8fafc;border:1px solid var(--line);border-radius:4px;padding:7px 9px">Versions are scoped by group ID: <strong>${currentGroupId()}</strong>.</div>
+    `<div style="margin-bottom:8px;font-size:13px">Save a named snapshot of the current schedule and settings for <strong>${qgEsc(currentGroupName())}</strong>. You can restore it later from "Restore Version".</div>
+     <div style="margin-bottom:12px;font-size:12px;color:var(--ink3);background:#f8fafc;border:1px solid var(--line);border-radius:4px;padding:7px 9px">Versions are scoped by group ID: <strong>${qgEsc(currentGroupId())}</strong>.</div>
      <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Snapshot name:</label>
-     <input id="version-name-input" type="text" value="${defaultName}" style="width:100%;padding:6px 8px;border:1px solid var(--line);border-radius:4px;font-size:13px">`,
+     <input id="version-name-input" type="text" value="${qgEsc(defaultName)}" style="width:100%;padding:6px 8px;border:1px solid var(--line);border-radius:4px;font-size:13px">`,
     'Save Snapshot',
     async ()=>{
       const name=document.getElementById('version-name-input')?.value?.trim()||defaultName;
@@ -2861,6 +2917,7 @@ async function saveVersion(){
           const {group_id, ...legacyRow}=versionRow;
           await _sbUpsert('versions',legacyRow);
         }
+        document.getElementById('modal').style.display='none';
         toast(`Snapshot "${name}" saved`,'success');
         trackEvent('version_saved',{name,group_id:currentGroupId()});
       }catch(e){
@@ -3059,16 +3116,24 @@ function importData(){
   i.accept='.json';
   i.onchange=e=>{
     const r=new FileReader();
-    r.onload=async ev=>{
-      try{
-        if(!confirm(`Import raw JSON into ${currentGroupName()}?\n\nThis can overwrite the current site data. Save a version first if needed.`))return;
-        S={...freshAppState(),...JSON.parse(ev.target.result)};
-        applyMigrations();
-        await saveData();
-        renderSchedule();renderRoster();renderDocList();populatePhysPicker();updateQuarterInfo();updateGenButton();
-        toast('Imported JSON','success');
-        trackEvent('json_imported',{group_id:currentGroupId()});
-      }catch(e){toast('Invalid file: '+errStr(e),'error');}
+    r.onload=ev=>{
+      const rawText=ev.target.result;
+      showModal('Import JSON',
+        `<div style="font-size:13px;margin-bottom:10px">Import raw JSON into <strong>${qgEsc(currentGroupName())}</strong>?</div>
+         <div style="font-size:12px;background:#fff5dc;border:1px solid #f0d080;border-radius:4px;padding:8px 10px">This can overwrite the current site data. Save a version first if needed.</div>`,
+        'Import',
+        async ()=>{
+          try{
+            S={...freshAppState(),...JSON.parse(rawText)};
+            applyMigrations();
+            await saveData();
+            renderSchedule();renderRoster();renderDocList();populatePhysPicker();updateQuarterInfo();updateGenButton();
+            document.getElementById('modal').style.display='none';
+            toast('Imported JSON','success');
+            trackEvent('json_imported',{group_id:currentGroupId()});
+          }catch(e){toast('Invalid file: '+errStr(e),'error');}
+        }
+      );
     };
     r.readAsText(e.target.files[0]);
   };
@@ -3559,11 +3624,13 @@ function activeDocs(year,month){
     return true;
   });
 }
+let toastHideTimer=null;
 function toast(msg,kind='info',ms=2500){
   const t=document.getElementById('toast');
+  if(toastHideTimer)clearTimeout(toastHideTimer);
   t.textContent=msg;
   t.className='toast on '+(kind||'');
-  setTimeout(()=>t.classList.remove('on'),ms);
+  toastHideTimer=setTimeout(()=>t.classList.remove('on'),ms);
 }
 function showModal(title,body,okLbl,okFn,opts={}){
   const box=document.querySelector('#modal .mo');
@@ -3620,7 +3687,7 @@ function holName(key){
 //  Swing fill layers (shortages remain visible when no clean tail is available):
 //    Layer 1 - Normal: preferredR met AND below monthly quota
 //    Layer 2 - Normal above-quota: preferredR met, but over monthly target (still fair)
-//    Layer 3 - Emergency: 5+ R (early transition when S supply is thin)
+//    Layer 3 - Emergency: 3+ R (early transition when S supply is thin)
 //    Layer 4 - Last resort: isolated S from OFF only to avoid a coverage miss
 //
 //  Team numbers:
@@ -4288,8 +4355,16 @@ function configureDemoProviderMix(year,varPct,sevenPct,twoPct,seed=9100){
 async function runDemoMode(){
   if(!isAdmin()){toast('Admin only','error');return;}
   if(demoModeSnapshot){
-    if(!confirm('A demo schedule is already showing. Restore the real schedule and run a new demo?'))return;
-    exitDemoMode({silent:true});
+    showModal('Run New Demo?',
+      '<div style="font-size:13px">A demo schedule is already showing. Restore the real schedule and run a new demo?</div>',
+      'Run New Demo',
+      ()=>{
+        document.getElementById('modal').style.display='none';
+        exitDemoMode({silent:true});
+        runDemoMode();
+      }
+    );
+    return;
   }
   const inputs={
     year:parseInt(document.getElementById('demo-year')?.value,10)||nextStressQuarter().year,
@@ -5040,17 +5115,6 @@ function _generateQuarter(candidateSeed=0,finalize=true){
     if(s.block==='W') return s.workInBlock<SOFT_VARIABLE_WORK;
     return s.dayInBlock>=s.lastWorkSize&&!hasRequiredInNextRBlock(docId,di);
   }
-  function canBeS_base(docId){
-    // Base S eligibility (shared between normal and emergency)
-    const s=state[docId];
-    if(!s||s.block!=='W') return false;
-    if(s.workInBlock>=s.maxWork) return false;
-    if(s.lastShift==='S') return s.runLen<MAX_S_BLOCK;  // continuation: cap at MAX_S_BLOCK
-    return false;
-  }
-  function getMaxS(docId){
-    return MAX_S_BLOCK;
-  }
   function qSTarget(docId){
     // Pro-rated quarterly S target based on FTE
     const doc=byId(docId);
@@ -5081,12 +5145,17 @@ function _generateQuarter(candidateSeed=0,finalize=true){
     return false;
   }
   function canBeS_emergency(docId){
+    // Relaxed layer for thin S supply: allow the R→S transition after only
+    // 3+ consecutive R (vs MIN_R_HARD=5 in the normal layer). All other
+    // guards (max work, FTE-adjusted quarter cap, MAX_S_BLOCK) still apply,
+    // and quarter scoring penalizes the short R block, so this only wins
+    // when the alternative is a coverage shortage.
     const s=state[docId];
     if(!s||s.block!=='W') return false;
     if(s.workInBlock>=s.maxWork) return false;
     if(s.qS >= swingQuarterCap(docId)) return false;  // respect FTE-adjusted cap plus catch-up
     if(s.lastShift==='S') return s.runLen<MAX_S_BLOCK;
-    if(s.lastShift==='R' && s.runLen>=MIN_R_HARD)
+    if(s.lastShift==='R' && s.runLen>=3)
       return s.workInBlock+1<=s.maxWork;
     return false;
   }
@@ -5100,9 +5169,6 @@ function _generateQuarter(candidateSeed=0,finalize=true){
     const s=state[docId];
     return s&&s.block==='W'&&s.lastShift==='R'
         &&s.runLen<Math.min(s.preferredR,SOFT_VARIABLE_WORK)&&s.workInBlock<SOFT_VARIABLE_WORK;
-  }
-  function mustContinueS_couplet(docId){
-    return false;
   }
   function canBeOff(docId){
     const s=state[docId];
@@ -5276,14 +5342,6 @@ function _generateQuarter(candidateSeed=0,finalize=true){
       if(assigned.has(doc.id)) return;
       if(mustContinueR(doc.id)){
         S.sched[doc.id][ds]='R';assign(doc.id,'R',month,ds);needR--;assigned.add(doc.id);
-      }
-    });
-
-    // STEP 3: Forced S couplet completions
-    rotation.forEach(doc=>{
-      if(assigned.has(doc.id)) return;
-      if(mustContinueS_couplet(doc.id)){
-        S.sched[doc.id][ds]='S';assign(doc.id,'S',month,ds);needS--;assigned.add(doc.id);
       }
     });
 
@@ -5461,7 +5519,6 @@ function _generateQuarter(candidateSeed=0,finalize=true){
     rotation.forEach(doc=>{
       if(assigned.has(doc.id)) return;
       if(mustContinueR(doc.id)){S.sched[doc.id][ds]='R';assign(doc.id,'R',month,ds);return;}
-      if(mustContinueS_couplet(doc.id)){S.sched[doc.id][ds]='S';assign(doc.id,'S',month,ds);return;}
       S.sched[doc.id][ds]='OFF';assign(doc.id,'OFF',month,ds);
     });
     // Part-time providers also get OFF if not already assigned
@@ -5725,9 +5782,11 @@ function getHonoringStats(year){
   rates.sort((a,b)=>a.rate-b.rate);
   return rates;
 }
+let announcementSaveTimer=null;
 function saveAnnouncement(){
   S.announcement=(document.getElementById('admin-announcement')?.value||'').trim();
-  saveData();
+  if(announcementSaveTimer)clearTimeout(announcementSaveTimer);
+  announcementSaveTimer=setTimeout(()=>saveData(true),600);
 }
 function loadAnnouncement(){
   const ta=document.getElementById('admin-announcement');
@@ -5776,7 +5835,7 @@ function recheckFairness(){
     let unmetRequired=0;
     required.forEach(ds=>{
       const sh=(S.sched[doc.id]&&S.sched[doc.id][ds])||'OFF';
-      if(sh==='R'||sh==='S') unmetRequired++;
+      if(sh==='R'||sh==='S'||sh==='H'||sh==='N'||sh==='APP_NS'||sh==='APP_NX') unmetRequired++;
     });
     // FTE-normalised values: what we'd expect a 1.0 FTE doc to have if this doc were full-time
     // Multiply actual stats by (1/fte) to get FTE-equivalent, then compare to full-time group
@@ -5865,7 +5924,7 @@ function recheckFairness(){
       const bErr=b.flags.some(f=>f.level==='error')?0:1;
       return aErr-bErr||a.doc.last.localeCompare(b.doc.last);
     }).forEach(({doc,flags:flist})=>{
-      html+=`<tr><td><strong>${dname(doc)}</strong></td><td class="tx-mu">${doc.fte}</td><td>`;
+      html+=`<tr><td><strong>${qgEsc(dname(doc))}</strong></td><td class="tx-mu">${doc.fte}</td><td>`;
       flist.forEach(f=>{
         const bg=f.level==='error'?'#fde2e2':f.level==='warn'?'#fff5dc':'#eef5fb';
         const col=f.level==='error'?'#a01918':f.level==='warn'?'#a85800':'#1b4d8f';
@@ -6046,7 +6105,7 @@ function renderSchedule(){
     // Single sticky name cell — Q∑ total embedded in bottom-right of the cell
     row+=`<td class="name-col${isHighlighted?' name-col-hl':''}" onclick="toggleRowHighlight('${doc.id}')" ondblclick="handleProviderNameDblClick('${doc.id}')" title="Q${q} total: ${qTotalR}R+${qTotalS}S${qTotalN?'+'+qTotalN+'N':''}${qTotalX?'+'+qTotalX+'X':''}=${qTotal} (target ~${target})&#10;${mTip}&#10;Double-click to open detail">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:4px">
-        <span>${isConsult?'<span class="consult-badge">MED DIR</span>':styleBadge}${dname(doc)}</span>
+        <span>${isConsult?'<span class="consult-badge">MED DIR</span>':styleBadge}${qgEsc(dname(doc))}</span>
         <span class="qtot-inline"><span class="qtot-num" style="color:${qColor}">${qTotal}</span><span class="qtot-sub">${qTotalR}R</span><span class="qtot-sub">${qTotalS}S</span>${qTotalN?`<span class="qtot-sub">${qTotalN}N</span>`:''}${qTotalX?`<span class="qtot-sub">${qTotalX}X</span>`:''}</span>
       </div>
     </td>`;
@@ -6107,7 +6166,10 @@ function renderSchedule(){
       const dayTarget=typeof target==='function'?target(ds):target;
       const v=countFn(ds);
       let cls='cell';
-      if(v===dayTarget)cls+=' cov-ok';else if(v<Math.max(0,dayTarget-1))cls+=' cov-bad';else cls+=' cov-low';
+      if(v===dayTarget)cls+=' cov-ok';
+      else if(v>dayTarget)cls+=' cov-high';
+      else if(v<Math.max(0,dayTarget-1))cls+=' cov-bad';
+      else cls+=' cov-low';
       if(i>0&&d.getDate()===1)cls+=' month-sep';
       if(selCols.has(ds))cls+=' col-hl';
       html+=`<td class="${cls}">${v}</td>`;
@@ -6299,7 +6361,7 @@ function setShiftMode(mode){
   const lbl=document.getElementById('fill-mode-label');
   if(lbl) lbl.textContent = mode
     ? `Fill mode: ${mode} — click cells to apply`
-    : 'Click cell to cycle R→S→N→OFF · Double-click name to open';
+    : 'Click cell to cycle R→S→N→X→OFF · Double-click name to open';
   ['R','S','OFF','none'].forEach(m=>{
     const btn=document.getElementById('m-fill-'+(m==='none'?'none':m.toLowerCase()));
     if(btn) btn.classList.remove('btn-p');
@@ -6336,8 +6398,6 @@ function cycleCell(docId,ds){
   saveData();
   renderSchedule();
 }
-function cellClick(docId,ds){ cycleCell(docId,ds); }
-
 // ════════════════════════════════════════════════════════
 //  WEEKLY VIEW
 // ════════════════════════════════════════════════════════
@@ -6377,7 +6437,7 @@ function renderWeek(){
     const renderTeam=(team)=>team==='green'||team==='white'
       ?`<span class="team-num ${team}">${teamLabel(team)}</span> `
       :'';
-    const renderWeekShift=(label,doc,team='')=>`<div class="wd-name"><span class="wd-shift">${renderTeam(team,isAppProvider(doc))}${label}</span><span class="wd-provider">${dname(doc)}</span></div>`;
+    const renderWeekShift=(label,doc,team='')=>`<div class="wd-name"><span class="wd-shift">${renderTeam(team,isAppProvider(doc))}${qgEsc(label)}</span><span class="wd-provider">${qgEsc(dname(doc))}</span></div>`;
     html+=`<div class="week-day"${isH?' style="background:#f8f3fe"':''}>
       <div class="wd-hdr">${dayN(d)}</div>
       <div class="wd-date${isT?' today':''}">${d.getDate()}</div>
@@ -6437,6 +6497,10 @@ function renderMyRequestCal(){
 
   const reqSet=new Set(entry.required);
   const optSet=new Set(entry.optional);
+
+  // Rules line reflects this group's configured limits
+  const rulesEl=document.getElementById('req-rules-text');
+  if(rulesEl)rulesEl.innerHTML=`<strong>Rules:</strong> Maximum <strong>${S.cfg.maxReq} OFF dates per quarter</strong>. Of those, no more than <strong>${S.cfg.maxWeekendReq} can span weekends</strong> and <strong>${S.cfg.maxRequired||5} can be marked Required</strong>. Required dates count toward all limits.`;
 
   // Check if this physician can edit this calendar
   const viewingOwnPage = isAdmin() || (currentUser && currentUser.docId === S.ui.currentPhysId);
@@ -6684,7 +6748,24 @@ function renderMyRequestList(){
   }).join('')+'</div>';
 }
 
-function submitMyRequests(){
+// Persist one provider/quarter's requests. schedule_data is admin-write-only
+// under RLS, so physician logins must go through the time_off_requests table.
+// Admins write the table too (so a physician's older row can't overlay their
+// edit on the next load) but fall back to the blob if the table is missing.
+async function persistRequests(qKey,docId,required,optional,submittedAt){
+  if(isDemoSessionUser()){saveData();return;}
+  try{
+    await savePhysicianRequestRow(qKey,docId,required,optional,submittedAt);
+  }catch(e){
+    if(isAdmin()){
+      console.warn('time_off_requests write failed, saving blob only:',errStr(e));
+    }else{
+      throw e;
+    }
+  }
+  if(isAdmin())saveData(true);
+}
+async function submitMyRequests(){
   if(!isAdmin() && isPhysician() && currentUser.docId !== S.ui.currentPhysId){
     toast('You can only submit your own time-off requests','error'); return;
   }
@@ -6696,21 +6777,42 @@ function submitMyRequests(){
   const req = (entry && entry.required) || [];
   const opt = (entry && entry.optional) || (Array.isArray(entry) ? entry : []);
   const total = req.length + opt.length;
+  const submittedAt=new Date().toISOString();
   if(!S.requests[qKey+'_submitted']) S.requests[qKey+'_submitted']={};
-  S.requests[qKey+'_submitted'][docId]=new Date().toISOString();
-  saveData();
+  S.requests[qKey+'_submitted'][docId]=submittedAt;
+  try{
+    await persistRequests(qKey,docId,req,opt,submittedAt);
+  }catch(e){
+    console.error('submitMyRequests error:',errStr(e),e);
+    toast('Submit failed: '+errStr(e),'error',6000);
+    return;
+  }
   document.getElementById('submit-status').textContent=`✓ Submitted ${total} dates (${req.length} required, ${opt.length} optional) for ${dname(doc)}`;
   toast(`Submitted ${total} dates for ${dname(doc)}`,'success');
   trackEvent('requests_submitted',{quarter:qKey,total_dates:total,required_dates:req.length,optional_dates:opt.length});
 }
 
 function clearMyRequests(){
-  if(!confirm('Clear all selected dates?')) return;
   const qKey=S.ui.requestQuarter;
-  if(S.requests[qKey]) S.requests[qKey][S.ui.currentPhysId]={required:[],optional:[]};
-  renderMyRequestCal();
-  toast('Cleared','info');
-  trackEvent('requests_cleared',{quarter:qKey});
+  const docId=S.ui.currentPhysId;
+  showModal('Clear All Requests',
+    `<div style="font-size:13px">Remove all selected dates for <strong>${qgEsc(qKey)}</strong>? This also clears any previously submitted dates for this quarter.</div>`,
+    'Clear All',
+    async ()=>{
+      if(S.requests[qKey]) S.requests[qKey][docId]={required:[],optional:[]};
+      if(S.requests[qKey+'_submitted']) delete S.requests[qKey+'_submitted'][docId];
+      document.getElementById('modal').style.display='none';
+      try{
+        await persistRequests(qKey,docId,[],[],null);
+        toast('Cleared and saved','info');
+      }catch(e){
+        console.error('clearMyRequests error:',errStr(e),e);
+        toast('Clear failed to save: '+errStr(e),'error',6000);
+      }
+      renderMyRequestCal();
+      trackEvent('requests_cleared',{quarter:qKey});
+    }
+  );
 }
 
 // ════════════════════════════════════════════════════════
@@ -6791,7 +6893,7 @@ function renderRequestsAdmin(){
           return `<span style="display:inline-block;margin-right:6px;color:${color}">${type}:${ds.slice(5)}${ok?'':'⚠'}</span>`;
         }).join('');
 
-      html+=`<tr><td><strong>${dname(doc)}</strong></td><td>${required.length}</td><td>${optional.length}</td><td>${weekendCount}</td><td>${statusHtml}</td><td style="font-family:'JetBrains Mono',monospace;font-size:11px">${dateChips}</td></tr>`;
+      html+=`<tr><td><strong>${qgEsc(dname(doc))}</strong></td><td>${required.length}</td><td>${optional.length}</td><td>${weekendCount}</td><td>${statusHtml}</td><td style="font-family:'JetBrains Mono',monospace;font-size:11px">${dateChips}</td></tr>`;
     });
     html+='</tbody></table>';
   }
@@ -6981,7 +7083,7 @@ function renderMySchedule(){
   const html=`
     <div class="doc-hdr">
       <div>
-        <div class="doc-name">${dname(doc)}</div>
+        <div class="doc-name">${qgEsc(dname(doc))}</div>
         <div class="fl" style="flex-wrap:wrap;gap:5px;margin-top:6px">
           <span class="tag tag-r">${providerRoleLabel(doc)}</span>
           ${doc.teamColor?`<span class="team-chip ${doc.teamColor}">${teamLabel(doc.teamColor)}</span>`:''}
@@ -6989,7 +7091,7 @@ function renderMySchedule(){
           ${doc.type==='swing-only'?'<span class="tag tag-s">Swing Only</span>':''}
           ${isMedicalDirectorDoc(doc)?'<span class="tag tag-w">Medical Director</span>':''}
           ${doc.type==='nocturnist'?'<span class="tag tag-n">Nocturnist</span>':''}
-          ${providerExtraTitle(doc)?`<span class="tag tag-d">${providerExtraTitle(doc)}</span>`:''}
+          ${providerExtraTitle(doc)?`<span class="tag tag-d">${qgEsc(providerExtraTitle(doc))}</span>`:''}
         </div>
         <div style="margin-top:10px;font-size:11px;color:var(--ink3)">
           <strong>Swing per quarter:</strong>
@@ -6997,7 +7099,6 @@ function renderMySchedule(){
           <span class="sh sh-S" style="margin:0 4px">Q2: ${qS[1]}</span>
           <span class="sh sh-S" style="margin:0 4px">Q3: ${qS[2]}</span>
           <span class="sh sh-S" style="margin:0 4px">Q4: ${qS[3]}</span>
-          <span class="tx-mu" style="margin-left:8px">(target ~8 per quarter)</span>
         </div>
       </div>
       <div style="min-width:280px">
@@ -7022,9 +7123,7 @@ function renderMySchedule(){
             <option value="q4">Q4 (Oct–Dec)</option>
           </select>
           <select id="my-cal-year" onchange="renderMySchedule()" style="padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:3px">
-            <option value="2025">2025</option>
-            <option value="2026">2026</option>
-            <option value="2027">2027</option>
+            ${selectableYears().map(y=>`<option value="${y}">${y}</option>`).join('')}
           </select>
         </div>
       </div>
@@ -7100,8 +7199,8 @@ function renderDocList(){
       else { paceLabel=`Behind ${paceDelta} (${totalCompleted}/${expected})`; paceClass='pace-behind'; }
     }
     return `<div class="dc${doc.type==='nocturnist'?' dc-noct':''}" onclick="showDocDetail('${doc.id}')">
-      <div class="dcn">${dname(doc)}</div>
-      <div class="dcm">${providerRoleLabel(doc)}${doc.teamColor?' · '+teamLabel(doc.teamColor):''}${doc.fte<1?` · ${doc.fte} FTE`:''}${doc.type==='swing-only'?' · Swing Only':''}${isMedicalDirectorDoc(doc)?' · Medical Director':''}${doc.type==='nocturnist'?' · Nocturnist':''}${providerExtraTitle(doc)?' · '+providerExtraTitle(doc):''}</div>
+      <div class="dcn">${qgEsc(dname(doc))}</div>
+      <div class="dcm">${providerRoleLabel(doc)}${doc.teamColor?' · '+teamLabel(doc.teamColor):''}${doc.fte<1?` · ${doc.fte} FTE`:''}${doc.type==='swing-only'?' · Swing Only':''}${isMedicalDirectorDoc(doc)?' · Medical Director':''}${doc.type==='nocturnist'?' · Nocturnist':''}${providerExtraTitle(doc)?' · '+qgEsc(providerExtraTitle(doc)):''}</div>
       <div class="dcs">${doc.type==='nocturnist'?'Self-scheduled (not in rotation)':totalScheduled+' / '+target+' shifts scheduled'}</div>
       ${doc.type!=='nocturnist'?`<div class="pb" style="margin-top:5px"><div class="pbf ${pct>100?'pf-over':pct>=90?'pf-ok':'pf-warn'}" style="width:${pct}%"></div></div>`:''}
       ${paceLabel?`<div class="dc-pace ${paceClass}">${paceLabel}</div>`:''}
@@ -7217,7 +7316,7 @@ function showDocDetail(docId){
   det.innerHTML=`
     <div class="doc-hdr">
       <div>
-        <div class="doc-name">${dname(doc)}</div>
+        <div class="doc-name">${qgEsc(dname(doc))}</div>
         <div class="fl" style="flex-wrap:wrap;gap:5px;margin-top:6px">
           <span class="tag tag-r">${providerRoleLabel(doc)}</span>
           ${doc.teamColor?`<span class="team-chip ${doc.teamColor}">${teamLabel(doc.teamColor)}</span>`:''}
@@ -7225,7 +7324,7 @@ function showDocDetail(docId){
           ${doc.type==='swing-only'?'<span class="tag tag-s">Swing Only</span>':''}
           ${isMedicalDirectorDoc(doc)?'<span class="tag tag-w">Medical Director</span>':''}
           ${doc.type==='nocturnist'?'<span class="tag tag-n">Nocturnist</span>':''}
-          ${providerExtraTitle(doc)?`<span class="tag tag-d">${providerExtraTitle(doc)}</span>`:''}
+          ${providerExtraTitle(doc)?`<span class="tag tag-d">${qgEsc(providerExtraTitle(doc))}</span>`:''}
           ${doc.startDate?`<span class="tag" style="background:#eee;color:var(--ink3);border-color:var(--line)">Start ${doc.startDate}</span>`:''}
         </div>
         <div style="margin-top:10px;font-size:11px;color:var(--ink3)">
@@ -7234,7 +7333,6 @@ function showDocDetail(docId){
           <span class="sh sh-S" style="margin:0 4px">Q2: ${qS[1]}</span>
           <span class="sh sh-S" style="margin:0 4px">Q3: ${qS[2]}</span>
           <span class="sh sh-S" style="margin:0 4px">Q4: ${qS[3]}</span>
-          <span class="tx-mu" style="margin-left:8px">(target ~8 per quarter)</span>
         </div>
       </div>
       <div style="min-width:280px">
@@ -7333,11 +7431,6 @@ function renderDocCalendarsForView(docId, mode, viewYear){
   return html;
 }
 
-// Legacy: render next 3 months from today
-function renderDocCalendars(docId, today){
-  return renderDocCalendarsForView(docId, 'next3', today.getFullYear());
-}
-
 function backToDocList(){
   document.getElementById('doc-list-view').style.display='';
   document.getElementById('doc-detail').style.display='none';
@@ -7398,7 +7491,7 @@ function toggleHolidayCell(docId,key){
 }
 function renderHolidayTable(){
   let y=parseInt(document.getElementById('hol-yr').value);
-  if(!y||y<2026)y=2026;
+  if(!y)y=new Date().getFullYear();
   const sel=document.getElementById('hol-yr');
   if(sel&&sel.value!==String(y))sel.value=String(y);
   S.ui.holYear=y;
@@ -7458,7 +7551,7 @@ function renderHolidayTable(){
         ? '<td><span style="color:#a01918;font-weight:700">⚠ 2 Xmas</span></td>'
         : '<td><span style="color:#0a7044">✓</span></td>';
     html+=`<tr>
-      <td><strong>${dname(doc)}</strong></td>
+      <td><strong>${qgEsc(dname(doc))}</strong></td>
       ${cells}
       <td>${prevXm?'<span style="color:#a85800">Yes</span>':'No'}</td>
       ${ruleCell}
@@ -7495,11 +7588,11 @@ function renderRoster(){
       ?`<select class="team-select" onchange="setProviderTeam('${d.id}',this.value)"><option value="green" ${d.teamColor==='green'?'selected':''}>Green</option><option value="white" ${d.teamColor==='white'?'selected':''}>White</option></select>`
       :'<span class="tx-mu">—</span>';
     html+=`<tr style="opacity:${d.active?1:.5}">
-      <td>${dname(d)}</td><td>${providerRoleLabel(d)}</td><td>${d.fte}</td><td>${providerTypeLabel(d)}</td>
+      <td>${qgEsc(dname(d))}</td><td>${providerRoleLabel(d)}</td><td>${d.fte}</td><td>${providerTypeLabel(d)}</td>
       <td>${teamCell}</td>
       <td>${styleBadge}</td>
       <td>${prefDisplay}</td>
-      <td class="tx-mu">${d.title||''}</td>
+      <td class="tx-mu">${qgEsc(d.title||'')}</td>
       <td class="tx-mu" style="font-family:'JetBrains Mono',monospace;font-size:11px">${d.startDate||''}</td>
       <td style="white-space:nowrap">
         <button class="btn btn-xs" onclick="openEditDoc('${d.id}')">Edit</button>
@@ -7530,8 +7623,8 @@ function openEditDoc(id){
   const maxW=(doc.preferences&&doc.preferences.maxWork)||7;
   const body=`
     <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;align-items:flex-end">
-      <div class="fg"><label>Last Name</label><input type="text" id="ed-last" value="${doc.last||''}" style="width:130px"></div>
-      <div class="fg"><label>First Name</label><input type="text" id="ed-first" value="${doc.first||''}" style="width:120px"></div>
+      <div class="fg"><label>Last Name</label><input type="text" id="ed-last" value="${qgEsc(doc.last||'')}" style="width:130px"></div>
+      <div class="fg"><label>First Name</label><input type="text" id="ed-first" value="${qgEsc(doc.first||'')}" style="width:120px"></div>
     </div>
     <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;align-items:flex-end">
       <div class="fg"><label>Role</label>
@@ -7567,7 +7660,7 @@ function openEditDoc(id){
     </div>
     <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;align-items:flex-end">
       <div class="fg"><label>Start Date</label><input type="date" id="ed-start" value="${doc.startDate||''}" style="width:150px"></div>
-      <div class="fg"><label>Title</label><input type="text" id="ed-title" value="${doc.title||''}" style="width:200px"></div>
+      <div class="fg"><label>Title</label><input type="text" id="ed-title" value="${qgEsc(doc.title||'')}" style="width:200px"></div>
     </div>
     <div style="border-top:1px solid var(--line);margin-top:6px;padding-top:10px">
       <div style="font-weight:700;font-size:12px;color:var(--ink2);margin-bottom:8px">Scheduling Preferences</div>
@@ -7676,7 +7769,10 @@ function addPhysician(){
   const last=document.getElementById('n-last').value.trim();
   const first=document.getElementById('n-first').value.trim();
   if(!last){toast('Last name required','error');return}
-  const id=(last+first).toLowerCase().replace(/\s+/g,'')+'_'+Date.now();
+  // Same sanitizer as the qGenda import path — ids are embedded in inline
+  // onclick handlers, so quotes/apostrophes must never survive. Existing
+  // stored ids are never rewritten.
+  const id=((last+first).toLowerCase().replace(/[^a-z0-9]/g,'')||'provider')+'_'+Date.now();
   const type=document.getElementById('n-type').value;
   const title=document.getElementById('n-title').value.trim()||(type==='weekday-only'?'Medical Director':'');
   S.docs.push({
@@ -7755,9 +7851,6 @@ function switchRole(role){
   updateSettingsMenuVisibility();
   // Old phys tab bar always hidden (navigation is now in page header)
   document.getElementById('tabs-phys').style.display='none';
-  // Legacy phys-pick (keep for backward compat but hide)
-  const legPick=document.getElementById('phys-pick');
-  if(legPick) legPick.style.display='none';
 
   if(role==='admin'){
     nav('sched');
@@ -7771,16 +7864,13 @@ function populatePhysPicker(){
   if(docs.length&&!docs.find(d=>d.id===S.ui.currentPhysId))S.ui.currentPhysId=docs[0].id;
   if(!docs.length)S.ui.currentPhysId=null;
   const opts=docs.length
-    ? docs.map(d=>`<option value="${d.id}"${d.id===S.ui.currentPhysId?' selected':''}>${dname(d)}</option>`).join('')
+    ? docs.map(d=>`<option value="${qgEsc(d.id)}"${d.id===S.ui.currentPhysId?' selected':''}>${qgEsc(dname(d))}</option>`).join('')
     : '<option value="">No providers yet</option>';
   // Populate both page-header pickers
   const reqPick=document.getElementById('phys-pick-req');
   const schdPick=document.getElementById('phys-pick-schd');
   if(reqPick){reqPick.innerHTML=opts;reqPick.disabled=!docs.length;}
   if(schdPick){schdPick.innerHTML=opts;schdPick.disabled=!docs.length;}
-  // Keep legacy hidden one in sync
-  const legPick=document.getElementById('phys-pick');
-  if(legPick){legPick.innerHTML=opts;legPick.disabled=!docs.length;}
   updatePhysHeaders();
 }
 function updatePhysHeaders(){
@@ -7820,18 +7910,6 @@ function onPhysPickSchd(){
   updatePhysHeaders();
   renderMySchedule();
 }
-// Legacy — keep for any code that still calls it
-function onPhysPick(){
-  const val=document.getElementById('phys-pick').value;
-  if(!val)return;
-  S.ui.currentPhysId=val;
-  populatePhysPicker();
-  if(S.ui.role==='phys'){
-    if(document.getElementById('pg-myreq').classList.contains('on')) renderMyRequestCal();
-    if(document.getElementById('pg-myschd').classList.contains('on')) renderMySchedule();
-  }
-}
-
 // ════════════════════════════════════════════════════════
 //  NAV
 // ════════════════════════════════════════════════════════
@@ -7875,7 +7953,7 @@ function nav(p){
   else {
     // qtot panel removed (now inline column)
   }
-  if(p==='week'){S.ui.wkStart=wkStart(new Date());renderWeek()}
+  if(p==='week'){if(!S.ui.wkStart)S.ui.wkStart=wkStart(new Date());renderWeek()}
   if(p==='requests') renderRequestsAdmin();
   if(p==='docs'){backToDocList();renderDocList()}
   if(p==='hol') renderHolidayTable();
@@ -7906,9 +7984,30 @@ function handleProviderNameDblClick(docId){
 // ════════════════════════════════════════════════════════
 //  INIT
 // ════════════════════════════════════════════════════════
-loadData();
+// Year/quarter selectors are generated from the current date so the app never
+// runs out of selectable periods (the old hardcoded lists ended at 2026 Q4).
+function selectableYears(){
+  const cur=new Date().getFullYear();
+  const years=[];
+  for(let y=cur-1;y<=cur+2;y++)years.push(y);
+  return years;
+}
+function populateDateSelectors(){
+  const years=selectableYears();
+  const yearOpts=years.map(y=>`<option value="${y}">${y}</option>`).join('');
+  const qLabels=['Jan–Mar','Apr–Jun','Jul–Sep','Oct–Dec'];
+  const ySel=document.getElementById('yr-sel');
+  if(ySel)ySel.innerHTML=yearOpts;
+  const holSel=document.getElementById('hol-yr');
+  if(holSel){holSel.innerHTML=yearOpts;holSel.value=String(new Date().getFullYear());}
+  const myq=document.getElementById('myq-sel');
+  if(myq)myq.innerHTML=years.map(y=>[1,2,3,4].map(q=>`<option value="${y}-${q}">${y} Q${q} (${qLabels[q-1]})</option>`).join('')).join('');
+  const reqq=document.getElementById('req-q-sel');
+  if(reqq)reqq.innerHTML=years.map(y=>[1,2,3,4].map(q=>`<option value="${y}-${q}">${y} Q${q}</option>`).join('')).join('');
+}
+populateDateSelectors();
 
-// Populate quarter selectors with reasonable defaults
+// Default the schedule view to the current quarter
 const now=new Date();
 const curYear=now.getFullYear();
 const curQ=Math.floor(now.getMonth()/3)+1;
