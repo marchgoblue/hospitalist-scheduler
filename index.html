@@ -730,6 +730,21 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
   .brand{min-width:0;padding-right:10px}
 }
 
+/* GUIDED TOUR — spotlight overlay */
+#tour-overlay{position:fixed;inset:0;z-index:1490;display:none}
+#tour-highlight{position:fixed;border:2.5px solid #7fb3ff;border-radius:5px;
+  box-shadow:0 0 0 9999px rgba(10,20,40,.55),0 0 18px rgba(127,179,255,.65);
+  pointer-events:none;z-index:1491;transition:top .25s,left .25s,width .25s,height .25s}
+#tour-card{position:fixed;z-index:1492;background:#fff;border-radius:6px;
+  box-shadow:0 12px 36px rgba(0,0,0,.35);padding:16px 18px 14px;width:360px;max-width:92vw}
+.tour-title{font-size:14px;font-weight:800;color:var(--navy);margin-bottom:6px;padding-right:18px}
+.tour-body{font-size:12.5px;color:var(--ink2);line-height:1.55}
+.tour-foot{display:flex;align-items:center;gap:8px;margin-top:12px}
+.tour-step-count{font-size:11px;color:var(--ink3);margin-right:auto}
+#tour-close{position:absolute;top:8px;right:10px;background:none;border:none;font-size:15px;color:var(--ink3);cursor:pointer;padding:2px}
+#tour-close:hover{color:var(--ink)}
+.tour-swatch{display:inline-block;width:12px;height:12px;border-radius:2px;vertical-align:-1px;margin-right:3px}
+
 /* PRINT */
 @page{size:landscape}
 @media print{
@@ -837,10 +852,11 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
         <option value="3">Q3 · Jul–Sep</option>
         <option value="4">Q4 · Oct–Dec</option>
       </select>
+      <button class="btn btn-p" id="demo-requests-btn" onclick="fillDemoTimeOffRequests()" style="display:none">1 · Fill Demo Requests</button>
       <button class="btn btn-p" id="gen-btn" onclick="tryGenerateQuarter()">Generate Schedule</button>
-      <button class="btn btn-sm" id="demo-requests-btn" onclick="fillDemoTimeOffRequests()" style="display:none">Fill Demo Requests</button>
-      <button class="btn btn-sm" onclick="recheckFairness()" title="Check shift distribution fairness">Fairness Check</button>
+      <button class="btn btn-sm" id="fairness-btn" onclick="recheckFairness()" title="Check shift distribution fairness">Fairness Check</button>
       <button class="btn btn-sm" onclick="exportScheduleExcel()" title="Download this quarter as an Excel file">Export Excel</button>
+      <button class="btn btn-sm" onclick="startScheduleTour()" title="Guided walkthrough of the schedule markings">Tutorial</button>
     </div>
   </div>
   <div id="gen-progress" class="card" style="display:none;margin-bottom:12px;padding:10px 12px">
@@ -1348,6 +1364,21 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
 <div class="toast" id="toast"></div>
 <div id="staffing-popover" class="staffing-popover" style="display:none"></div>
 
+<!-- Guided tour overlay (spotlights real schedule elements) -->
+<div id="tour-overlay" class="no-print">
+  <div id="tour-highlight"></div>
+  <div id="tour-card">
+    <button id="tour-close" onclick="endScheduleTour()" title="Close tutorial">✕</button>
+    <div class="tour-title" id="tour-title"></div>
+    <div class="tour-body" id="tour-body"></div>
+    <div class="tour-foot">
+      <span class="tour-step-count" id="tour-step-count"></span>
+      <button class="btn btn-sm" id="tour-back" onclick="tourNav(-1)">Back</button>
+      <button class="btn btn-p btn-sm" id="tour-next" onclick="tourNav(1)">Next</button>
+    </div>
+  </div>
+</div>
+
 <script>
 // ════════════════════════════════════════════════════════
 //  PHYSICIAN ROSTER
@@ -1481,6 +1512,7 @@ document.addEventListener('click',ev=>{
 document.addEventListener('keydown',ev=>{
   if(ev.key==='Escape'){
     closeStaffingPopover();
+    if(typeof endScheduleTour==='function')endScheduleTour();
     const modal=document.getElementById('modal');
     if(modal&&modal.style.display!=='none')modal.style.display='none';
   }
@@ -4623,6 +4655,7 @@ async function runDemoMode(){
     if(exitBtn)exitBtn.disabled=false;
     if(status)status.innerHTML=`<strong>Demo mode is showing.</strong> ${mix.variableCount} variable, ${mix.sevenCount} 7S, ${mix.twoCount} 2S providers. Requests were submitted for variable providers only. This has not been saved.`;
     toast('Demo schedule is visible. Exit Demo restores the real schedule.','info',4500);
+    maybeAutoStartTour();
   }catch(e){
     console.error('demo mode error:',errStr(e),e);
     exitDemoMode({silent:true});
@@ -5733,6 +5766,7 @@ function _finalizeGeneratedQuarter(year,q,best){
   toast(`Generated Q${q} ${year} from 48 candidates (best variant ${best.seed+1})`,'success');
   trackEvent('schedule_generated',{year,quarter:q,candidate_count:48,best_variant:best.seed+1});
   setTimeout(recheckFairness, 100);  // auto-check fairness after generation
+  maybeAutoStartTour();
 }
 
 function snapshotBaseSchedule(year,q,lastDateStr=null){
@@ -5868,6 +5902,8 @@ function updateGenButton(){
     btn.textContent='Generate Schedule';
     btn.className='btn btn-p';
   }
+  // Demo sites show a numbered two-step flow: 1 · Fill Demo Requests → 2 · Generate
+  if(isDemoGroup()&&isAdmin())btn.textContent='2 · '+btn.textContent;
 }
 
 async function tryGenerateQuarter(){
@@ -6117,6 +6153,133 @@ function recheckFairness(){
   }
   document.getElementById('fairness-panel').style.display='block';
   toast(`Fairness check: ${flags.length} flag${flags.length!==1?'s':''}`,flags.length===0?'success':'info');
+}
+
+// ════════════════════════════════════════════════════════
+//  GUIDED TOUR — explains the generated schedule's markings by
+//  spotlighting real cells. Auto-shown once per browser session after a
+//  demo-context generation; always available via the Tutorial button.
+// ════════════════════════════════════════════════════════
+let tourSteps=[],tourIdx=0;
+const TOUR_SESSION_KEY='hs_tour_shown';
+function _tourCellSel(docId,ds){return `#pg-sched .sheet td.cell[data-doc="${docId}"][data-date="${ds}"]`;}
+function _tourSwatch(color,border){return `<span class="tour-swatch" style="background:${color};border:1px solid ${border||color}"></span>`;}
+function buildTourSteps(){
+  const steps=[];
+  if(!document.querySelector('#pg-sched .sheet'))return steps;
+  const year=S.ui.year,q=S.ui.quarter;
+  const qKey=`${year}-${q}`;
+  const reqs=S.requests[qKey]||{};
+
+  steps.push({sel:'#sheet-outer',title:'This schedule was built automatically',
+    body:`The engine generated 48 complete candidate schedules for Q${q} ${year}, scored each one on required days off, block structure, daily coverage, and workload fairness, and kept the best. Rows are providers, columns are days: <span class="sh sh-R">R</span> rounding, <span class="sh sh-S">S</span> swing/admitting, <span class="sh sh-H">H</span> holiday, blank = off.`});
+
+  // Find real request examples in the visible quarter
+  let reqHonored=null,reqConflict=null,optHonored=null,optMissed=null;
+  Object.entries(reqs).forEach(([docId,entry])=>{
+    if(!entry||typeof entry!=='object')return;
+    const required=Array.isArray(entry)?[]:(entry.required||[]);
+    const optional=Array.isArray(entry)?entry:(entry.optional||[]);
+    required.forEach(ds=>{
+      if(!document.querySelector(_tourCellSel(docId,ds)))return;
+      const sh=(S.sched[docId]&&S.sched[docId][ds])||'OFF';
+      if(sh==='OFF'||sh==='H'){if(!reqHonored)reqHonored={docId,ds};}
+      else if(!reqConflict)reqConflict={docId,ds};
+    });
+    optional.forEach(ds=>{
+      if(!document.querySelector(_tourCellSel(docId,ds)))return;
+      const sh=(S.sched[docId]&&S.sched[docId][ds])||'OFF';
+      if(sh==='OFF'||sh==='H'){if(!optHonored)optHonored={docId,ds};}
+      else if(!optMissed)optMissed={docId,ds};
+    });
+  });
+  if(reqHonored)steps.push({sel:_tourCellSel(reqHonored.docId,reqHonored.ds),title:'A REQUIRED day off — honored',
+    body:`${_tourSwatch('#d71920','#8b0000')}The solid red cell is a day this provider marked <strong>Required</strong> (trip, surgery — must be honored). It's empty because the engine left them off. Required days are the engine's highest priority: a candidate schedule that breaks one is effectively disqualified.`});
+  if(optHonored)steps.push({sel:_tourCellSel(optHonored.docId,optHonored.ds),title:'An OPTIONAL day off — honored',
+    body:`${_tourSwatch('#fff','#a8252a')}The thin red outline marks an <strong>Optional</strong> request — honor if possible. This one was honored. Optional days are weighed against coverage; providers whose past requests were missed get priority next time.`});
+  if(optMissed)steps.push({sel:_tourCellSel(optMissed.docId,optMissed.ds),title:'An OPTIONAL day off — not honored',
+    body:`${_tourSwatch('#ffb3b3','#7a0000')}This provider asked for this day off (optional), but coverage needed them, so they're scheduled. The miss raises their priority for future requests — the fairness system remembers.`});
+  if(reqConflict)steps.push({sel:_tourCellSel(reqConflict.docId,reqConflict.ds),title:'⚠ A REQUIRED day off — conflict',
+    body:`This provider is scheduled on a day they marked Required. The engine avoids this at all costs, so it usually means a manual edit or holiday assignment collided with the request. Fix it by clicking the cell to change the shift.`});
+
+  if(document.querySelector('#pg-sched .sheet thead th.staffing-issue'))
+    steps.push({sel:'#pg-sched .sheet thead th.staffing-issue',title:'Red outline = staffing gap',
+      body:`A red-outlined date doesn't match the daily coverage targets — a role is short or overstaffed. <strong>Click the date</strong> to see exactly which role is off and which providers are the fairest candidates to fix it. If the day is acceptable as-is, you can clear the flag from the same popup.`});
+
+  if(document.querySelector('#pg-sched .sheet tfoot tr.cov td.name-col'))
+    steps.push({sel:'#pg-sched .sheet tfoot tr.cov td.name-col',title:'Coverage counts, day by day',
+      body:`These bottom rows count who's actually scheduled for each role every day. ${_tourSwatch('#dff5e6','#0a7044')}green = exactly on target, ${_tourSwatch('#dfecf5','#1b4d8f')}blue = over, ${_tourSwatch('#fff5dc','#a85800')}amber = one short, ${_tourSwatch('#ffe0e0','#a01918')}red = two or more short.`});
+
+  if(document.querySelector('#pg-sched .sheet tbody td.name-col .qtot-inline'))
+    steps.push({sel:'#pg-sched .sheet tbody td.name-col',title:'Quarter totals and scheduling style',
+      body:`Each name shows the provider's quarter total against their FTE-scaled target (green on-target, amber under, red over) with the R/S breakdown. Badges mark the style: <strong>VARI</strong> = flexible with requests, <strong>7S</strong>/<strong>2S</strong> = strict 7-on/7-off.`});
+
+  if(document.getElementById('fairness-btn'))
+    steps.push({sel:'#fairness-btn',title:'Check fairness anytime',
+      body:`After manual edits, run the Fairness Check. It flags providers with unusually high or low totals, swing shifts, or weekend load (adjusted for FTE) and any unmet required requests.`});
+
+  steps.push({sel:'#sheet-outer',title:'Make it yours',
+    body:`Click any cell to cycle shifts, use the Fill buttons for bulk edits, and Undo to step back — the coverage rows update live. Save a named Version before big changes. Replay this walkthrough anytime with the <strong>Tutorial</strong> button.`});
+  return steps;
+}
+function startScheduleTour(){
+  if(!document.getElementById('pg-sched').classList.contains('on'))nav('sched');
+  tourSteps=buildTourSteps();
+  if(tourSteps.length<2){toast('Generate a schedule first, then start the tutorial.','info',3500);return;}
+  tourIdx=0;
+  document.getElementById('tour-overlay').style.display='block';
+  renderTourStep();
+  trackEvent('tour_started',{group_id:currentGroupId()});
+}
+function endScheduleTour(){
+  document.getElementById('tour-overlay').style.display='none';
+  tourSteps=[];
+}
+function tourNav(dir){
+  tourIdx+=dir;
+  if(tourIdx<0)tourIdx=0;
+  if(tourIdx>=tourSteps.length){endScheduleTour();return;}
+  renderTourStep();
+}
+function renderTourStep(){
+  const step=tourSteps[tourIdx];
+  if(!step)return;
+  const hl=document.getElementById('tour-highlight');
+  const card=document.getElementById('tour-card');
+  let el=step.sel?document.querySelector(step.sel):null;
+  if(!el)el=document.getElementById('sheet-outer');
+  try{el.scrollIntoView({block:'center',inline:'center',behavior:'auto'});}catch(e){}
+  const r=el.getBoundingClientRect();
+  const pad=4;
+  hl.style.top=(r.top-pad)+'px';
+  hl.style.left=(r.left-pad)+'px';
+  hl.style.width=(r.width+pad*2)+'px';
+  hl.style.height=(r.height+pad*2)+'px';
+  document.getElementById('tour-title').textContent=step.title;
+  document.getElementById('tour-body').innerHTML=step.body;
+  document.getElementById('tour-step-count').textContent=`${tourIdx+1} of ${tourSteps.length}`;
+  document.getElementById('tour-back').style.display=tourIdx>0?'':'none';
+  document.getElementById('tour-next').textContent=tourIdx===tourSteps.length-1?'Finish':'Next';
+  // Place the card below the highlight, or above if there's no room
+  card.style.visibility='hidden';
+  const ch=card.offsetHeight,cw=card.offsetWidth;
+  let top=r.bottom+pad+14;
+  if(top+ch>window.innerHeight-10)top=Math.max(10,r.top-ch-pad-14);
+  const left=Math.min(Math.max(10,r.left),Math.max(10,window.innerWidth-cw-10));
+  card.style.top=top+'px';
+  card.style.left=left+'px';
+  card.style.visibility='visible';
+}
+window.addEventListener('resize',()=>{if(tourSteps.length)renderTourStep();});
+// Auto-show once per browser session, only in demo contexts
+function maybeAutoStartTour(){
+  const demoContext=isDemoSessionUser()||isDemoGroup()||!!demoModeSnapshot;
+  if(!demoContext)return;
+  try{
+    if(sessionStorage.getItem(TOUR_SESSION_KEY))return;
+    sessionStorage.setItem(TOUR_SESSION_KEY,'1');
+  }catch(e){return;}
+  setTimeout(startScheduleTour,700);
 }
 
 // ════════════════════════════════════════════════════════

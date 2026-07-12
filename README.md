@@ -19,6 +19,7 @@ It is **not** a qGenda replacement — day-to-day operations (swaps, call, pagin
 - Temporary staffing overrides for high-census periods
 - Holiday auto-assignment: Thanksgiving/Christmas alternate year to year — never both in one year, never two Christmases in a row
 - Stress test and demo mode: simulate request loads to see when the schedule strains, or build a temporary throwaway schedule for presentations
+- Guided tutorial: a spotlight walkthrough of the generated schedule (honored/missed requests, staffing flags, coverage rows, fairness) — auto-shown once in demo modes, available anytime via the Tutorial button
 
 **For physicians and APPs**
 - Time-off request calendar: mark dates **Required** (must honor) or **Optional** (honor when possible), with per-quarter limits on totals, required days, and weekends enforced as you click
