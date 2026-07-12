@@ -30,6 +30,10 @@ It is **not** a qGenda replacement — day-to-day operations (swaps, call, pagin
 - Max 2 consecutive swing days for variable providers; rest day enforced after a swing stretch before returning to rounding
 - Daily coverage targets for rounders, admitters, nocturnists, and APP roles checked across the entire quarter
 - Workload balanced by FTE within the quarter and year-to-date, using base-schedule history (voluntary extra shifts don't count against anyone)
+- Part-time providers share the variable pool: same rest rules and request honoring, FTE-scaled workload (fewer blocks, not shorter ones)
+- APPs default to strict 7-on/7-off; an APP set to Variable joins the request-honoring variable pool with APP coverage targets
+- Rest and rotation rules hold across quarter boundaries — strict phases, swing-only rhythms, and variable rest carry over (no marathon stretches at the seam)
+- Holiday rotation enforced at request time: a provider who had last Christmas off cannot request the next one off
 
 ## Architecture
 
@@ -94,7 +98,7 @@ Host `index.html` on any static host (GitHub Pages, Netlify, S3, a hospital intr
 
 | Type | Behavior |
 |---|---|
-| Standard — Variable | The flexible pool; requests honored, 5–7 day R blocks with 1–2 day swing tails |
+| Standard — Variable | The flexible pool (any FTE); requests honored, 5–7 day R blocks with 1–2 day swing tails |
 | Standard — Strict 7-on/7-off (mixed) | Fixed rotation, 5R+2S pattern; requests disabled |
 | Standard — Strict 7-on/7-off (swing block) | Alternating full 7R / 7S weeks; requests disabled |
 | Nocturnist | Night coverage blocks, scheduled separately |
