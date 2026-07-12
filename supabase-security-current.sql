@@ -8,6 +8,13 @@
 -- The old custom users/password_hash login is intentionally not used.
 -- Review before running in an existing project because policy names may differ.
 
+-- LEGACY CLEANUP: the old custom-login table public.users (with password_hash)
+-- is completely unreferenced by the app and triggers Supabase RLS warnings.
+-- Dropping it is safe and good hygiene (it holds obsolete password hashes).
+-- Uncomment to remove it. NOTE: this is public.users only — auth.users is
+-- Supabase's built-in auth table and must never be dropped.
+-- drop table if exists public.users;
+
 create table if not exists groups (
   id text primary key,
   name text not null,
