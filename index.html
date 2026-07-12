@@ -840,6 +840,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
       <button class="btn btn-p" id="gen-btn" onclick="tryGenerateQuarter()">Generate Schedule</button>
       <button class="btn btn-sm" id="demo-requests-btn" onclick="fillDemoTimeOffRequests()" style="display:none">Fill Demo Requests</button>
       <button class="btn btn-sm" onclick="recheckFairness()" title="Check shift distribution fairness">Fairness Check</button>
+      <button class="btn btn-sm" onclick="exportScheduleExcel()" title="Download this quarter as an Excel file">Export Excel</button>
     </div>
   </div>
   <div id="gen-progress" class="card" style="display:none;margin-bottom:12px;padding:10px 12px">
@@ -3097,6 +3098,105 @@ function confirmResetGroup(){
       trackEvent('group_reset',{group_id:currentGroupId()});
     }
   );
+}
+
+// ── Excel export ─────────────────────────────────────────
+// Builds a workbook for one quarter: a Schedule sheet mirroring the on-screen
+// grid (provider rows, one column per day, section headers, coverage counts)
+// and a Totals sheet with per-provider shift counts vs target.
+function buildScheduleWorkbook(year,q){
+  const days=quarterDays(year,q);
+  const allDocs=activeDocs(year);
+  const consultDocs=allDocs.filter(isMedicalDirectorDoc).sort(providerSort);
+  const rotationDocs=allDocs.filter(d=>!isMedicalDirectorDoc(d)&&d.type!=='nocturnist'&&d.type!=='prn'&&!isAppProvider(d)).sort(providerSort);
+  const nocturnistDocs=allDocs.filter(d=>d.type==='nocturnist'&&!isAppProvider(d)).sort(providerSort);
+  const appDocs=allDocs.filter(d=>!isMedicalDirectorDoc(d)&&d.type!=='prn'&&isAppProvider(d)).sort(providerSort);
+  const prnDocs=allDocs.filter(d=>d.type==='prn').sort(providerSort);
+
+  const cellLabel=sh=>sh==='OFF'||!sh?'':(sh==='APP_NS'?'NA':sh==='APP_NX'?'NX':sh);
+  const shiftAt=(docId,ds)=>(S.sched[docId]&&S.sched[docId][ds])||'OFF';
+
+  const header=['Provider','Role','Type','FTE',...days.map(d=>`${monAbbr(d.getMonth())} ${d.getDate()} ${dayN(d)}`)];
+  const rows=[header];
+  const addSection=(label,docs)=>{
+    if(!docs.length)return;
+    rows.push([`── ${label} ──`]);
+    docs.forEach(doc=>{
+      rows.push([
+        dname(doc),
+        providerRoleLabel(doc),
+        providerTypeLabel(doc),
+        fteValue(doc),
+        ...days.map(d=>cellLabel(shiftAt(doc.id,dstrD(d))))
+      ]);
+    });
+  };
+  addSection('Medical Director / Leadership',consultDocs);
+  addSection('Rounding Providers',rotationDocs);
+  addSection('Nocturnists',nocturnistDocs);
+  addSection('APP Providers',appDocs);
+  addSection('PRN / Per Diem (filled manually)',prnDocs);
+
+  // Daily coverage counts, same definitions as the on-screen footer
+  rows.push([]);
+  const covRow=(label,countFn)=>rows.push([label,'','','',...days.map(d=>countFn(dstrD(d)))]);
+  covRow('MD/DO Rounders',ds=>allDocs.filter(doc=>!isAppProvider(doc)&&!isMedicalDirectorDoc(doc)&&shiftAt(doc.id,ds)==='R').length);
+  covRow('MD/DO Swing',ds=>allDocs.filter(doc=>!isAppProvider(doc)&&!isMedicalDirectorDoc(doc)&&['S','H'].includes(shiftAt(doc.id,ds))).length);
+  covRow('Nocturnists',ds=>allDocs.filter(doc=>!isAppProvider(doc)&&shiftAt(doc.id,ds)==='N').length);
+  covRow('APP Rounders',ds=>allDocs.filter(doc=>isAppProvider(doc)&&doc.type!=='prn'&&shiftAt(doc.id,ds)==='R').length);
+  covRow('APP Admitters',ds=>allDocs.filter(doc=>isAppProvider(doc)&&doc.type!=='prn'&&['S','H'].includes(shiftAt(doc.id,ds))).length);
+  covRow('Target: MD/DO Rounders',ds=>physicianRounderTargetForDate(ds));
+  covRow('Target: MD/DO Swing',ds=>admitterTargetForDate(ds));
+
+  const ws=XLSX.utils.aoa_to_sheet(rows);
+  ws['!cols']=[{wch:24},{wch:6},{wch:18},{wch:5},...days.map(()=>({wch:5}))];
+
+  // Totals sheet
+  const totalsHeader=['Provider','Role','Type','FTE','R','S','N','X','H','Weekend','Total','Quarter Target'];
+  const totalsRows=[totalsHeader];
+  [...consultDocs,...rotationDocs,...nocturnistDocs,...appDocs,...prnDocs].forEach(doc=>{
+    let r=0,s=0,n=0,x=0,h=0,wk=0;
+    days.forEach(d=>{
+      const sh=shiftAt(doc.id,dstrD(d));
+      if(sh==='R')r++;
+      else if(sh==='S')s++;
+      else if(sh==='N'||sh==='APP_NS'||sh==='APP_NX')n++;
+      else if(sh==='X')x++;
+      else if(sh==='H')h++;
+      if(sh!=='OFF'&&isWeekend(d))wk++;
+    });
+    const total=r+s+n+x+h;
+    totalsRows.push([dname(doc),providerRoleLabel(doc),providerTypeLabel(doc),fteValue(doc),r,s,n,x,h,wk,total,Math.round(fteValue(doc)*(S.cfg.annual||182)/4)]);
+  });
+  const wsTotals=XLSX.utils.aoa_to_sheet(totalsRows);
+  wsTotals['!cols']=totalsHeader.map((hd,i)=>({wch:i===0?24:i===2?18:8}));
+
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,`Schedule Q${q} ${year}`);
+  XLSX.utils.book_append_sheet(wb,wsTotals,'Totals');
+  return wb;
+}
+
+function exportScheduleExcel(){
+  if(typeof XLSX==='undefined'){
+    toast('Excel library did not load. Check your internet connection and refresh.','error',5000);
+    return;
+  }
+  const year=parseInt(document.getElementById('yr-sel')?.value,10)||S.ui.year;
+  const q=parseInt(document.getElementById('q-sel')?.value,10)||S.ui.quarter;
+  if(!activeDocs(year).length){
+    toast('No providers to export. Import qGenda or add providers first.','error');
+    return;
+  }
+  try{
+    const wb=buildScheduleWorkbook(year,q);
+    XLSX.writeFile(wb,`hospitalist-schedule-${currentGroupId()}-${year}-Q${q}.xlsx`);
+    toast(`Exported Q${q} ${year} schedule to Excel`,'success');
+    trackEvent('excel_exported',{year,quarter:q,group_id:currentGroupId()});
+  }catch(e){
+    console.error('exportScheduleExcel error:',errStr(e),e);
+    toast('Excel export failed: '+errStr(e),'error',5000);
+  }
 }
 
 function exportData(){

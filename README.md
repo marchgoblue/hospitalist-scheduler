@@ -11,6 +11,7 @@ It is **not** a qGenda replacement — day-to-day operations (swaps, call, pagin
 **For scheduling staff (admin)**
 - One-click quarterly generation — 48 scored candidates, best one wins
 - Excel-style schedule grid: click any cell to change a shift, fill modes for bulk edits, undo, name-column resize, search filter
+- One-click Excel export: the quarter grid (with daily coverage counts) plus a per-provider totals sheet as a .xlsx download
 - Staffing gap detection: short/overstaffed days flagged in red; click a date to see which shift is off and the fairest candidate providers to fix it
 - Fairness dashboard: flags outliers in total shifts, swing shifts, weekend load, and unmet required requests (FTE-adjusted)
 - qGenda Excel import (Calendar by Task): bootstraps a new site's roster and reconciles actual worked shifts each quarter
