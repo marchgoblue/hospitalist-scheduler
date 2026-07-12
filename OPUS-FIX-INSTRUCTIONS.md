@@ -1,5 +1,17 @@
 # Bug-Fix Instructions — Hospitalist Scheduler
 
+> **STATUS (July 2026): APPLIED.** All Priority 1 and Priority 2 items below, and
+> Priority 3 items 3.1–3.8, were implemented on branch
+> `claude/code-review-recommendations-cbtqkb`. Item 1.3 used the preferred
+> `time_off_requests` table approach; item 2.8 implemented the relaxed 3+ R rule
+> (run the built-in Stress Test to confirm shortage counts before relying on it).
+> Additional fixes beyond this list: a `profiles` column-level-grant fix for a
+> privilege-escalation hole, a save guard after failed loads, optimistic
+> concurrency on saves, the qGenda parser's hardcoded "Athens" break generalized,
+> and the xlsx library upgraded to 0.20.3 with an SRI hash.
+> **Re-run `supabase-security-current.sql` in each Supabase project.**
+> This file is kept for historical reference.
+
 Paste this file (or its sections) into Claude Opus as the task prompt. Context: the entire
 app is a single `index.html` (~8,000 lines, vanilla JS + Supabase via raw REST fetch) plus
 `supabase-security-current.sql` (RLS reference). App state is one JSON blob `S` saved whole

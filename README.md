@@ -11,6 +11,7 @@ It is **not** a qGenda replacement — day-to-day operations (swaps, call, pagin
 **For scheduling staff (admin)**
 - One-click quarterly generation — 48 scored candidates, best one wins
 - Excel-style schedule grid: click any cell to change a shift, fill modes for bulk edits, undo, name-column resize, search filter
+- One-click Excel export: the quarter grid (with daily coverage counts) plus a per-provider totals sheet as a .xlsx download
 - Staffing gap detection: short/overstaffed days flagged in red; click a date to see which shift is off and the fairest candidate providers to fix it
 - Fairness dashboard: flags outliers in total shifts, swing shifts, weekend load, and unmet required requests (FTE-adjusted)
 - qGenda Excel import (Calendar by Task): bootstraps a new site's roster and reconciles actual worked shifts each quarter
@@ -30,6 +31,10 @@ It is **not** a qGenda replacement — day-to-day operations (swaps, call, pagin
 - Max 2 consecutive swing days for variable providers; rest day enforced after a swing stretch before returning to rounding
 - Daily coverage targets for rounders, admitters, nocturnists, and APP roles checked across the entire quarter
 - Workload balanced by FTE within the quarter and year-to-date, using base-schedule history (voluntary extra shifts don't count against anyone)
+- Part-time providers share the variable pool: same rest rules and request honoring, FTE-scaled workload (fewer blocks, not shorter ones)
+- APPs default to strict 7-on/7-off; an APP set to Variable joins the request-honoring variable pool with APP coverage targets
+- Rest and rotation rules hold across quarter boundaries — strict phases, swing-only rhythms, and variable rest carry over (no marathon stretches at the seam)
+- Holiday rotation enforced at request time: a provider who had last Christmas off cannot request the next one off
 
 ## Architecture
 
@@ -94,7 +99,7 @@ Host `index.html` on any static host (GitHub Pages, Netlify, S3, a hospital intr
 
 | Type | Behavior |
 |---|---|
-| Standard — Variable | The flexible pool; requests honored, 5–7 day R blocks with 1–2 day swing tails |
+| Standard — Variable | The flexible pool (any FTE); requests honored, 5–7 day R blocks with 1–2 day swing tails |
 | Standard — Strict 7-on/7-off (mixed) | Fixed rotation, 5R+2S pattern; requests disabled |
 | Standard — Strict 7-on/7-off (swing block) | Alternating full 7R / 7S weeks; requests disabled |
 | Nocturnist | Night coverage blocks, scheduled separately |
@@ -104,11 +109,12 @@ Host `index.html` on any static host (GitHub Pages, Netlify, S3, a hospital intr
 
 ## Project status
 
-Functional and in active use; currently being hardened for broader rollout. Known issues and the prioritized fix list live in [OPUS-FIX-INSTRUCTIONS.md](OPUS-FIX-INSTRUCTIONS.md). Notable near-term items:
+Functional and in active use; currently being hardened for broader rollout. The prioritized fix list in [OPUS-FIX-INSTRUCTIONS.md](OPUS-FIX-INSTRUCTIONS.md) has been applied (see the status header in that file). Notable recent changes:
 
-- Move physician request submission to its own table (RLS currently limits `schedule_data` writes to admins)
-- Generate quarter/year dropdowns dynamically (hardcoded lists end at 2026 Q4)
-- Apply manual name-match corrections in the qGenda import for already-auto-matched providers
+- Physician request submission now writes to its own `time_off_requests` table (RLS limits `schedule_data` writes to admins); rows are merged into app state on load
+- Quarter/year dropdowns are generated dynamically from the current date (the old hardcoded lists ended at 2026 Q4)
+- Saves now use optimistic concurrency (a concurrent admin's save triggers a reload instead of being silently overwritten), and saving is blocked after a failed load so defaults can never overwrite real data
+- **Deployments must re-run `supabase-security-current.sql`**: it adds the `time_off_requests` table and — critically — column-level grants on `profiles` that close a privilege-escalation hole (any authenticated user could previously set their own `is_master_admin` flag via the REST API)
 
 ## Development notes
 

@@ -22,6 +22,12 @@ create table if not exists profiles (
   created_at timestamptz not null default now()
 );
 
+-- Columns the app reads for master-admin logins (default group targeting).
+alter table profiles
+  add column if not exists doc_id text,
+  add column if not exists group_id text,
+  add column if not exists group_name text;
+
 create table if not exists memberships (
   user_id uuid not null references auth.users(id) on delete cascade,
   group_id text not null references groups(id) on update cascade on delete cascade,
@@ -104,6 +110,16 @@ on profiles for update
 using (user_id = auth.uid() or public.is_master_admin())
 with check (user_id = auth.uid() or public.is_master_admin());
 
+-- CRITICAL: RLS policies control *rows*, not *columns*. Without the grants
+-- below, any authenticated user could PATCH their own profiles row and set
+-- is_master_admin = true, gaining full read/write access to every group
+-- (all helper functions short-circuit on is_master_admin()). Restrict
+-- updates from the API to harmless columns only; role/group changes must go
+-- through the dashboard or service role.
+revoke update on table public.profiles from authenticated;
+revoke update on table public.profiles from anon;
+grant update (display_name) on table public.profiles to authenticated;
+
 drop policy if exists memberships_select_relevant on memberships;
 create policy memberships_select_relevant
 on memberships for select
@@ -151,6 +167,63 @@ create policy versions_write_admin
 on versions for all
 using (public.is_group_admin(group_id))
 with check (public.is_group_admin(group_id));
+
+-- Physician time-off requests. schedule_data is admin-write-only, so
+-- physician logins persist their requests here; the app merges these rows
+-- into its in-memory request state on load. One row per provider/quarter.
+create table if not exists time_off_requests (
+  group_id text not null references groups(id) on update cascade on delete cascade,
+  doc_id text not null,
+  quarter_key text not null,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  required jsonb not null default '[]'::jsonb,
+  optional jsonb not null default '[]'::jsonb,
+  submitted_at timestamptz,
+  updated_at timestamptz not null default now(),
+  primary key (group_id, doc_id, quarter_key)
+);
+
+create index if not exists time_off_requests_group_idx on time_off_requests(group_id);
+create index if not exists time_off_requests_user_idx on time_off_requests(user_id);
+
+alter table time_off_requests enable row level security;
+
+-- Group members (and admins/master) can read all requests in their group.
+drop policy if exists time_off_requests_select_member on time_off_requests;
+create policy time_off_requests_select_member
+on time_off_requests for select
+using (public.is_group_member(group_id));
+
+-- A user may write only their own rows, and only for the provider (doc_id)
+-- their membership links them to. Group admins may write any row in their
+-- group (e.g. entering requests on a physician's behalf).
+drop policy if exists time_off_requests_write_own on time_off_requests;
+create policy time_off_requests_write_own
+on time_off_requests for all
+using (
+  public.is_group_admin(group_id)
+  or (
+    user_id = auth.uid()
+    and exists (
+      select 1 from memberships m
+      where m.user_id = auth.uid()
+        and m.group_id = time_off_requests.group_id
+        and m.doc_id = time_off_requests.doc_id
+    )
+  )
+)
+with check (
+  public.is_group_admin(group_id)
+  or (
+    user_id = auth.uid()
+    and exists (
+      select 1 from memberships m
+      where m.user_id = auth.uid()
+        and m.group_id = time_off_requests.group_id
+        and m.doc_id = time_off_requests.doc_id
+    )
+  )
+);
 
 create table if not exists activity_events (
   id bigint generated always as identity primary key,

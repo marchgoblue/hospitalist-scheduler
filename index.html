@@ -6,7 +6,7 @@
 <title>Hospitalist Scheduler</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23102a4c'/%3E%3Crect x='7' y='9' width='18' height='16' rx='2' fill='none' stroke='%23ffffff' stroke-width='2'/%3E%3Cline x1='7' y1='14' x2='25' y2='14' stroke='%23ffffff' stroke-width='2'/%3E%3Cline x1='11' y1='6' x2='11' y2='10' stroke='%23ffffff' stroke-width='2' stroke-linecap='round'/%3E%3Cline x1='21' y1='6' x2='21' y2='10' stroke='%23ffffff' stroke-width='2' stroke-linecap='round'/%3E%3Crect x='11' y='17' width='4' height='4' fill='%237fb3ff'/%3E%3C/svg%3E">
 <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js" integrity="sha384-EnyY0/GSHQGSxSgMwaIPzSESbqoOLSexfnSMN2AP+39Ckmn92stwABZynq1JyzdT" crossorigin="anonymous"></script>
 <script>
 // ══════════════════════════════════════════════════════
 //  DATABASE CONFIG — direct REST fetch (no client library, avoids DataCloneError)
@@ -179,36 +179,6 @@ async function authSignOut(){
   try{await _authFetch('/auth/v1/logout',{method:'POST'});}catch(e){console.warn('Auth signout warning:',errStr(e));}
 }
 
-// getSB() returns a compatibility shim so all existing call sites work unchanged
-function getSB(){
-  return {
-    from(table){
-      return {
-        select(){ return {
-          eq(col,val){ return {
-            async single(){
-              try {
-                const rows = await _sbGet(table, {[col]:val});
-                if(!rows||rows.length===0) return {data:null,error:{code:'PGRST116',message:'Not found'}};
-                return {data:rows[0], error:null};
-              } catch(e){ return {data:null, error:{message:e.message}}; }
-            }
-          }}
-        }},
-        async upsert(data){
-          try { await _sbUpsert(table, data); return {error:null}; }
-          catch(e){ return {error:{message:e.message}}; }
-        },
-        update(data){ return {
-          eq(col,val){ return (async()=>{
-            try { await _sbPatch(table,{[col]:val},data); return {error:null}; }
-            catch(e){ return {error:{message:e.message}}; }
-          })(); }
-        }}
-      };
-    }
-  };
-}
 // Safe error stringifier — handles Error objects, Supabase error objects, strings
 function errStr(e){
   if(!e) return 'unknown error';
@@ -746,7 +716,22 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
   .qg-import-grid,.qg-guide-layout{grid-template-columns:1fr}
 }
 
-/* PRINT *//* PRINT */
+/* MOBILE — physician portal pages are opened on phones */
+@media(max-width:640px){
+  .pg{padding:12px 10px}
+  .g2{grid-template-columns:1fr}
+  .phys-page-hdr{margin:-12px -10px 16px -10px;padding:12px 14px;gap:10px}
+  .phys-page-hdr-nav{width:100%}
+  .phys-nav-btn{flex:1;padding:8px 10px;font-size:12px}
+  .phys-page-hdr-right{width:100%;justify-content:flex-start!important}
+  .req-cal-day{min-height:38px;padding:4px 2px}
+  .doc-cal-row{grid-template-columns:1fr}
+  #hdr{padding:0 10px}
+  .brand{min-width:0;padding-right:10px}
+}
+
+/* PRINT */
+@page{size:landscape}
 @media print{
   body{background:#fff!important}
   #hdr,.no-print,.toolbar{display:none!important}
@@ -825,7 +810,6 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
       <button class="on" id="r-admin" onclick="switchRole('admin')">Admin</button>
       <button id="r-phys" onclick="switchRole('phys')">Physician</button>
     </div>
-    <select id="phys-pick" style="display:none;width:160px" onchange="onPhysPick()"></select>
     <select id="site-pick" style="display:none;width:190px" onchange="onSitePick()" title="Select hospitalist site"></select>
     <button class="btn btn-sm" onclick="window.print()">Print</button>
     <span id="user-display" style="font-size:12px;color:#d6e2f0;font-weight:600;margin-right:4px"></span>
@@ -846,9 +830,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
       <p class="tx-sm tx-mu" id="quarter-info">Select a quarter and generate.</p>
     </div>
     <div class="fl">
-      <select id="yr-sel" style="width:90px" onchange="updateQuarterInfo()">
-        <option>2025</option><option>2026</option><option>2027</option>
-      </select>
+      <select id="yr-sel" style="width:90px" onchange="updateQuarterInfo()"></select>
       <select id="q-sel" style="width:150px" onchange="updateQuarterInfo()">
         <option value="1">Q1 · Jan–Mar</option>
         <option value="2">Q2 · Apr–Jun</option>
@@ -858,6 +840,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
       <button class="btn btn-p" id="gen-btn" onclick="tryGenerateQuarter()">Generate Schedule</button>
       <button class="btn btn-sm" id="demo-requests-btn" onclick="fillDemoTimeOffRequests()" style="display:none">Fill Demo Requests</button>
       <button class="btn btn-sm" onclick="recheckFairness()" title="Check shift distribution fairness">Fairness Check</button>
+      <button class="btn btn-sm" onclick="exportScheduleExcel()" title="Download this quarter as an Excel file">Export Excel</button>
     </div>
   </div>
   <div id="gen-progress" class="card" style="display:none;margin-bottom:12px;padding:10px 12px">
@@ -894,13 +877,13 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
     </div>
     <div class="tb-group">
       <span class="tb-label">Legend</span>
-      <span class="sh sh-R">R</span><span class="tx-xs tx-mu">Rounding 7a–5p</span>
-      <span class="sh sh-S">S</span><span class="tx-xs tx-mu">Swing 3p–1a</span>
+      <span class="sh sh-R">R</span><span class="tx-xs tx-mu">Rounding</span>
+      <span class="sh sh-S">S</span><span class="tx-xs tx-mu">Swing / Admit</span>
       <span class="sh sh-H">H</span><span class="tx-xs tx-mu">Holiday</span>
       <span class="sh" style="background:#e8f0fe;color:#244b7a;border:1px solid #b8c8e8">X</span><span class="tx-xs tx-mu">Cross Coverage</span>
     </div>
     <div class="tb-group" style="margin-left:auto">
-      <span class="tb-label" id="fill-mode-label">Click cell to cycle R→S→N→OFF · Double-click name to open</span>
+      <span class="tb-label" id="fill-mode-label">Click cell to cycle R→S→N→X→OFF · Double-click name to open</span>
     </div>
   </div>
 
@@ -960,16 +943,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
       <p class="tx-sm tx-mu">Review submitted requests for the upcoming quarter.</p>
     </div>
     <div class="fl">
-      <select id="req-q-sel" onchange="renderRequestsAdmin()">
-        <option value="2025-1">2025 Q1</option>
-        <option value="2025-2">2025 Q2</option>
-        <option value="2025-3">2025 Q3</option>
-        <option value="2025-4">2025 Q4</option>
-        <option value="2026-1">2026 Q1</option>
-        <option value="2026-2">2026 Q2</option>
-        <option value="2026-3">2026 Q3</option>
-        <option value="2026-4">2026 Q4</option>
-      </select>
+      <select id="req-q-sel" onchange="renderRequestsAdmin()"></select>
     </div>
   </div>
 
@@ -1010,9 +984,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
   <div class="fb mb">
     <h1>Holiday Assignments</h1>
     <div class="fl">
-      <select id="hol-yr" onchange="renderHolidayTable()">
-        <option selected>2026</option><option>2027</option><option>2028</option>
-      </select>
+      <select id="hol-yr" onchange="renderHolidayTable()"></select>
       <button class="btn btn-p btn-sm" onclick="autoAssignHolidays()">Auto-Assign</button>
     </div>
   </div>
@@ -1285,16 +1257,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
       <p class="tx-sm tx-mu">Select dates you <strong>cannot work</strong> in the upcoming quarter. Use <strong style="color:#a01918">Required</strong> for must-honor requests and <strong style="color:#806000">Optional</strong> for flexible preferences.</p>
     </div>
     <div class="fl">
-      <select id="myq-sel" onchange="renderMyRequestCal()">
-        <option value="2025-1">2025 Q1 (Jan–Mar)</option>
-        <option value="2025-2">2025 Q2 (Apr–Jun)</option>
-        <option value="2025-3">2025 Q3 (Jul–Sep)</option>
-        <option value="2025-4">2025 Q4 (Oct–Dec)</option>
-        <option value="2026-1">2026 Q1 (Jan–Mar)</option>
-        <option value="2026-2">2026 Q2 (Apr–Jun)</option>
-        <option value="2026-3">2026 Q3 (Jul–Sep)</option>
-        <option value="2026-4">2026 Q4 (Oct–Dec)</option>
-      </select>
+      <select id="myq-sel" onchange="renderMyRequestCal()"></select>
     </div>
   </div>
 
@@ -1326,9 +1289,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
           <span><strong>OPTIONAL</strong> — flexible, honor if possible</span>
         </label>
       </div>
-      <div class="tx-xs tx-mu mb">
-        <strong>Rules:</strong> Maximum <strong>20 OFF dates per quarter</strong>. Of those, no more than <strong>6 can span weekends</strong>. Required dates count toward both limits.
-      </div>
+      <div class="tx-xs tx-mu mb" id="req-rules-text"></div>
       <div id="my-req-list"><div class="tx-mu tx-sm">No dates selected yet. Choose Required or Optional above, then click days on the calendar.</div></div>
       <div class="fl mt" id="req-action-area">
         <button class="btn btn-p btn-sm" onclick="submitMyRequests()">Submit Requests</button>
@@ -1367,8 +1328,8 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
   </div>
   <span style="display:none" id="my-name-lbl"></span>
   <div id="my-schd-content"><div class="tx-mu tx-sm" style="padding:40px;text-align:center">Schedule not generated yet. Ask your admin to generate the schedule.</div></div>
-  <div style="padding:16px 24px;border-top:1px solid rgba(255,255,255,.2)">
-    <button class="phys-nav-btn" onclick="showChangePasswordModal()" style="font-size:12px;padding:6px 14px">Change My Password</button>
+  <div style="padding:16px 24px;border-top:1px solid var(--line)">
+    <button class="btn btn-sm" onclick="showChangePasswordModal()">Change My Password</button>
   </div>
 </div>
 
@@ -1518,7 +1479,11 @@ document.addEventListener('click',ev=>{
   if(pop&&pop.style.display!=='none'&&!pop.contains(ev.target)&&!ev.target.closest('.col-hdr'))closeStaffingPopover();
 });
 document.addEventListener('keydown',ev=>{
-  if(ev.key==='Escape')closeStaffingPopover();
+  if(ev.key==='Escape'){
+    closeStaffingPopover();
+    const modal=document.getElementById('modal');
+    if(modal&&modal.style.display!=='none')modal.style.display='none';
+  }
 });
 
 function navSettings(p){
@@ -1550,10 +1515,21 @@ function updateHeaderForUser(){
   if(brand)brand.textContent=group;
   if(mark)mark.textContent=groupInitials(group);
   el.textContent=isAdmin()?`${currentUser.username} (Admin)`:`${currentUser.username}`;
+  // Physician logins stay in the physician portal — no admin-view browsing
+  const roleSwitch=document.querySelector('.role-switch');
+  if(roleSwitch)roleSwitch.style.display=isPhysician()?'none':'flex';
   updateSettingsMenuVisibility();
   renderSitePicker();
 }
 
+// Guard rails around the shared state blob:
+// - loadFailed blocks saves after a failed load so a near-empty default state
+//   can never overwrite a group's real data.
+// - lastLoadedUpdatedAt enables optimistic concurrency: the save only lands if
+//   nobody else wrote the row since we last read it (last-writer-wins otherwise
+//   silently destroys a concurrent admin's edits).
+let loadFailed=false;
+let lastLoadedUpdatedAt=null;
 async function saveData(silent=false){
   if(!currentUser){toast('Not logged in','error');return;}
   if(isDemoSessionUser()){
@@ -1573,14 +1549,85 @@ async function saveData(silent=false){
     if(!silent)toast('Demo mode is temporary. Exit Demo before saving real changes.','info',3500);
     return;
   }
+  if(loadFailed){
+    setSyncStatus('error');
+    toast('Saving is disabled because the last data load failed — saving now could erase this site\'s data. Reload the page to try again.','error',7000);
+    return;
+  }
   if(isSaving){pendingSave=true;return;}
   isSaving=true;setSyncStatus('saving');
   try{
-    await _sbUpsert('schedule_data',{id:currentScheduleRowId(),data:JSON.stringify(S),updated_at:new Date().toISOString()});
+    const rowId=currentScheduleRowId();
+    const body=JSON.stringify(S);
+    const now=new Date().toISOString();
+    let rows;
+    if(lastLoadedUpdatedAt){
+      rows=await _sbFetch(`/rest/v1/schedule_data?id=eq.${encodeURIComponent(rowId)}&updated_at=eq.${encodeURIComponent(lastLoadedUpdatedAt)}`,{
+        method:'PATCH',
+        headers:{'Prefer':'return=representation'},
+        body:JSON.stringify({data:body,updated_at:now})
+      });
+      if(!rows||!rows.length){
+        // Someone else saved since our last load — reload rather than clobber.
+        setSyncStatus('error');
+        toast('Another session saved changes to this site. Loading the latest data — please reapply your last edit.','error',8000);
+        await loadData();
+        renderSchedule();
+        return;
+      }
+    }else{
+      rows=await _sbFetch('/rest/v1/schedule_data',{
+        method:'POST',
+        headers:{'Prefer':'resolution=merge-duplicates,return=representation'},
+        body:JSON.stringify({id:rowId,data:body,updated_at:now})
+      });
+    }
+    if(rows&&rows.length&&rows[0].updated_at){
+      lastLoadedUpdatedAt=rows[0].updated_at;
+      lastSyncTime=new Date(rows[0].updated_at).getTime();
+    }
     setSyncStatus('saved');
     if(isAdmin()&&!silent)toast('Saved','success');
   }catch(e){console.error('saveData error:',errStr(e),e);setSyncStatus('error');toast('Save failed: '+errStr(e),'error');}
   finally{isSaving=false;if(pendingSave){pendingSave=false;saveData(silent);}}
+}
+
+// Physician time-off requests live in their own table (RLS: physicians write
+// their own rows) because schedule_data is admin-write-only. Rows are merged
+// into S.requests on load so all rendering/generation code is untouched.
+async function savePhysicianRequestRow(quarterKey,docId,required,optional,submittedAt=new Date().toISOString()){
+  await _sbUpsert('time_off_requests',{
+    user_id:currentUser.userId,
+    group_id:currentGroupId(),
+    doc_id:docId,
+    quarter_key:quarterKey,
+    required,
+    optional,
+    submitted_at:submittedAt
+  });
+}
+async function loadPhysicianRequestRows(){
+  try{
+    const rows=await _sbGet('time_off_requests',{group_id:currentGroupId()});
+    (rows||[]).forEach(row=>{
+      if(!row||!row.quarter_key||!row.doc_id)return;
+      if(!S.requests[row.quarter_key])S.requests[row.quarter_key]={};
+      S.requests[row.quarter_key][row.doc_id]={
+        required:Array.isArray(row.required)?row.required:[],
+        optional:Array.isArray(row.optional)?row.optional:[]
+      };
+      const subKey=row.quarter_key+'_submitted';
+      if(row.submitted_at){
+        if(!S.requests[subKey])S.requests[subKey]={};
+        S.requests[subKey][row.doc_id]=row.submitted_at;
+      }else if(S.requests[subKey]){
+        delete S.requests[subKey][row.doc_id];
+      }
+    });
+  }catch(e){
+    // Table may not exist in older deployments — degrade to blob-only requests.
+    console.warn('time_off_requests load skipped:',errStr(e));
+  }
 }
 
 async function loadData(){
@@ -1623,14 +1670,21 @@ async function loadData(){
     const rows = await _sbGet('schedule_data', {id: currentScheduleRowId()});
     if(rows && rows.length > 0 && rows[0].data){
       S = {...S, ...JSON.parse(rows[0].data)};
+      lastLoadedUpdatedAt = rows[0].updated_at || null;
+    } else {
+      lastLoadedUpdatedAt = null;
     }
+    loadFailed = false;
     setSyncStatus(isDemoSessionUser()?'session':'synced');
   } catch(e){
     console.error('loadData error:', errStr(e), e);
+    // Block saves until a successful reload — otherwise the next autosave
+    // would overwrite the group's real data with this default/empty state.
+    loadFailed = true;
     setSyncStatus('error');
-    // Non-fatal — proceed with default/empty state so app still loads
-    toast('Database load failed: ' + errStr(e), 'error');
+    toast('Database load failed: ' + errStr(e) + ' — viewing defaults; saving is disabled until reload.', 'error', 8000);
   }
+  if(!loadFailed && currentUser && !isDemoSessionUser()) await loadPhysicianRequestRows();
   applyMigrations();
   if(isDemoGroup()&&await ensureDemoHistoricalSchedule()){
     if(demoKey){
@@ -1856,8 +1910,6 @@ function applyMigrations(){
   if(!S.ui)S.ui={};
   if(S.ui.currentPhysId&&!S.docs.find(d=>d.id===S.ui.currentPhysId))S.ui.currentPhysId=null;
   S.ui.selectedRow=null;S.ui.selectedCols=new Set();S.ui.fillMode=null;
-  const u={odeyinka:{first:'Oladipo'},chapagain:{first:'Sudeep'},walls:{type:'nocturnist',title:'Nocturnist'},ahmadani:{type:'nocturnist',title:'Nocturnist'},tahir:{type:'weekday-only'}};
-  Object.entries(u).forEach(([id,p])=>{const d=S.docs.find(d=>d.id===id);if(d)Object.assign(d,p);});
   S.docs.forEach(d=>{d.role=normalizeRole(d.role);});
   S.docs.forEach(normalizeProviderDefaults);
   S.ui.staffingFocus=null;
@@ -1886,7 +1938,7 @@ async function pollForChanges(){
       }
       lastSyncTime=t;
     }
-  }catch(e){}
+  }catch(e){console.warn('pollForChanges failed:',errStr(e));}
 }
 setInterval(pollForChanges,30000);
 
@@ -2368,12 +2420,14 @@ function parseQgendaWorkbook(wb, filename){
         }
       }
 
-      // Read data rows until the next "Monday" row or "Athens" group header
+      // Read data rows until the next "Monday" row or a section/group header
+      // (a row where only the first cell is populated, e.g. a site name).
       let j=i+2;
       while(j<rows.length){
         const dRow=rows[j];
         const first=String(dRow[0]||'').trim();
-        if(first==='Monday'||first==='Athens') break;
+        if(first==='Monday') break;
+        if(first&&dRow.slice(1).every(c=>!String(c||'').trim())) break;
 
         // Each day: cols [d*2] = shift name, [d*2+1] = provider name
         for(let d=0;d<7;d++){
@@ -2542,7 +2596,7 @@ function showQgendaMapModal(records, filename, totalParsed, totalIgnored, unknow
     const addOpt=(isUnmatched||onboardingEmptyRoster)?`<option value="__add__" ${onboardingEmptyRoster?'selected':''} style="color:#0a7044;font-weight:700">+ Add as new provider</option>`:'';
     const opts=addOpt+`<option value="">— skip —</option>`+
       S.docs.filter(d=>d.active).sort((a,b)=>providerGridRank(a)-providerGridRank(b)||providerSort(a,b))
-        .map(d=>`<option value="${d.id}" ${matched===d.id?'selected':''}>${d.last}, ${d.first}</option>`).join('');
+        .map(d=>`<option value="${qgEsc(d.id)}" ${matched===d.id?'selected':''}>${qgEsc(d.last)}, ${qgEsc(d.first)}</option>`).join('');
     const cls=(matched||onboardingEmptyRoster)?'matched':'unmatched';
     const count=displayRecords.filter(r=>r.rawName===rawName).length;
     const safeId=rawName.replace(/[^a-zA-Z0-9]/g,'_');
@@ -2570,7 +2624,7 @@ function showQgendaMapModal(records, filename, totalParsed, totalIgnored, unknow
         </select>
         <span style="color:#555">FTE:</span>
         <input type="number" class="qg-new-fte" data-raw="${rawName.replace(/"/g,'&quot;')}" value="${defaultFte}" min="0.0" max="1.0" step="0.1">
-        <span class="qg-new-name">(${defFirst} ${defLast})</span>
+        <span class="qg-new-name">(${qgEsc(defFirst)} ${qgEsc(defLast)})</span>
       </div>
     </div>`;
   }).join('');
@@ -2641,7 +2695,8 @@ function previewQgendaImport(){
   const records=window._qgRecords;
   if(!records){toast('No data loaded','error');return;}
 
-  // Apply manual corrections from modal
+  // Apply manual corrections from modal. Every dropdown's value wins over the
+  // auto-match — including "— skip —" (empty), which drops the name entirely.
   const corrections={};
   document.querySelectorAll('#qg-match-container .qg-match-sel').forEach(sel=>{
     const raw=sel.getAttribute('data-raw');
@@ -2654,7 +2709,7 @@ function previewQgendaImport(){
 
   records.forEach(rec=>{
     if(rec.date>=today) return; // skip future
-    const docId=rec.docId||corrections[rec.rawName];
+    const docId=Object.prototype.hasOwnProperty.call(corrections,rec.rawName)?corrections[rec.rawName]:rec.docId;
     if(!docId) return;
     let previewDocId=docId;
     let doc=byId(docId);
@@ -2728,7 +2783,9 @@ function previewQgendaImport(){
 }
 
 async function runQgendaImport(records){
-  // Read match selections — handle corrections, new providers, and skips
+  // Read match selections — every dropdown's value overrides the auto-match,
+  // including "— skip —" (empty), so wrong fuzzy matches can be corrected or
+  // dropped. New providers get their generated id filled in below.
   const corrections={};
   const newProviders={};
 
@@ -2751,8 +2808,8 @@ async function runQgendaImport(records){
         preferences:defaultPreferencesForType(type),
         teamColor:''
       };
-    } else if(val){
-      corrections[raw]=val;
+    } else {
+      corrections[raw]=val||null;
     }
   });
 
@@ -2766,7 +2823,7 @@ async function runQgendaImport(records){
     corrections[rawName]=uid;
   }
 
-  records.forEach(r=>{ if(!r.docId&&corrections[r.rawName]) r.docId=corrections[r.rawName]; });
+  records.forEach(r=>{ if(Object.prototype.hasOwnProperty.call(corrections,r.rawName)) r.docId=corrections[r.rawName]; });
 
   const progDiv=document.getElementById('qg-import-progress');
   const bar=document.getElementById('qg-bar');
@@ -2839,10 +2896,10 @@ async function saveVersion(){
   if(!isAdmin()){ toast('Admin only','error'); return; }
   const defaultName=`v${new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'2-digit'})} – ${S.cycleStarts&&Object.keys(S.cycleStarts).length?Object.keys(S.cycleStarts).sort().pop():'manual'}`;
   showModal('Save Version',
-    `<div style="margin-bottom:8px;font-size:13px">Save a named snapshot of the current schedule and settings for <strong>${currentGroupName()}</strong>. You can restore it later from "Restore Version".</div>
-     <div style="margin-bottom:12px;font-size:12px;color:var(--ink3);background:#f8fafc;border:1px solid var(--line);border-radius:4px;padding:7px 9px">Versions are scoped by group ID: <strong>${currentGroupId()}</strong>.</div>
+    `<div style="margin-bottom:8px;font-size:13px">Save a named snapshot of the current schedule and settings for <strong>${qgEsc(currentGroupName())}</strong>. You can restore it later from "Restore Version".</div>
+     <div style="margin-bottom:12px;font-size:12px;color:var(--ink3);background:#f8fafc;border:1px solid var(--line);border-radius:4px;padding:7px 9px">Versions are scoped by group ID: <strong>${qgEsc(currentGroupId())}</strong>.</div>
      <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Snapshot name:</label>
-     <input id="version-name-input" type="text" value="${defaultName}" style="width:100%;padding:6px 8px;border:1px solid var(--line);border-radius:4px;font-size:13px">`,
+     <input id="version-name-input" type="text" value="${qgEsc(defaultName)}" style="width:100%;padding:6px 8px;border:1px solid var(--line);border-radius:4px;font-size:13px">`,
     'Save Snapshot',
     async ()=>{
       const name=document.getElementById('version-name-input')?.value?.trim()||defaultName;
@@ -2861,6 +2918,7 @@ async function saveVersion(){
           const {group_id, ...legacyRow}=versionRow;
           await _sbUpsert('versions',legacyRow);
         }
+        document.getElementById('modal').style.display='none';
         toast(`Snapshot "${name}" saved`,'success');
         trackEvent('version_saved',{name,group_id:currentGroupId()});
       }catch(e){
@@ -3042,6 +3100,105 @@ function confirmResetGroup(){
   );
 }
 
+// ── Excel export ─────────────────────────────────────────
+// Builds a workbook for one quarter: a Schedule sheet mirroring the on-screen
+// grid (provider rows, one column per day, section headers, coverage counts)
+// and a Totals sheet with per-provider shift counts vs target.
+function buildScheduleWorkbook(year,q){
+  const days=quarterDays(year,q);
+  const allDocs=activeDocs(year);
+  const consultDocs=allDocs.filter(isMedicalDirectorDoc).sort(providerSort);
+  const rotationDocs=allDocs.filter(d=>!isMedicalDirectorDoc(d)&&d.type!=='nocturnist'&&d.type!=='prn'&&!isAppProvider(d)).sort(providerSort);
+  const nocturnistDocs=allDocs.filter(d=>d.type==='nocturnist'&&!isAppProvider(d)).sort(providerSort);
+  const appDocs=allDocs.filter(d=>!isMedicalDirectorDoc(d)&&d.type!=='prn'&&isAppProvider(d)).sort(providerSort);
+  const prnDocs=allDocs.filter(d=>d.type==='prn').sort(providerSort);
+
+  const cellLabel=sh=>sh==='OFF'||!sh?'':(sh==='APP_NS'?'NA':sh==='APP_NX'?'NX':sh);
+  const shiftAt=(docId,ds)=>(S.sched[docId]&&S.sched[docId][ds])||'OFF';
+
+  const header=['Provider','Role','Type','FTE',...days.map(d=>`${monAbbr(d.getMonth())} ${d.getDate()} ${dayN(d)}`)];
+  const rows=[header];
+  const addSection=(label,docs)=>{
+    if(!docs.length)return;
+    rows.push([`── ${label} ──`]);
+    docs.forEach(doc=>{
+      rows.push([
+        dname(doc),
+        providerRoleLabel(doc),
+        providerTypeLabel(doc),
+        fteValue(doc),
+        ...days.map(d=>cellLabel(shiftAt(doc.id,dstrD(d))))
+      ]);
+    });
+  };
+  addSection('Medical Director / Leadership',consultDocs);
+  addSection('Rounding Providers',rotationDocs);
+  addSection('Nocturnists',nocturnistDocs);
+  addSection('APP Providers',appDocs);
+  addSection('PRN / Per Diem (filled manually)',prnDocs);
+
+  // Daily coverage counts, same definitions as the on-screen footer
+  rows.push([]);
+  const covRow=(label,countFn)=>rows.push([label,'','','',...days.map(d=>countFn(dstrD(d)))]);
+  covRow('MD/DO Rounders',ds=>allDocs.filter(doc=>!isAppProvider(doc)&&!isMedicalDirectorDoc(doc)&&shiftAt(doc.id,ds)==='R').length);
+  covRow('MD/DO Swing',ds=>allDocs.filter(doc=>!isAppProvider(doc)&&!isMedicalDirectorDoc(doc)&&['S','H'].includes(shiftAt(doc.id,ds))).length);
+  covRow('Nocturnists',ds=>allDocs.filter(doc=>!isAppProvider(doc)&&shiftAt(doc.id,ds)==='N').length);
+  covRow('APP Rounders',ds=>allDocs.filter(doc=>isAppProvider(doc)&&doc.type!=='prn'&&shiftAt(doc.id,ds)==='R').length);
+  covRow('APP Admitters',ds=>allDocs.filter(doc=>isAppProvider(doc)&&doc.type!=='prn'&&['S','H'].includes(shiftAt(doc.id,ds))).length);
+  covRow('Target: MD/DO Rounders',ds=>physicianRounderTargetForDate(ds));
+  covRow('Target: MD/DO Swing',ds=>admitterTargetForDate(ds));
+
+  const ws=XLSX.utils.aoa_to_sheet(rows);
+  ws['!cols']=[{wch:24},{wch:6},{wch:18},{wch:5},...days.map(()=>({wch:5}))];
+
+  // Totals sheet
+  const totalsHeader=['Provider','Role','Type','FTE','R','S','N','X','H','Weekend','Total','Quarter Target'];
+  const totalsRows=[totalsHeader];
+  [...consultDocs,...rotationDocs,...nocturnistDocs,...appDocs,...prnDocs].forEach(doc=>{
+    let r=0,s=0,n=0,x=0,h=0,wk=0;
+    days.forEach(d=>{
+      const sh=shiftAt(doc.id,dstrD(d));
+      if(sh==='R')r++;
+      else if(sh==='S')s++;
+      else if(sh==='N'||sh==='APP_NS'||sh==='APP_NX')n++;
+      else if(sh==='X')x++;
+      else if(sh==='H')h++;
+      if(sh!=='OFF'&&isWeekend(d))wk++;
+    });
+    const total=r+s+n+x+h;
+    totalsRows.push([dname(doc),providerRoleLabel(doc),providerTypeLabel(doc),fteValue(doc),r,s,n,x,h,wk,total,Math.round(fteValue(doc)*(S.cfg.annual||182)/4)]);
+  });
+  const wsTotals=XLSX.utils.aoa_to_sheet(totalsRows);
+  wsTotals['!cols']=totalsHeader.map((hd,i)=>({wch:i===0?24:i===2?18:8}));
+
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,`Schedule Q${q} ${year}`);
+  XLSX.utils.book_append_sheet(wb,wsTotals,'Totals');
+  return wb;
+}
+
+function exportScheduleExcel(){
+  if(typeof XLSX==='undefined'){
+    toast('Excel library did not load. Check your internet connection and refresh.','error',5000);
+    return;
+  }
+  const year=parseInt(document.getElementById('yr-sel')?.value,10)||S.ui.year;
+  const q=parseInt(document.getElementById('q-sel')?.value,10)||S.ui.quarter;
+  if(!activeDocs(year).length){
+    toast('No providers to export. Import qGenda or add providers first.','error');
+    return;
+  }
+  try{
+    const wb=buildScheduleWorkbook(year,q);
+    XLSX.writeFile(wb,`hospitalist-schedule-${currentGroupId()}-${year}-Q${q}.xlsx`);
+    toast(`Exported Q${q} ${year} schedule to Excel`,'success');
+    trackEvent('excel_exported',{year,quarter:q,group_id:currentGroupId()});
+  }catch(e){
+    console.error('exportScheduleExcel error:',errStr(e),e);
+    toast('Excel export failed: '+errStr(e),'error',5000);
+  }
+}
+
 function exportData(){
   if(!isMasterAdmin()){toast('Master admin only','error');return;}
   const b=new Blob([JSON.stringify(S,null,2)],{type:'application/json'});
@@ -3059,16 +3216,24 @@ function importData(){
   i.accept='.json';
   i.onchange=e=>{
     const r=new FileReader();
-    r.onload=async ev=>{
-      try{
-        if(!confirm(`Import raw JSON into ${currentGroupName()}?\n\nThis can overwrite the current site data. Save a version first if needed.`))return;
-        S={...freshAppState(),...JSON.parse(ev.target.result)};
-        applyMigrations();
-        await saveData();
-        renderSchedule();renderRoster();renderDocList();populatePhysPicker();updateQuarterInfo();updateGenButton();
-        toast('Imported JSON','success');
-        trackEvent('json_imported',{group_id:currentGroupId()});
-      }catch(e){toast('Invalid file: '+errStr(e),'error');}
+    r.onload=ev=>{
+      const rawText=ev.target.result;
+      showModal('Import JSON',
+        `<div style="font-size:13px;margin-bottom:10px">Import raw JSON into <strong>${qgEsc(currentGroupName())}</strong>?</div>
+         <div style="font-size:12px;background:#fff5dc;border:1px solid #f0d080;border-radius:4px;padding:8px 10px">This can overwrite the current site data. Save a version first if needed.</div>`,
+        'Import',
+        async ()=>{
+          try{
+            S={...freshAppState(),...JSON.parse(rawText)};
+            applyMigrations();
+            await saveData();
+            renderSchedule();renderRoster();renderDocList();populatePhysPicker();updateQuarterInfo();updateGenButton();
+            document.getElementById('modal').style.display='none';
+            toast('Imported JSON','success');
+            trackEvent('json_imported',{group_id:currentGroupId()});
+          }catch(e){toast('Invalid file: '+errStr(e),'error');}
+        }
+      );
     };
     r.readAsText(e.target.files[0]);
   };
@@ -3107,7 +3272,7 @@ function scheduleStyleShortLabel(d){
   return {text:'STD',cls:'sched-badge-other',title:'Standard scheduling'};
 }
 function scheduleStyleBadgeHtml(d){
-  if(isMedicalDirectorDoc(d)||isAppProvider(d)||d.type==='prn'||d.type==='nocturnist')return '';
+  if(isMedicalDirectorDoc(d)||d.type==='prn'||d.type==='nocturnist')return '';
   const b=scheduleStyleShortLabel(d);
   return `<span class="sched-badge ${b.cls}" title="${qgEsc(b.title)}">${b.text}</span>`;
 }
@@ -3306,6 +3471,11 @@ function strictTeamPhase(doc,idx,total){
 }
 function normalizeProviderDefaults(doc){
   if(!doc.preferences) doc.preferences=defaultPreferencesForType(doc.type);
+  // APPs were historically always scheduled strictly regardless of style;
+  // now that a Variable APP is meaningful, backfill the strict default so
+  // legacy rows without an explicit style keep their old behavior.
+  if(isAppProvider(doc)&&doc.type==='standard'&&!doc.preferences.scheduleStyle)
+    doc.preferences.scheduleStyle='strict-swing-block';
   if(isStrictTeamEligible(doc)){
     if(!doc.preferences.scheduleStyle) doc.preferences=defaultPreferencesForType(doc.type);
     if(!doc.teamColor) doc.teamColor=nextTeamColor();
@@ -3559,11 +3729,13 @@ function activeDocs(year,month){
     return true;
   });
 }
+let toastHideTimer=null;
 function toast(msg,kind='info',ms=2500){
   const t=document.getElementById('toast');
+  if(toastHideTimer)clearTimeout(toastHideTimer);
   t.textContent=msg;
   t.className='toast on '+(kind||'');
-  setTimeout(()=>t.classList.remove('on'),ms);
+  toastHideTimer=setTimeout(()=>t.classList.remove('on'),ms);
 }
 function showModal(title,body,okLbl,okFn,opts={}){
   const box=document.querySelector('#modal .mo');
@@ -3607,6 +3779,19 @@ function holName(key){
   return {ny:'New Year\'s Day',mem:'Memorial Day',jul4:'4th of July',
           lab:'Labor Day',tg:'Thanksgiving',xm:'Christmas'}[key]||key;
 }
+// Holiday rotation rule: a provider who had last Christmas off is due to work
+// this one, so requesting it off is blocked. Only enforced when the data
+// positively shows they had it off — a schedule entry of OFF for last
+// Christmas, or an explicit holiday assignment without Christmas. Unknown
+// history (new site/provider) never blocks.
+function priorChristmasKnownOff(docId,year){
+  const prevDs=`${year-1}-12-25`;
+  const schedEntry=S.sched[docId]&&S.sched[docId][prevDs];
+  if(schedEntry!==undefined)return schedEntry==='OFF';
+  const holsPrev=S.hols&&S.hols[year-1]&&S.hols[year-1][docId];
+  if(holsPrev&&Object.prototype.hasOwnProperty.call(holsPrev,'xm'))return !holsPrev.xm;
+  return false;
+}
 
 // ════════════════════════════════════════════════════════
 //  SCHEDULE GENERATION (v11) — block-aware multi-candidate optimization
@@ -3620,7 +3805,7 @@ function holName(key){
 //  Swing fill layers (shortages remain visible when no clean tail is available):
 //    Layer 1 - Normal: preferredR met AND below monthly quota
 //    Layer 2 - Normal above-quota: preferredR met, but over monthly target (still fair)
-//    Layer 3 - Emergency: 5+ R (early transition when S supply is thin)
+//    Layer 3 - Emergency: 3+ R (early transition when S supply is thin)
 //    Layer 4 - Last resort: isolated S from OFF only to avoid a coverage miss
 //
 //  Team numbers:
@@ -3638,6 +3823,83 @@ function getMaxWork(doc){
   // All providers use full 7-day work blocks — part-time providers
   // get fewer blocks per quarter, not shorter blocks.
   return (doc.preferences && doc.preferences.maxWork) || 7;
+}
+
+// Single source of truth for the variable-pool block state machine. Used for
+// live assignment, prior-quarter seeding, and past-day replay so all three
+// agree on rest credit — divergent copies previously let providers start a
+// quarter with too little rest.
+function advanceVariableState(s,shift){
+  const isWork=!!shift&&shift!=='OFF';
+  if(isWork){
+    if(s.block==='O'){s.block='W';s.dayInBlock=0;s.workInBlock=0;s.runLen=0;}
+    s.workInBlock++;s.dayInBlock++;
+    s.runLen=(s.lastShift===shift)?s.runLen+1:1;
+    s.lastShift=shift;
+  }else{
+    if(s.block==='W'&&s.workInBlock>0){
+      s.lastWorkSize=s.workInBlock;
+      s.lastBlockEndedOnS=(s.lastShift==='S');
+      s.block='O';s.dayInBlock=1;s.workInBlock=0;
+      s.lastShift=null;s.runLen=1;
+    }else if(s.block==='O'){
+      s.dayInBlock++;s.runLen++;
+      if(s.dayInBlock>1)s.lastBlockEndedOnS=false;
+    }else{
+      s.block='O';s.dayInBlock=1;s.workInBlock=0;
+      s.lastShift=null;s.runLen=1;
+    }
+  }
+}
+
+// Absolute day number (timezone-safe) — anchors repeating patterns to the
+// calendar instead of the quarter, so they never reset at quarter boundaries.
+function absDayNum(date){
+  return Math.round(Date.UTC(date.getFullYear(),date.getMonth(),date.getDate())/86400000);
+}
+
+// Where a swing-only provider is in their 14-day cycle on the quarter's first
+// day (0-6 = working week position, 7-13 = off week position). Continues the
+// rhythm actually observed at the end of the prior quarter; with no history,
+// anchors to the calendar. Prevents the old failure where the pattern reset
+// each quarter and produced up to 13 consecutive swing shifts at the seam.
+function swingOnlyStartPos(doc,startD,idx){
+  let working=null,run=0;
+  for(let lb=1;lb<=14;lb++){
+    const sh=S.sched[doc.id]&&S.sched[doc.id][dstrD(addD(startD,-lb))];
+    if(sh===undefined)break;
+    const w=sh!=='OFF';
+    if(working===null){working=w;run=1;}
+    else if(w===working)run++;
+    else break;
+  }
+  if(working===null)return ((absDayNum(startD)-idx*7)%14+14)%14;
+  run=Math.min(run,7);
+  return working?run%14:(7+run)%14;
+}
+
+// Consecutive worked days immediately before the quarter starts (any shift).
+function strictBoundaryTailRun(doc,startD){
+  let run=0;
+  for(let lb=1;lb<=14;lb++){
+    const sh=S.sched[doc.id]&&S.sched[doc.id][dstrD(addD(startD,-lb))];
+    if(!sh||sh==='OFF')break;
+    run++;
+  }
+  return run;
+}
+
+// Hard guard: a phase whose leading work days, combined with the provider's
+// actual tail from the prior quarter, exceed 7 consecutive days is effectively
+// forbidden (the penalty dwarfs every coverage consideration). The soft
+// continuity penalty alone let coverage pressure create boundary marathons.
+function strictBoundaryOverrunPenalty(doc,startD,phase){
+  const tail=strictBoundaryTailRun(doc,startD);
+  if(!tail)return 0;
+  let leading=0;
+  for(let i=0;i<7;i++){if(strictIsWorkingOffset(i,phase))leading++;else break;}
+  const overrun=tail+leading-7;
+  return overrun>0?overrun*100000:0;
 }
 
 function _candidateUnit(seed,key){
@@ -3685,7 +3947,8 @@ function _scoreScheduleCandidate(year,q){
   const days=quarterDays(year,q);
   const qKey=`${year}-${q}`;
   const reqs=S.requests[qKey]||{};
-  const docs=activeDocs(year).filter(d=>d.type==='standard'&&!isMedicalDirectorDoc(d)&&!isAppProvider(d)&&!isStrictStyle(d));
+  // All variable-engine providers are scored: MDs, part-time, and variable APPs
+  const docs=activeDocs(year).filter(d=>d.type==='standard'&&!isMedicalDirectorDoc(d)&&!isStrictStyle(d));
   let requiredMisses=0,optionalMisses=0,structural=0,shortages=0,overages=0,swingImbalance=0;
   let longDays=0,restMismatch=0;
   const affectedRequired=new Set();
@@ -3886,10 +4149,9 @@ function strictContinuingShift(doc,startD,phase){
   return prior==='S'||prior==='H'?'S':'R';
 }
 function strictSwingOnlyCountForOffset(swingOnly,startD,di,ds){
-  return swingOnly.filter(doc=>{
+  return swingOnly.filter((doc,idx)=>{
     if(doc.startDate&&doc.startDate>ds)return false;
-    const phase=swingOnly.indexOf(doc)*7;
-    const pos=((di-phase)%14+14)%14;
+    const pos=(swingOnlyStartPos(doc,startD,idx)+di)%14;
     return pos<7;
   }).length;
 }
@@ -3916,7 +4178,8 @@ function chooseStrictPhases(pool,days,startD,targetWorkForDay,candidateSeed){
       });
       const continuity=strictPriorPhasePenalty(doc,startD,phase);
       const requestPenalty=strictRequestPenalty(doc,days,phase);
-      const score=squaredError(extra)+continuity+requestPenalty+_candidateUnit(candidateSeed,doc.id+'|phase|'+phase)*0.01;
+      const boundaryGuard=strictBoundaryOverrunPenalty(doc,startD,phase);
+      const score=squaredError(extra)+continuity+requestPenalty+boundaryGuard+_candidateUnit(candidateSeed,doc.id+'|phase|'+phase)*0.01;
       if(!best||score<best.score)best={phase,extra,score};
     }
     phaseById[doc.id]=best.phase;
@@ -4288,8 +4551,16 @@ function configureDemoProviderMix(year,varPct,sevenPct,twoPct,seed=9100){
 async function runDemoMode(){
   if(!isAdmin()){toast('Admin only','error');return;}
   if(demoModeSnapshot){
-    if(!confirm('A demo schedule is already showing. Restore the real schedule and run a new demo?'))return;
-    exitDemoMode({silent:true});
+    showModal('Run New Demo?',
+      '<div style="font-size:13px">A demo schedule is already showing. Restore the real schedule and run a new demo?</div>',
+      'Run New Demo',
+      ()=>{
+        document.getElementById('modal').style.display='none';
+        exitDemoMode({silent:true});
+        runDemoMode();
+      }
+    );
+    return;
   }
   const inputs={
     year:parseInt(document.getElementById('demo-year')?.value,10)||nextStressQuarter().year,
@@ -4850,16 +5121,18 @@ function _generateQuarter(candidateSeed=0,finalize=true){
   const days=quarterDays(year,q);
 
   const allActive=activeDocs(year,range.months[0]);
-  const swingOnly=allActive.filter(d=>d.type==='swing-only');
+  // Stable id order so swing-only phases don't reshuffle when the roster changes
+  const swingOnly=allActive.filter(d=>d.type==='swing-only').sort((a,b)=>a.id<b.id?-1:a.id>b.id?1:0);
   const weekdayOnly=allActive.filter(isMedicalDirectorDoc);
   const nocturnists=allActive.filter(d=>d.type==='nocturnist');
 
-  // Strict providers are pre-assigned before variable scheduling
+  // Strict providers are pre-assigned before variable scheduling.
+  // APPs default to strict 7-on/7-off, but an APP explicitly set to Variable
+  // is scheduled by the variable engine (appRotation) like any other provider.
   const strictMixed=allActive.filter(d=>d.type==='standard'&&!isMedicalDirectorDoc(d)&&d.preferences&&d.preferences.scheduleStyle==='strict');
   const strictSwing=allActive.filter(d=>d.type==='standard'&&!isMedicalDirectorDoc(d)&&d.preferences&&d.preferences.scheduleStyle==='strict-swing-block');
-  const appStandard=allActive.filter(d=>d.type==='standard'&&!isMedicalDirectorDoc(d)&&isAppProvider(d));
-  const strictAll=[...new Map([...strictMixed,...strictSwing,...appStandard].map(d=>[d.id,d])).values()];
-  const strictPhysicianCount=strictAll.filter(d=>!isAppProvider(d)).length;
+  const appStrict=allActive.filter(d=>d.type==='standard'&&!isMedicalDirectorDoc(d)&&isAppProvider(d)&&isStrictStyle(d));
+  const strictAll=[...new Map([...strictMixed,...strictSwing,...appStrict].map(d=>[d.id,d])).values()];
   const physicianSwingPool=allActive.filter(d=>d.type==='standard'
     &&!isMedicalDirectorDoc(d)
     &&!isAppProvider(d)
@@ -4878,12 +5151,15 @@ function _generateQuarter(candidateSeed=0,finalize=true){
     strictSwingShare=Math.max(0,Math.min(strictSwingShare,historicalStrictSwingShare));
   }
 
-  // Variable providers: standard type only — PRN are NOT scheduled in generation
-  const rotation=allActive.filter(d=>d.type==='standard'&&!isMedicalDirectorDoc(d)&&!isAppProvider(d)&&d.fte===1.0&&!isStrictStyle(d));
-  const partTime=allActive.filter(d=>d.type==='standard'&&!isMedicalDirectorDoc(d)&&!isAppProvider(d)&&d.fte<1.0&&!isStrictStyle(d));
+  // Variable providers: standard type only — PRN are NOT scheduled in generation.
+  // Part-time (FTE < 1.0) providers share this pool: they get fewer blocks via
+  // FTE-scaled targets, and their time-off requests are honored like anyone's.
+  const rotation=allActive.filter(d=>d.type==='standard'&&!isMedicalDirectorDoc(d)&&!isAppProvider(d)&&!isStrictStyle(d)&&fteValue(d)>0);
+  const appRotation=allActive.filter(d=>d.type==='standard'&&!isMedicalDirectorDoc(d)&&isAppProvider(d)&&!isStrictStyle(d)&&fteValue(d)>0);
   // PRN providers are never scheduled by the algorithm (0 FTE / on-call only)
 
   rotation.sort((a,b)=>a.last.localeCompare(b.last)||a.first.localeCompare(b.first));
+  appRotation.sort((a,b)=>a.last.localeCompare(b.last)||a.first.localeCompare(b.first));
 
   if(!S.requests[qKey]) S.requests[qKey]={};
   const requests=S.requests[qKey];
@@ -4922,7 +5198,7 @@ function _generateQuarter(candidateSeed=0,finalize=true){
   // excluding any voluntary extra shifts they picked up.
   // The generator then uses this to equalize annual totals across providers.
   const ytdBase={};  // docId → {R:n, S:n, N:n, total:n}
-  physicianSwingPool.forEach(doc=>{
+  [...physicianSwingPool,...appRotation].forEach(doc=>{
     let bR=0, bS=0, bN=0;
     // Count base schedule shifts from all quarters before this one
     for(let pq=1; pq<q; pq++){
@@ -4953,43 +5229,49 @@ function _generateQuarter(candidateSeed=0,finalize=true){
   // Compute per-provider annual target and remaining budget
   const annualTarget=S.cfg.annual; // 182 for FTE=1.0
   const ytdRemaining={};
-  rotation.forEach(doc=>{
-    const target=Math.round(doc.fte*annualTarget);
+  [...rotation,...appRotation].forEach(doc=>{
+    const target=Math.round(fteValue(doc)*annualTarget);
     const used=ytdBase[doc.id]?ytdBase[doc.id].total:0;
     ytdRemaining[doc.id]=Math.max(0, target-used);
   });
 
-  // State init — look back at prior quarter to maintain continuity
-  // Read last 14 days of prior quarter to seed each provider's state.
+  // APP swing budgeting mirrors the MD pool: divide the quarter's APP admitter
+  // demand across all APP FTE (strict + variable).
+  const totalAppSwingFte=(appRotation.reduce((sum,d)=>sum+fteValue(d),0)
+    +strictAll.filter(isAppProvider).reduce((sum,d)=>sum+fteValue(d),0))||1;
+  const avgAppAdmitters=days.reduce((sum,d)=>sum+(staffingForDate(dstrD(d)).appAdmitters||0),0)/Math.max(1,days.length);
+
+  // Swing-only providers continue their observed 7S/7-off rhythm from the
+  // prior quarter; with no history they anchor to the calendar (absolute day
+  // number) so the pattern never resets at a quarter boundary.
+  const swingOnlyPos0={};
+  swingOnly.forEach((doc,idx)=>{swingOnlyPos0[doc.id]=swingOnlyStartPos(doc,startD,idx);});
+
+  // State init — look back at prior quarter to maintain continuity.
+  // The last 14 days of the prior quarter are replayed through the SAME state
+  // machine used during assignment (advanceVariableState), so rest credit and
+  // block structure carry across the quarter boundary consistently.
   // Fall back to staggered phase if no prior data exists.
   const state={};
-  rotation.forEach((doc,i)=>{
+  [...rotation,...appRotation].forEach((doc,i)=>{
     // Try to read trailing state from prior quarter
     let seededState=null;
     {
-      const lookback=14;
-      let lastShift=null,runLen=0,block='O',workInBlock=0,dayInBlock=0,lastWorkSize=0;
+      const s0={block:'O',lastWorkSize:0,dayInBlock:0,workInBlock:0,lastShift:null,runLen:0,lastBlockEndedOnS:false};
       let foundAny=false;
-      for(let lb=lookback;lb>=1;lb--){
-        const priorD=addD(startD,-lb);
-        const priorDs=dstrD(priorD);
+      for(let lb=14;lb>=1;lb--){
+        const priorDs=dstrD(addD(startD,-lb));
         const sh=(S.sched[doc.id]&&S.sched[doc.id][priorDs]);
         if(!sh) continue;
         foundAny=true;
-        if(sh==='R'||sh==='S'){
-          if(block==='O'){block='W';workInBlock=0;dayInBlock=0;}
-          workInBlock++;dayInBlock++;
-          runLen=(lastShift===sh)?runLen+1:1;
-          lastShift=sh;
-        } else {
-          if(block==='W'){lastWorkSize=workInBlock;}
-          block='O';dayInBlock++;runLen++;
-          lastShift=null;
-        }
+        advanceVariableState(s0,sh);
       }
       if(foundAny){
+        // Never observed a work→rest transition → work length unknown.
+        // Assume a full block so the rest requirement errs toward more rest.
+        if(!s0.lastWorkSize)s0.lastWorkSize=7;
         seededState={
-          block,lastWorkSize,dayInBlock,workInBlock,lastShift,runLen,
+          ...s0,
           qR:0,qS:0,monthCount:[0,0,0,0,0,0,0,0,0,0,0,0],
           preferredR:Math.max(5,getPreferredR(doc)),maxWork:MAX_VARIABLE_WORK,
           teamHistory:[]
@@ -5040,22 +5322,15 @@ function _generateQuarter(candidateSeed=0,finalize=true){
     if(s.block==='W') return s.workInBlock<SOFT_VARIABLE_WORK;
     return s.dayInBlock>=s.lastWorkSize&&!hasRequiredInNextRBlock(docId,di);
   }
-  function canBeS_base(docId){
-    // Base S eligibility (shared between normal and emergency)
-    const s=state[docId];
-    if(!s||s.block!=='W') return false;
-    if(s.workInBlock>=s.maxWork) return false;
-    if(s.lastShift==='S') return s.runLen<MAX_S_BLOCK;  // continuation: cap at MAX_S_BLOCK
-    return false;
-  }
-  function getMaxS(docId){
-    return MAX_S_BLOCK;
-  }
   function qSTarget(docId){
-    // Pro-rated quarterly S target based on FTE
+    // Pro-rated quarterly S target: the pool's total swing demand divided by
+    // total pool FTE, times this provider's FTE. APPs budget against APP
+    // admitter demand, MDs against physician admitter demand.
     const doc=byId(docId);
-    const fte=doc?doc.fte:1.0;
-    const baseQTarget=Math.round(avgAdmitterTarget(quarterDays(year,q)) * totalDays / (rotation.length + partTime.length + strictPhysicianCount || 1));
+    const fte=fteValue(doc)||1.0;
+    const baseQTarget=(doc&&isAppProvider(doc))
+      ? avgAppAdmitters*totalDays/totalAppSwingFte
+      : avgAdmitterTarget(quarterDays(year,q))*totalDays/(totalPhysicianSwingFte||1);
     return Math.max(1, Math.round(baseQTarget * fte));
   }
   function swingCatchupDeficit(docId){
@@ -5081,12 +5356,17 @@ function _generateQuarter(candidateSeed=0,finalize=true){
     return false;
   }
   function canBeS_emergency(docId){
+    // Relaxed layer for thin S supply: allow the R→S transition after only
+    // 3+ consecutive R (vs MIN_R_HARD=5 in the normal layer). All other
+    // guards (max work, FTE-adjusted quarter cap, MAX_S_BLOCK) still apply,
+    // and quarter scoring penalizes the short R block, so this only wins
+    // when the alternative is a coverage shortage.
     const s=state[docId];
     if(!s||s.block!=='W') return false;
     if(s.workInBlock>=s.maxWork) return false;
     if(s.qS >= swingQuarterCap(docId)) return false;  // respect FTE-adjusted cap plus catch-up
     if(s.lastShift==='S') return s.runLen<MAX_S_BLOCK;
-    if(s.lastShift==='R' && s.runLen>=MIN_R_HARD)
+    if(s.lastShift==='R' && s.runLen>=3)
       return s.workInBlock+1<=s.maxWork;
     return false;
   }
@@ -5101,9 +5381,6 @@ function _generateQuarter(candidateSeed=0,finalize=true){
     return s&&s.block==='W'&&s.lastShift==='R'
         &&s.runLen<Math.min(s.preferredR,SOFT_VARIABLE_WORK)&&s.workInBlock<SOFT_VARIABLE_WORK;
   }
-  function mustContinueS_couplet(docId){
-    return false;
-  }
   function canBeOff(docId){
     const s=state[docId];
     if(!s) return true;
@@ -5112,31 +5389,12 @@ function _generateQuarter(candidateSeed=0,finalize=true){
   }
   function assign(docId,shift,month,dateStr=null){
     const s=state[docId];
+    advanceVariableState(s,shift==='R'||shift==='S'?shift:'OFF');
     if(shift==='R'||shift==='S'){
-      if(s.block==='O'){
-        s.block='W';s.dayInBlock=0;s.workInBlock=0;s.runLen=0;
-      }
-      s.workInBlock++;s.dayInBlock++;
-      s.runLen=(s.lastShift===shift)?s.runLen+1:1;
-      s.lastShift=shift;
       if(shift==='R') s.qR++; else s.qS++;
       s.monthCount[month]++;
       // Decrement annual remaining budget as shifts are assigned
       if((!dateStr||countsForFairness(dateStr))&&ytdRemaining[docId]!==undefined&&ytdRemaining[docId]>0) ytdRemaining[docId]--;
-    } else {
-      if(s.block==='W'&&s.workInBlock>0){
-        s.lastWorkSize=s.workInBlock;
-        // Remember if the last work shift was S — enforce a rest day before R
-        s.lastBlockEndedOnS = (s.lastShift==='S');
-        s.block='O';s.dayInBlock=1;s.workInBlock=0;
-        s.lastShift=null;s.runLen=1;
-      } else if(s.block==='O'){
-        s.dayInBlock++;s.runLen++;
-        if(s.dayInBlock>1) s.lastBlockEndedOnS=false; // cleared after 1 rest day
-      } else {
-        s.block='O';s.dayInBlock=1;s.workInBlock=0;
-        s.lastShift=null;s.runLen=1;
-      }
     }
   }
   function hasRequiredRequest(docId,ds){
@@ -5159,132 +5417,53 @@ function _generateQuarter(candidateSeed=0,finalize=true){
   assignNocturnistBaseline({nocturnists,days,startD,candidateSeed});
 
     // ──────── DAILY LOOP ────────
-  // Reset per-quarter S counters for part-time providers
-  partTime.forEach(doc=>{ doc._ptQS=0; });
   for(let di=0;di<totalDays;di++){
     const date=addD(startD,di);
     const ds=dstrD(date);
     const dow=date.getDay();
     const month=date.getMonth();
 
-    // Skip past days that already have imported data — don't overwrite history
+    // Skip past days that already have imported data — don't overwrite history.
+    // Replay them through the shared state machine so continuity is exact.
     if(ds<todayDs){
-      // Still need to update state tracking for continuity into future days
-      rotation.forEach(doc=>{
+      [...rotation,...appRotation].forEach(doc=>{
         const sh=S.sched[doc.id]&&S.sched[doc.id][ds];
-        if(sh&&state[doc.id]){
-          // Lightweight state update so the algorithm knows where each provider stands
-          const s=state[doc.id];
-          if(sh==='R'||sh==='S'){
-            if(s.block==='O'){s.block='W';s.dayInBlock=0;s.workInBlock=0;s.runLen=0;}
-            s.workInBlock++;s.dayInBlock++;
-            s.runLen=(s.lastShift===sh)?s.runLen+1:1;
-            s.lastShift=sh;
-          } else {
-            if(s.block==='W'){s.lastWorkSize=s.workInBlock;s.block='O';s.dayInBlock=0;s.workInBlock=0;s.runLen=0;s.lastShift=null;}
-            else{s.dayInBlock++;}
-          }
-        }
+        if(sh&&state[doc.id])advanceVariableState(state[doc.id],sh);
       });
       continue; // don't generate for this day
     }
 
-    let tahirR=0;
     weekdayOnly.forEach(doc=>{
       if(doc.startDate&&doc.startDate>ds){S.sched[doc.id][ds]='OFF';return;}
-      if(dow>=1&&dow<=5){S.sched[doc.id][ds]='R';tahirR++;}
+      if(dow>=1&&dow<=5){S.sched[doc.id][ds]='R';}
       else{S.sched[doc.id][ds]='OFF';}
     });
 
-    let slavinaS=0;
-    swingOnly.forEach((doc,idx)=>{
+    let swingOnlyS=0;
+    swingOnly.forEach(doc=>{
       if(doc.startDate&&doc.startDate>ds){S.sched[doc.id][ds]='OFF';return;}
-      const phase=idx*7;
-      const pos=((di-phase)%14+14)%14;
-      if(pos<7){S.sched[doc.id][ds]='S';slavinaS++;}
+      const pos=(swingOnlyPos0[doc.id]+di)%14;
+      if(pos<7){S.sched[doc.id][ds]='S';swingOnlyS++;}
       else{S.sched[doc.id][ds]='OFF';}
     });
 
+    let needR=physicianRounderTargetForDate(ds);
+    let needS=admitterTargetForDate(ds)-swingOnlyS;
+    const stDay=staffingForDate(ds);
+    let needAppR=stDay.appRounders||0;
+    let needAppS=stDay.appAdmitters||0;
 
-
-    let marchR=0,marchS=0;
-    // Part-time providers: 7on/7off cycle with FTE-adjusted S quota
-    // Compute their quarterly S target same as qSTarget() but inline since we're pre-loop
-    const ptSTarget=Math.max(1, Math.round(
-      Math.round(avgAdmitterTarget(quarterDays(year,q)) * totalDays / (rotation.length + partTime.length + strictPhysicianCount || 1))
-    ));
-    partTime.forEach(doc=>{
-      if(doc.startDate&&doc.startDate>ds){S.sched[doc.id][ds]='OFF';return;}
-      // Count S already assigned this quarter for this provider
-      if(!doc._ptQS) doc._ptQS=0; // reset at start of quarter (handled below)
-      const myTarget=Math.max(1, Math.round(ptSTarget * (doc.fte||1.0)));
-      const superPos=((di)%28+28)%28;
-      let m='OFF';
-      if(superPos<7){
-        const remainingS=Math.max(0,myTarget-doc._ptQS);
-        const tailDays=Math.min(2,remainingS);
-        m=superPos>=7-tailDays?'S':'R';
-      }
-      S.sched[doc.id][ds]=m;
-      if(!isAppProvider(doc)&&!isMedicalDirectorDoc(doc)&&m==='R') marchR++;
-      if(m==='S'){
-        if(!isAppProvider(doc)&&!isMedicalDirectorDoc(doc)) marchS++;
-        doc._ptQS=(doc._ptQS||0)+1;
-      }
-    });
-
-    let needR=physicianRounderTargetForDate(ds)-marchR;
-    let needS=admitterTargetForDate(ds)-slavinaS-marchS;
-
-    // Deduct strict pre-assigned shifts
+    // Deduct strict pre-assigned shifts (MD and APP pools separately)
     strictAll.forEach(doc=>{
+      if(isMedicalDirectorDoc(doc))return;
       const sh=S.sched[doc.id]&&S.sched[doc.id][ds];
-      if(isAppProvider(doc)||isMedicalDirectorDoc(doc))return;
+      if(isAppProvider(doc)){
+        if(sh==='R') needAppR--;
+        else if(sh==='S') needAppS--;
+        return;
+      }
       if(sh==='R') needR--;
       else if(sh==='S') needS--;
-    });
-    const assigned=new Set();
-
-    // STEP 1: Required OFF
-    rotation.forEach(doc=>{
-      if(doc.startDate&&doc.startDate>ds){S.sched[doc.id][ds]='OFF';assigned.add(doc.id);return;}
-      if(hasRequiredRequest(doc.id,ds)){
-        S.sched[doc.id][ds]='OFF';assign(doc.id,'OFF',month,ds);assigned.add(doc.id);
-      }
-    });
-
-    // STEP 1b: Optional OFF. Candidate variants partially approve optional dates;
-    // complete-quarter scoring chooses the best balance of quality and fairness.
-    const optionalRequestDocs = rotation.filter(doc=>{
-      if(assigned.has(doc.id)) return false;
-      if(!hasOptionalRequest(doc.id,ds)||!canBeOff(doc.id)) return false;
-      const honorBias=0.55+(candidateSeed%10)*0.045;
-      return _candidateUnit(candidateSeed,doc.id+'|'+ds+'|optional')<=honorBias;
-    });
-    // Sort: lowest honoring rate gets honored first
-    optionalRequestDocs.sort((a,b)=>{
-      const rA=getHonoringRate(a.id,year);
-      const rB=getHonoringRate(b.id,year);
-      return rA-rB||_candidateTie(candidateSeed,ds,a.id)-_candidateTie(candidateSeed,ds,b.id);
-    });
-    optionalRequestDocs.forEach(doc=>{
-      S.sched[doc.id][ds]='OFF';assign(doc.id,'OFF',month,ds);assigned.add(doc.id);
-    });
-
-    // STEP 2: Forced R continuations (must reach preferredR)
-    rotation.forEach(doc=>{
-      if(assigned.has(doc.id)) return;
-      if(mustContinueR(doc.id)){
-        S.sched[doc.id][ds]='R';assign(doc.id,'R',month,ds);needR--;assigned.add(doc.id);
-      }
-    });
-
-    // STEP 3: Forced S couplet completions
-    rotation.forEach(doc=>{
-      if(assigned.has(doc.id)) return;
-      if(mustContinueS_couplet(doc.id)){
-        S.sched[doc.id][ds]='S';assign(doc.id,'S',month,ds);needS--;assigned.add(doc.id);
-      }
     });
 
     // Helper: prefer clean 5-6 day R blocks with a 1-2 day S tail, then fairness.
@@ -5305,171 +5484,228 @@ function _generateQuarter(candidateSeed=0,finalize=true){
       const normalizedYS = swingFairnessRatio(docId);
       return [sTailScore(docId), normalizedYS, -rem, s.monthCount[month], s.qS];
     }
-
-    // STEP 4a: Normal S — BELOW monthly target (strongest fairness tier)
-    if(needS>0){
-      const cands=rotation
-        .filter(d=>!assigned.has(d.id)&&canBeS_normal(d.id)&&state[d.id].monthCount[month]<MONTHLY_S_TARGET)
-        .sort((a,b)=>{
-          const [at,ay,ar,am,aq]=sSortKey(a.id), [bt,by,br,bm,bq]=sSortKey(b.id);
-          return at!==bt?at-bt:ay!==by?ay-by:ar!==br?ar-br:am!==bm?am-bm:aq!==bq?aq-bq:_candidateTie(candidateSeed,ds,a.id)-_candidateTie(candidateSeed,ds,b.id);
-        });
-      let i=0;
-      while(needS>0&&i<cands.length){
-        const doc=cands[i];
-        S.sched[doc.id][ds]='S';assign(doc.id,'S',month,ds);assigned.add(doc.id);needS--;i++;
+    // Optional dates a fresh R block started today would run through — used to
+    // steer new-block starts away from optional requests when others can cover.
+    function optionalInNextRBlock(docId,di2){
+      let n=0;
+      for(let offset=0;offset<MIN_R_HARD&&di2+offset<totalDays;offset++){
+        if(hasOptionalRequest(docId,dstrD(addD(startD,di2+offset))))n++;
       }
+      return n;
     }
 
-    // STEP 4b: Normal S — AT/ABOVE monthly target (still use, just lower priority)
-    if(needS>0){
-      const cands=rotation
-        .filter(d=>!assigned.has(d.id)&&canBeS_normal(d.id))
-        .sort((a,b)=>{
-          const [at,ay,ar,am,aq]=sSortKey(a.id), [bt,by,br,bm,bq]=sSortKey(b.id);
-          return at!==bt?at-bt:ay!==by?ay-by:ar!==br?ar-br:am!==bm?am-bm:aq!==bq?aq-bq:_candidateTie(candidateSeed,ds,a.id)-_candidateTie(candidateSeed,ds,b.id);
-        });
-      let i=0;
-      while(needS>0&&i<cands.length){
-        const doc=cands[i];
-        S.sched[doc.id][ds]='S';assign(doc.id,'S',month,ds);assigned.add(doc.id);needS--;i++;
-      }
-    }
+    // One fill pass per variable pool (physicians and variable-style APPs run
+    // the same engine against their own coverage targets).
+    function fillPool(pool,needR,needS){
+      const assigned=new Set();
 
-    // STEP 4c: Emergency S (3+ R done, early transition)
-    if(needS>0){
-      const cands=rotation
-        .filter(d=>!assigned.has(d.id)&&canBeS_emergency(d.id))
-        .sort((a,b)=>{
-          const [at,ay,ar,am,aq]=sSortKey(a.id), [bt,by,br,bm,bq]=sSortKey(b.id);
-          if(at!==bt) return at-bt;
-          if(ay!==by) return ay-by;
-          if(ar!==br) return ar-br;
-          if(am!==bm) return am-bm;
-          if(aq!==bq) return aq-bq;
-          const aR=(state[a.id].block==='W'&&state[a.id].lastShift==='R')?state[a.id].runLen:0;
-          const bR=(state[b.id].block==='W'&&state[b.id].lastShift==='R')?state[b.id].runLen:0;
-          return bR-aR||_candidateTie(candidateSeed,ds,a.id)-_candidateTie(candidateSeed,ds,b.id);
-        });
-      let i=0;
-      while(needS>0&&i<cands.length){
-        const doc=cands[i];
-        S.sched[doc.id][ds]='S';assign(doc.id,'S',month,ds);assigned.add(doc.id);needS--;i++;
-      }
-    }
-
-    // STEP 4d: Last-resort isolated S from OFF. This is intentionally after all
-    // R-tail options so a standalone S is only used to avoid a coverage miss.
-    if(needS>0){
-      const cands=rotation
-        .filter(d=>!assigned.has(d.id)&&canBeS_lastResort(d.id))
-        .sort((a,b)=>{
-          const sa=state[a.id],sb=state[b.id];
-          const aNorm=swingFairnessRatio(a.id),bNorm=swingFairnessRatio(b.id);
-          if(aNorm!==bNorm) return aNorm-bNorm;
-          if(sa.monthCount[month]!==sb.monthCount[month]) return sa.monthCount[month]-sb.monthCount[month];
-          return sb.dayInBlock-sa.dayInBlock||_candidateTie(candidateSeed,ds,a.id)-_candidateTie(candidateSeed,ds,b.id);
-        });
-      let i=0;
-      while(needS>0&&i<cands.length){
-        const doc=cands[i];
-        S.sched[doc.id][ds]='S';assign(doc.id,'S',month,ds);assigned.add(doc.id);needS--;i++;
-      }
-    }
-
-    // STEP 5a: Normal R fill — candidates eligible by rest rules
-    // Sort priority: continuing R > most annual budget remaining > fewest monthly > fewest qR > most rested
-    const rCandidates=rotation
-      .filter(d=>!assigned.has(d.id)&&canBeR(d.id,di))
-      .sort((a,b)=>{
-        const sa=state[a.id],sb=state[b.id];
-        // Continue until preferredR, then prefer swing tails or rested starts.
-        // Longer R stretches remain available when needed for coverage.
-        const aCont=(sa.block==='W'&&sa.lastShift==='R')
-          ?(sa.runLen<sa.preferredR?0:(sa.runLen<SOFT_VARIABLE_WORK?2:4))
-          :1;
-        const bCont=(sb.block==='W'&&sb.lastShift==='R')
-          ?(sb.runLen<sb.preferredR?0:(sb.runLen<SOFT_VARIABLE_WORK?2:4))
-          :1;
-        if(aCont!==bCont) return aCont-bCont;
-        // Annual fairness: providers with more remaining budget get priority
-        const aRem=ytdRemaining[a.id]||0, bRem=ytdRemaining[b.id]||0;
-        if(Math.abs(aRem-bRem)>3) return bRem-aRem; // significant gap → pick the one further behind
-        if(sa.monthCount[month]!==sb.monthCount[month]) return sa.monthCount[month]-sb.monthCount[month];
-        if(sa.qR!==sb.qR) return sa.qR-sb.qR;
-        const aRest=(sa.block==='O')?sa.dayInBlock:0;
-        const bRest=(sb.block==='O')?sb.dayInBlock:0;
-        return bRest-aRest||_candidateTie(candidateSeed,ds,a.id)-_candidateTie(candidateSeed,ds,b.id);
+      // STEP 1: Required OFF
+      pool.forEach(doc=>{
+        if(doc.startDate&&doc.startDate>ds){S.sched[doc.id][ds]='OFF';assigned.add(doc.id);return;}
+        if(hasRequiredRequest(doc.id,ds)){
+          S.sched[doc.id][ds]='OFF';assign(doc.id,'OFF',month,ds);assigned.add(doc.id);
+        }
       });
-    let ri=0;
-    while(needR>0&&ri<rCandidates.length){
-      const doc=rCandidates[ri];
-      S.sched[doc.id][ds]='R';assign(doc.id,'R',month,ds);assigned.add(doc.id);needR--;ri++;
-    }
 
-    // STEP 5b: Emergency R — relax rest requirement, allow rest ≥ MIN_R_HARD
-    if(needR>0){
-      const rEmerg=rotation
-        .filter(d=>{
-          if(assigned.has(d.id)) return false;
-          const s=state[d.id];
-          if(!s||s.lastShift==='S'||s.lastBlockEndedOnS) return false;
-          if(s.block==='W') return s.workInBlock<s.maxWork; // already eligible, just not picked
-          // OFF block: relax rest from lastWorkSize to MIN_R_HARD
-          return s.dayInBlock>=MIN_R_HARD&&!hasRequiredInNextRBlock(d.id,di);
-        })
+      // STEP 1b: Optional OFF. Ending an in-progress block at an optional date
+      // is free under the rest rules, so it is always honored — this keeps as
+      // much of an optional block intact as possible even when its first days
+      // could not be. Rested providers are honored probabilistically; candidate
+      // variants differ and complete-quarter scoring picks the best balance.
+      const optionalRequestDocs = pool.filter(doc=>{
+        if(assigned.has(doc.id)) return false;
+        if(!hasOptionalRequest(doc.id,ds)||!canBeOff(doc.id)) return false;
+        const s=state[doc.id];
+        if(s&&s.block==='W') return true;
+        const honorBias=0.55+(candidateSeed%10)*0.045;
+        return _candidateUnit(candidateSeed,doc.id+'|'+ds+'|optional')<=honorBias;
+      });
+      // Sort: lowest honoring rate gets honored first
+      optionalRequestDocs.sort((a,b)=>{
+        const rA=getHonoringRate(a.id,year);
+        const rB=getHonoringRate(b.id,year);
+        return rA-rB||_candidateTie(candidateSeed,ds,a.id)-_candidateTie(candidateSeed,ds,b.id);
+      });
+      optionalRequestDocs.forEach(doc=>{
+        S.sched[doc.id][ds]='OFF';assign(doc.id,'OFF',month,ds);assigned.add(doc.id);
+      });
+
+      // STEP 2: Forced R continuations (must reach preferredR)
+      pool.forEach(doc=>{
+        if(assigned.has(doc.id)) return;
+        if(mustContinueR(doc.id)){
+          S.sched[doc.id][ds]='R';assign(doc.id,'R',month,ds);needR--;assigned.add(doc.id);
+        }
+      });
+
+      // STEP 4a: Normal S — BELOW monthly target (strongest fairness tier)
+      if(needS>0){
+        const cands=pool
+          .filter(d=>!assigned.has(d.id)&&canBeS_normal(d.id)&&state[d.id].monthCount[month]<MONTHLY_S_TARGET)
+          .sort((a,b)=>{
+            const [at,ay,ar,am,aq]=sSortKey(a.id), [bt,by,br,bm,bq]=sSortKey(b.id);
+            return at!==bt?at-bt:ay!==by?ay-by:ar!==br?ar-br:am!==bm?am-bm:aq!==bq?aq-bq:_candidateTie(candidateSeed,ds,a.id)-_candidateTie(candidateSeed,ds,b.id);
+          });
+        let i=0;
+        while(needS>0&&i<cands.length){
+          const doc=cands[i];
+          S.sched[doc.id][ds]='S';assign(doc.id,'S',month,ds);assigned.add(doc.id);needS--;i++;
+        }
+      }
+
+      // STEP 4b: Normal S — AT/ABOVE monthly target (still use, just lower priority)
+      if(needS>0){
+        const cands=pool
+          .filter(d=>!assigned.has(d.id)&&canBeS_normal(d.id))
+          .sort((a,b)=>{
+            const [at,ay,ar,am,aq]=sSortKey(a.id), [bt,by,br,bm,bq]=sSortKey(b.id);
+            return at!==bt?at-bt:ay!==by?ay-by:ar!==br?ar-br:am!==bm?am-bm:aq!==bq?aq-bq:_candidateTie(candidateSeed,ds,a.id)-_candidateTie(candidateSeed,ds,b.id);
+          });
+        let i=0;
+        while(needS>0&&i<cands.length){
+          const doc=cands[i];
+          S.sched[doc.id][ds]='S';assign(doc.id,'S',month,ds);assigned.add(doc.id);needS--;i++;
+        }
+      }
+
+      // STEP 4c: Emergency S (3+ R done, early transition)
+      if(needS>0){
+        const cands=pool
+          .filter(d=>!assigned.has(d.id)&&canBeS_emergency(d.id))
+          .sort((a,b)=>{
+            const [at,ay,ar,am,aq]=sSortKey(a.id), [bt,by,br,bm,bq]=sSortKey(b.id);
+            if(at!==bt) return at-bt;
+            if(ay!==by) return ay-by;
+            if(ar!==br) return ar-br;
+            if(am!==bm) return am-bm;
+            if(aq!==bq) return aq-bq;
+            const aR=(state[a.id].block==='W'&&state[a.id].lastShift==='R')?state[a.id].runLen:0;
+            const bR=(state[b.id].block==='W'&&state[b.id].lastShift==='R')?state[b.id].runLen:0;
+            return bR-aR||_candidateTie(candidateSeed,ds,a.id)-_candidateTie(candidateSeed,ds,b.id);
+          });
+        let i=0;
+        while(needS>0&&i<cands.length){
+          const doc=cands[i];
+          S.sched[doc.id][ds]='S';assign(doc.id,'S',month,ds);assigned.add(doc.id);needS--;i++;
+        }
+      }
+
+      // STEP 4d: Last-resort isolated S from OFF. This is intentionally after all
+      // R-tail options so a standalone S is only used to avoid a coverage miss.
+      if(needS>0){
+        const cands=pool
+          .filter(d=>!assigned.has(d.id)&&canBeS_lastResort(d.id))
+          .sort((a,b)=>{
+            const sa=state[a.id],sb=state[b.id];
+            const aNorm=swingFairnessRatio(a.id),bNorm=swingFairnessRatio(b.id);
+            if(aNorm!==bNorm) return aNorm-bNorm;
+            if(sa.monthCount[month]!==sb.monthCount[month]) return sa.monthCount[month]-sb.monthCount[month];
+            return sb.dayInBlock-sa.dayInBlock||_candidateTie(candidateSeed,ds,a.id)-_candidateTie(candidateSeed,ds,b.id);
+          });
+        let i=0;
+        while(needS>0&&i<cands.length){
+          const doc=cands[i];
+          S.sched[doc.id][ds]='S';assign(doc.id,'S',month,ds);assigned.add(doc.id);needS--;i++;
+        }
+      }
+
+      // STEP 5a: Normal R fill — candidates eligible by rest rules
+      // Sort priority: continuing R > fewest optional dates in the new block >
+      // most annual budget remaining > fewest monthly > fewest qR > most rested
+      const rCandidates=pool
+        .filter(d=>!assigned.has(d.id)&&canBeR(d.id,di))
         .sort((a,b)=>{
           const sa=state[a.id],sb=state[b.id];
+          // Continue until preferredR, then prefer swing tails or rested starts.
+          // Longer R stretches remain available when needed for coverage.
+          const aCont=(sa.block==='W'&&sa.lastShift==='R')
+            ?(sa.runLen<sa.preferredR?0:(sa.runLen<SOFT_VARIABLE_WORK?2:4))
+            :1;
+          const bCont=(sb.block==='W'&&sb.lastShift==='R')
+            ?(sb.runLen<sb.preferredR?0:(sb.runLen<SOFT_VARIABLE_WORK?2:4))
+            :1;
+          if(aCont!==bCont) return aCont-bCont;
+          // Attempt to honor optional blocks: a rested provider whose next
+          // stretch would run through optional dates starts a block only when
+          // no equivalent alternative exists.
+          const aOpt=(sa.block==='O')?optionalInNextRBlock(a.id,di):0;
+          const bOpt=(sb.block==='O')?optionalInNextRBlock(b.id,di):0;
+          if(aOpt!==bOpt) return aOpt-bOpt;
+          // Annual fairness: providers with more remaining budget get priority
+          const aRem=ytdRemaining[a.id]||0, bRem=ytdRemaining[b.id]||0;
+          if(Math.abs(aRem-bRem)>3) return bRem-aRem; // significant gap → pick the one further behind
           if(sa.monthCount[month]!==sb.monthCount[month]) return sa.monthCount[month]-sb.monthCount[month];
           if(sa.qR!==sb.qR) return sa.qR-sb.qR;
           const aRest=(sa.block==='O')?sa.dayInBlock:0;
           const bRest=(sb.block==='O')?sb.dayInBlock:0;
-          return bRest-aRest;
+          return bRest-aRest||_candidateTie(candidateSeed,ds,a.id)-_candidateTie(candidateSeed,ds,b.id);
         });
-      let rei=0;
-      while(needR>0&&rei<rEmerg.length){
-        const doc=rEmerg[rei];
-        S.sched[doc.id][ds]='R';assign(doc.id,'R',month,ds);assigned.add(doc.id);needR--;rei++;
+      let ri=0;
+      while(needR>0&&ri<rCandidates.length){
+        const doc=rCandidates[ri];
+        S.sched[doc.id][ds]='R';assign(doc.id,'R',month,ds);assigned.add(doc.id);needR--;ri++;
       }
+
+      // STEP 5b: Emergency R — relax rest requirement, allow rest ≥ MIN_R_HARD
+      if(needR>0){
+        const rEmerg=pool
+          .filter(d=>{
+            if(assigned.has(d.id)) return false;
+            const s=state[d.id];
+            if(!s||s.lastShift==='S'||s.lastBlockEndedOnS) return false;
+            if(s.block==='W') return s.workInBlock<s.maxWork; // already eligible, just not picked
+            // OFF block: relax rest from lastWorkSize to MIN_R_HARD
+            return s.dayInBlock>=MIN_R_HARD&&!hasRequiredInNextRBlock(d.id,di);
+          })
+          .sort((a,b)=>{
+            const sa=state[a.id],sb=state[b.id];
+            if(sa.monthCount[month]!==sb.monthCount[month]) return sa.monthCount[month]-sb.monthCount[month];
+            if(sa.qR!==sb.qR) return sa.qR-sb.qR;
+            const aRest=(sa.block==='O')?sa.dayInBlock:0;
+            const bRest=(sb.block==='O')?sb.dayInBlock:0;
+            return bRest-aRest;
+          });
+        let rei=0;
+        while(needR>0&&rei<rEmerg.length){
+          const doc=rEmerg[rei];
+          S.sched[doc.id][ds]='R';assign(doc.id,'R',month,ds);assigned.add(doc.id);needR--;rei++;
+        }
+      }
+
+      // STEP 5c: Last resort R — any rested OFF doc (lifts rest requirement entirely)
+      // Guarantees full rounder coverage unless literally every provider is mid-block or just finished one
+      if(needR>0){
+        const rLast=pool
+          .filter(d=>{
+            if(assigned.has(d.id)) return false;
+            const s=state[d.id];
+            if(!s) return false;
+            if(s.lastShift==='S'||s.lastBlockEndedOnS) return false;  // no S→R transition
+            if(s.block==='W') return false;            // mid-block already handled above
+            return s.dayInBlock>=1&&!hasRequiredInNextRBlock(d.id,di);
+          })
+          .sort((a,b)=>{
+            const sa=state[a.id],sb=state[b.id];
+            if(sa.qR!==sb.qR) return sa.qR-sb.qR;
+            return sb.dayInBlock-sa.dayInBlock;
+          });
+        let rli=0;
+        while(needR>0&&rli<rLast.length){
+          const doc=rLast[rli];
+          S.sched[doc.id][ds]='R';assign(doc.id,'R',month,ds);assigned.add(doc.id);needR--;rli++;
+        }
+      }
+
+      // STEP 6: Everyone else OFF (variable providers only — strict already pre-assigned)
+      pool.forEach(doc=>{
+        if(assigned.has(doc.id)) return;
+        if(mustContinueR(doc.id)){S.sched[doc.id][ds]='R';assign(doc.id,'R',month,ds);return;}
+        S.sched[doc.id][ds]='OFF';assign(doc.id,'OFF',month,ds);
+      });
     }
 
-    // STEP 5c: Last resort R — any rested OFF doc (lifts rest requirement entirely)
-    // Guarantees 13 rounders unless literally every provider is mid-block or just finished one
-    if(needR>0){
-      const rLast=rotation
-        .filter(d=>{
-          if(assigned.has(d.id)) return false;
-          const s=state[d.id];
-          if(!s) return false;
-          if(s.lastShift==='S'||s.lastBlockEndedOnS) return false;  // no S→R transition
-          if(s.block==='W') return false;            // mid-block already handled above
-          return s.dayInBlock>=1&&!hasRequiredInNextRBlock(d.id,di);
-        })
-        .sort((a,b)=>{
-          const sa=state[a.id],sb=state[b.id];
-          if(sa.qR!==sb.qR) return sa.qR-sb.qR;
-          return sb.dayInBlock-sa.dayInBlock;
-        });
-      let rli=0;
-      while(needR>0&&rli<rLast.length){
-        const doc=rLast[rli];
-        S.sched[doc.id][ds]='R';assign(doc.id,'R',month,ds);assigned.add(doc.id);needR--;rli++;
-      }
-    }
-
-    // STEP 6: Everyone else OFF (variable providers only — strict already pre-assigned)
-    rotation.forEach(doc=>{
-      if(assigned.has(doc.id)) return;
-      if(mustContinueR(doc.id)){S.sched[doc.id][ds]='R';assign(doc.id,'R',month,ds);return;}
-      if(mustContinueS_couplet(doc.id)){S.sched[doc.id][ds]='S';assign(doc.id,'S',month,ds);return;}
-      S.sched[doc.id][ds]='OFF';assign(doc.id,'OFF',month,ds);
-    });
-    // Part-time providers also get OFF if not already assigned
-    partTime.forEach(doc=>{
-      if(!assigned.has(doc.id)&&S.sched[doc.id]&&S.sched[doc.id][ds]===undefined){
-        S.sched[doc.id][ds]='OFF';
-      }
-    });
+    fillPool(rotation,needR,needS);
+    fillPool(appRotation,needAppR,needAppS);
 
     assignTeamNumbers(allActive,ds,state,di);
   }
@@ -5725,9 +5961,11 @@ function getHonoringStats(year){
   rates.sort((a,b)=>a.rate-b.rate);
   return rates;
 }
+let announcementSaveTimer=null;
 function saveAnnouncement(){
   S.announcement=(document.getElementById('admin-announcement')?.value||'').trim();
-  saveData();
+  if(announcementSaveTimer)clearTimeout(announcementSaveTimer);
+  announcementSaveTimer=setTimeout(()=>saveData(true),600);
 }
 function loadAnnouncement(){
   const ta=document.getElementById('admin-announcement');
@@ -5776,7 +6014,7 @@ function recheckFairness(){
     let unmetRequired=0;
     required.forEach(ds=>{
       const sh=(S.sched[doc.id]&&S.sched[doc.id][ds])||'OFF';
-      if(sh==='R'||sh==='S') unmetRequired++;
+      if(sh==='R'||sh==='S'||sh==='H'||sh==='N'||sh==='APP_NS'||sh==='APP_NX') unmetRequired++;
     });
     // FTE-normalised values: what we'd expect a 1.0 FTE doc to have if this doc were full-time
     // Multiply actual stats by (1/fte) to get FTE-equivalent, then compare to full-time group
@@ -5865,7 +6103,7 @@ function recheckFairness(){
       const bErr=b.flags.some(f=>f.level==='error')?0:1;
       return aErr-bErr||a.doc.last.localeCompare(b.doc.last);
     }).forEach(({doc,flags:flist})=>{
-      html+=`<tr><td><strong>${dname(doc)}</strong></td><td class="tx-mu">${doc.fte}</td><td>`;
+      html+=`<tr><td><strong>${qgEsc(dname(doc))}</strong></td><td class="tx-mu">${doc.fte}</td><td>`;
       flist.forEach(f=>{
         const bg=f.level==='error'?'#fde2e2':f.level==='warn'?'#fff5dc':'#eef5fb';
         const col=f.level==='error'?'#a01918':f.level==='warn'?'#a85800':'#1b4d8f';
@@ -6046,7 +6284,7 @@ function renderSchedule(){
     // Single sticky name cell — Q∑ total embedded in bottom-right of the cell
     row+=`<td class="name-col${isHighlighted?' name-col-hl':''}" onclick="toggleRowHighlight('${doc.id}')" ondblclick="handleProviderNameDblClick('${doc.id}')" title="Q${q} total: ${qTotalR}R+${qTotalS}S${qTotalN?'+'+qTotalN+'N':''}${qTotalX?'+'+qTotalX+'X':''}=${qTotal} (target ~${target})&#10;${mTip}&#10;Double-click to open detail">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:4px">
-        <span>${isConsult?'<span class="consult-badge">MED DIR</span>':styleBadge}${dname(doc)}</span>
+        <span>${isConsult?'<span class="consult-badge">MED DIR</span>':styleBadge}${qgEsc(dname(doc))}</span>
         <span class="qtot-inline"><span class="qtot-num" style="color:${qColor}">${qTotal}</span><span class="qtot-sub">${qTotalR}R</span><span class="qtot-sub">${qTotalS}S</span>${qTotalN?`<span class="qtot-sub">${qTotalN}N</span>`:''}${qTotalX?`<span class="qtot-sub">${qTotalX}X</span>`:''}</span>
       </div>
     </td>`;
@@ -6107,7 +6345,10 @@ function renderSchedule(){
       const dayTarget=typeof target==='function'?target(ds):target;
       const v=countFn(ds);
       let cls='cell';
-      if(v===dayTarget)cls+=' cov-ok';else if(v<Math.max(0,dayTarget-1))cls+=' cov-bad';else cls+=' cov-low';
+      if(v===dayTarget)cls+=' cov-ok';
+      else if(v>dayTarget)cls+=' cov-high';
+      else if(v<Math.max(0,dayTarget-1))cls+=' cov-bad';
+      else cls+=' cov-low';
       if(i>0&&d.getDate()===1)cls+=' month-sep';
       if(selCols.has(ds))cls+=' col-hl';
       html+=`<td class="${cls}">${v}</td>`;
@@ -6299,7 +6540,7 @@ function setShiftMode(mode){
   const lbl=document.getElementById('fill-mode-label');
   if(lbl) lbl.textContent = mode
     ? `Fill mode: ${mode} — click cells to apply`
-    : 'Click cell to cycle R→S→N→OFF · Double-click name to open';
+    : 'Click cell to cycle R→S→N→X→OFF · Double-click name to open';
   ['R','S','OFF','none'].forEach(m=>{
     const btn=document.getElementById('m-fill-'+(m==='none'?'none':m.toLowerCase()));
     if(btn) btn.classList.remove('btn-p');
@@ -6336,8 +6577,6 @@ function cycleCell(docId,ds){
   saveData();
   renderSchedule();
 }
-function cellClick(docId,ds){ cycleCell(docId,ds); }
-
 // ════════════════════════════════════════════════════════
 //  WEEKLY VIEW
 // ════════════════════════════════════════════════════════
@@ -6377,7 +6616,7 @@ function renderWeek(){
     const renderTeam=(team)=>team==='green'||team==='white'
       ?`<span class="team-num ${team}">${teamLabel(team)}</span> `
       :'';
-    const renderWeekShift=(label,doc,team='')=>`<div class="wd-name"><span class="wd-shift">${renderTeam(team,isAppProvider(doc))}${label}</span><span class="wd-provider">${dname(doc)}</span></div>`;
+    const renderWeekShift=(label,doc,team='')=>`<div class="wd-name"><span class="wd-shift">${renderTeam(team,isAppProvider(doc))}${qgEsc(label)}</span><span class="wd-provider">${qgEsc(dname(doc))}</span></div>`;
     html+=`<div class="week-day"${isH?' style="background:#f8f3fe"':''}>
       <div class="wd-hdr">${dayN(d)}</div>
       <div class="wd-date${isT?' today':''}">${d.getDate()}</div>
@@ -6437,6 +6676,10 @@ function renderMyRequestCal(){
 
   const reqSet=new Set(entry.required);
   const optSet=new Set(entry.optional);
+
+  // Rules line reflects this group's configured limits
+  const rulesEl=document.getElementById('req-rules-text');
+  if(rulesEl)rulesEl.innerHTML=`<strong>Rules:</strong> Maximum <strong>${S.cfg.maxReq} OFF dates per quarter</strong>. Of those, no more than <strong>${S.cfg.maxWeekendReq} can span weekends</strong> and <strong>${S.cfg.maxRequired||5} can be marked Required</strong>. Required dates count toward all limits.`;
 
   // Check if this physician can edit this calendar
   const viewingOwnPage = isAdmin() || (currentUser && currentUser.docId === S.ui.currentPhysId);
@@ -6551,17 +6794,20 @@ function renderMyRequestCal(){
       const isReq=reqSet.has(ds);
       const isOpt=optSet.has(ds);
       const isPast=d<today;
+      const isBlockedXmas=!isReq&&!isOpt&&ds.slice(5)==='12-25'&&priorChristmasKnownOff(S.ui.currentPhysId,y);
       const cls=['req-cal-day'];
       if(isW) cls.push('weekend');
       if(isReq) cls.push('req-required');
       if(isOpt) cls.push('req-optional');
-      if(isPast||!viewingOwnPage) cls.push('disabled');
-      const clickable = !isPast && viewingOwnPage;
-      html+=`<div class="${cls.join(' ')}" ${clickable?`onclick="toggleRequestDate('${ds}')"`:''} data-date="${ds}">
+      if(isPast||!viewingOwnPage||isBlockedXmas) cls.push('disabled');
+      const clickable = !isPast && viewingOwnPage && !isBlockedXmas;
+      const blockedTitle=isBlockedXmas?' title="You had last Christmas off — the rotation schedules you to work this one."':'';
+      html+=`<div class="${cls.join(' ')}" ${clickable?`onclick="toggleRequestDate('${ds}')"`:''} data-date="${ds}"${blockedTitle}>
         <span class="day-num">${d.getDate()}</span>
         ${isW?'<span style="font-size:8px;color:var(--ink3);text-transform:uppercase;letter-spacing:.5px">wknd</span>':''}
         ${isReq?'<span style="font-size:8px;color:#a01918;font-weight:700;letter-spacing:.5px">REQ</span>':''}
         ${isOpt?'<span style="font-size:8px;color:#806000;font-weight:700;letter-spacing:.5px">OPT</span>':''}
+        ${isBlockedXmas?'<span style="font-size:8px;color:#5e3aaa;font-weight:700;letter-spacing:.5px">WORK HOL</span>':''}
       </div>`;
     });
     html+='</div>';
@@ -6619,6 +6865,10 @@ function toggleRequestDate(ds){
     if(inOpt >= 0) entry.optional.splice(inOpt, 1);
   } else {
     // Adding new date - check limits
+    if(ds.slice(5)==='12-25'&&priorChristmasKnownOff(S.ui.currentPhysId,parseInt(ds.slice(0,4),10))){
+      toast('You had last Christmas off — the holiday rotation schedules you to work this Christmas, so it cannot be requested off.','error',6000);
+      return;
+    }
     const total = entry.required.length + entry.optional.length;
     const weekendCount = [...entry.required, ...entry.optional]
       .filter(s=>isWeekend(parseD(s))).length;
@@ -6684,7 +6934,24 @@ function renderMyRequestList(){
   }).join('')+'</div>';
 }
 
-function submitMyRequests(){
+// Persist one provider/quarter's requests. schedule_data is admin-write-only
+// under RLS, so physician logins must go through the time_off_requests table.
+// Admins write the table too (so a physician's older row can't overlay their
+// edit on the next load) but fall back to the blob if the table is missing.
+async function persistRequests(qKey,docId,required,optional,submittedAt){
+  if(isDemoSessionUser()){saveData();return;}
+  try{
+    await savePhysicianRequestRow(qKey,docId,required,optional,submittedAt);
+  }catch(e){
+    if(isAdmin()){
+      console.warn('time_off_requests write failed, saving blob only:',errStr(e));
+    }else{
+      throw e;
+    }
+  }
+  if(isAdmin())saveData(true);
+}
+async function submitMyRequests(){
   if(!isAdmin() && isPhysician() && currentUser.docId !== S.ui.currentPhysId){
     toast('You can only submit your own time-off requests','error'); return;
   }
@@ -6696,21 +6963,42 @@ function submitMyRequests(){
   const req = (entry && entry.required) || [];
   const opt = (entry && entry.optional) || (Array.isArray(entry) ? entry : []);
   const total = req.length + opt.length;
+  const submittedAt=new Date().toISOString();
   if(!S.requests[qKey+'_submitted']) S.requests[qKey+'_submitted']={};
-  S.requests[qKey+'_submitted'][docId]=new Date().toISOString();
-  saveData();
+  S.requests[qKey+'_submitted'][docId]=submittedAt;
+  try{
+    await persistRequests(qKey,docId,req,opt,submittedAt);
+  }catch(e){
+    console.error('submitMyRequests error:',errStr(e),e);
+    toast('Submit failed: '+errStr(e),'error',6000);
+    return;
+  }
   document.getElementById('submit-status').textContent=`✓ Submitted ${total} dates (${req.length} required, ${opt.length} optional) for ${dname(doc)}`;
   toast(`Submitted ${total} dates for ${dname(doc)}`,'success');
   trackEvent('requests_submitted',{quarter:qKey,total_dates:total,required_dates:req.length,optional_dates:opt.length});
 }
 
 function clearMyRequests(){
-  if(!confirm('Clear all selected dates?')) return;
   const qKey=S.ui.requestQuarter;
-  if(S.requests[qKey]) S.requests[qKey][S.ui.currentPhysId]={required:[],optional:[]};
-  renderMyRequestCal();
-  toast('Cleared','info');
-  trackEvent('requests_cleared',{quarter:qKey});
+  const docId=S.ui.currentPhysId;
+  showModal('Clear All Requests',
+    `<div style="font-size:13px">Remove all selected dates for <strong>${qgEsc(qKey)}</strong>? This also clears any previously submitted dates for this quarter.</div>`,
+    'Clear All',
+    async ()=>{
+      if(S.requests[qKey]) S.requests[qKey][docId]={required:[],optional:[]};
+      if(S.requests[qKey+'_submitted']) delete S.requests[qKey+'_submitted'][docId];
+      document.getElementById('modal').style.display='none';
+      try{
+        await persistRequests(qKey,docId,[],[],null);
+        toast('Cleared and saved','info');
+      }catch(e){
+        console.error('clearMyRequests error:',errStr(e),e);
+        toast('Clear failed to save: '+errStr(e),'error',6000);
+      }
+      renderMyRequestCal();
+      trackEvent('requests_cleared',{quarter:qKey});
+    }
+  );
 }
 
 // ════════════════════════════════════════════════════════
@@ -6791,7 +7079,7 @@ function renderRequestsAdmin(){
           return `<span style="display:inline-block;margin-right:6px;color:${color}">${type}:${ds.slice(5)}${ok?'':'⚠'}</span>`;
         }).join('');
 
-      html+=`<tr><td><strong>${dname(doc)}</strong></td><td>${required.length}</td><td>${optional.length}</td><td>${weekendCount}</td><td>${statusHtml}</td><td style="font-family:'JetBrains Mono',monospace;font-size:11px">${dateChips}</td></tr>`;
+      html+=`<tr><td><strong>${qgEsc(dname(doc))}</strong></td><td>${required.length}</td><td>${optional.length}</td><td>${weekendCount}</td><td>${statusHtml}</td><td style="font-family:'JetBrains Mono',monospace;font-size:11px">${dateChips}</td></tr>`;
     });
     html+='</tbody></table>';
   }
@@ -6981,7 +7269,7 @@ function renderMySchedule(){
   const html=`
     <div class="doc-hdr">
       <div>
-        <div class="doc-name">${dname(doc)}</div>
+        <div class="doc-name">${qgEsc(dname(doc))}</div>
         <div class="fl" style="flex-wrap:wrap;gap:5px;margin-top:6px">
           <span class="tag tag-r">${providerRoleLabel(doc)}</span>
           ${doc.teamColor?`<span class="team-chip ${doc.teamColor}">${teamLabel(doc.teamColor)}</span>`:''}
@@ -6989,7 +7277,7 @@ function renderMySchedule(){
           ${doc.type==='swing-only'?'<span class="tag tag-s">Swing Only</span>':''}
           ${isMedicalDirectorDoc(doc)?'<span class="tag tag-w">Medical Director</span>':''}
           ${doc.type==='nocturnist'?'<span class="tag tag-n">Nocturnist</span>':''}
-          ${providerExtraTitle(doc)?`<span class="tag tag-d">${providerExtraTitle(doc)}</span>`:''}
+          ${providerExtraTitle(doc)?`<span class="tag tag-d">${qgEsc(providerExtraTitle(doc))}</span>`:''}
         </div>
         <div style="margin-top:10px;font-size:11px;color:var(--ink3)">
           <strong>Swing per quarter:</strong>
@@ -6997,7 +7285,6 @@ function renderMySchedule(){
           <span class="sh sh-S" style="margin:0 4px">Q2: ${qS[1]}</span>
           <span class="sh sh-S" style="margin:0 4px">Q3: ${qS[2]}</span>
           <span class="sh sh-S" style="margin:0 4px">Q4: ${qS[3]}</span>
-          <span class="tx-mu" style="margin-left:8px">(target ~8 per quarter)</span>
         </div>
       </div>
       <div style="min-width:280px">
@@ -7022,9 +7309,7 @@ function renderMySchedule(){
             <option value="q4">Q4 (Oct–Dec)</option>
           </select>
           <select id="my-cal-year" onchange="renderMySchedule()" style="padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:3px">
-            <option value="2025">2025</option>
-            <option value="2026">2026</option>
-            <option value="2027">2027</option>
+            ${selectableYears().map(y=>`<option value="${y}">${y}</option>`).join('')}
           </select>
         </div>
       </div>
@@ -7100,8 +7385,8 @@ function renderDocList(){
       else { paceLabel=`Behind ${paceDelta} (${totalCompleted}/${expected})`; paceClass='pace-behind'; }
     }
     return `<div class="dc${doc.type==='nocturnist'?' dc-noct':''}" onclick="showDocDetail('${doc.id}')">
-      <div class="dcn">${dname(doc)}</div>
-      <div class="dcm">${providerRoleLabel(doc)}${doc.teamColor?' · '+teamLabel(doc.teamColor):''}${doc.fte<1?` · ${doc.fte} FTE`:''}${doc.type==='swing-only'?' · Swing Only':''}${isMedicalDirectorDoc(doc)?' · Medical Director':''}${doc.type==='nocturnist'?' · Nocturnist':''}${providerExtraTitle(doc)?' · '+providerExtraTitle(doc):''}</div>
+      <div class="dcn">${qgEsc(dname(doc))}</div>
+      <div class="dcm">${providerRoleLabel(doc)}${doc.teamColor?' · '+teamLabel(doc.teamColor):''}${doc.fte<1?` · ${doc.fte} FTE`:''}${doc.type==='swing-only'?' · Swing Only':''}${isMedicalDirectorDoc(doc)?' · Medical Director':''}${doc.type==='nocturnist'?' · Nocturnist':''}${providerExtraTitle(doc)?' · '+qgEsc(providerExtraTitle(doc)):''}</div>
       <div class="dcs">${doc.type==='nocturnist'?'Self-scheduled (not in rotation)':totalScheduled+' / '+target+' shifts scheduled'}</div>
       ${doc.type!=='nocturnist'?`<div class="pb" style="margin-top:5px"><div class="pbf ${pct>100?'pf-over':pct>=90?'pf-ok':'pf-warn'}" style="width:${pct}%"></div></div>`:''}
       ${paceLabel?`<div class="dc-pace ${paceClass}">${paceLabel}</div>`:''}
@@ -7217,7 +7502,7 @@ function showDocDetail(docId){
   det.innerHTML=`
     <div class="doc-hdr">
       <div>
-        <div class="doc-name">${dname(doc)}</div>
+        <div class="doc-name">${qgEsc(dname(doc))}</div>
         <div class="fl" style="flex-wrap:wrap;gap:5px;margin-top:6px">
           <span class="tag tag-r">${providerRoleLabel(doc)}</span>
           ${doc.teamColor?`<span class="team-chip ${doc.teamColor}">${teamLabel(doc.teamColor)}</span>`:''}
@@ -7225,7 +7510,7 @@ function showDocDetail(docId){
           ${doc.type==='swing-only'?'<span class="tag tag-s">Swing Only</span>':''}
           ${isMedicalDirectorDoc(doc)?'<span class="tag tag-w">Medical Director</span>':''}
           ${doc.type==='nocturnist'?'<span class="tag tag-n">Nocturnist</span>':''}
-          ${providerExtraTitle(doc)?`<span class="tag tag-d">${providerExtraTitle(doc)}</span>`:''}
+          ${providerExtraTitle(doc)?`<span class="tag tag-d">${qgEsc(providerExtraTitle(doc))}</span>`:''}
           ${doc.startDate?`<span class="tag" style="background:#eee;color:var(--ink3);border-color:var(--line)">Start ${doc.startDate}</span>`:''}
         </div>
         <div style="margin-top:10px;font-size:11px;color:var(--ink3)">
@@ -7234,7 +7519,6 @@ function showDocDetail(docId){
           <span class="sh sh-S" style="margin:0 4px">Q2: ${qS[1]}</span>
           <span class="sh sh-S" style="margin:0 4px">Q3: ${qS[2]}</span>
           <span class="sh sh-S" style="margin:0 4px">Q4: ${qS[3]}</span>
-          <span class="tx-mu" style="margin-left:8px">(target ~8 per quarter)</span>
         </div>
       </div>
       <div style="min-width:280px">
@@ -7333,11 +7617,6 @@ function renderDocCalendarsForView(docId, mode, viewYear){
   return html;
 }
 
-// Legacy: render next 3 months from today
-function renderDocCalendars(docId, today){
-  return renderDocCalendarsForView(docId, 'next3', today.getFullYear());
-}
-
 function backToDocList(){
   document.getElementById('doc-list-view').style.display='';
   document.getElementById('doc-detail').style.display='none';
@@ -7398,7 +7677,7 @@ function toggleHolidayCell(docId,key){
 }
 function renderHolidayTable(){
   let y=parseInt(document.getElementById('hol-yr').value);
-  if(!y||y<2026)y=2026;
+  if(!y)y=new Date().getFullYear();
   const sel=document.getElementById('hol-yr');
   if(sel&&sel.value!==String(y))sel.value=String(y);
   S.ui.holYear=y;
@@ -7458,7 +7737,7 @@ function renderHolidayTable(){
         ? '<td><span style="color:#a01918;font-weight:700">⚠ 2 Xmas</span></td>'
         : '<td><span style="color:#0a7044">✓</span></td>';
     html+=`<tr>
-      <td><strong>${dname(doc)}</strong></td>
+      <td><strong>${qgEsc(dname(doc))}</strong></td>
       ${cells}
       <td>${prevXm?'<span style="color:#a85800">Yes</span>':'No'}</td>
       ${ruleCell}
@@ -7495,11 +7774,11 @@ function renderRoster(){
       ?`<select class="team-select" onchange="setProviderTeam('${d.id}',this.value)"><option value="green" ${d.teamColor==='green'?'selected':''}>Green</option><option value="white" ${d.teamColor==='white'?'selected':''}>White</option></select>`
       :'<span class="tx-mu">—</span>';
     html+=`<tr style="opacity:${d.active?1:.5}">
-      <td>${dname(d)}</td><td>${providerRoleLabel(d)}</td><td>${d.fte}</td><td>${providerTypeLabel(d)}</td>
+      <td>${qgEsc(dname(d))}</td><td>${providerRoleLabel(d)}</td><td>${d.fte}</td><td>${providerTypeLabel(d)}</td>
       <td>${teamCell}</td>
       <td>${styleBadge}</td>
       <td>${prefDisplay}</td>
-      <td class="tx-mu">${d.title||''}</td>
+      <td class="tx-mu">${qgEsc(d.title||'')}</td>
       <td class="tx-mu" style="font-family:'JetBrains Mono',monospace;font-size:11px">${d.startDate||''}</td>
       <td style="white-space:nowrap">
         <button class="btn btn-xs" onclick="openEditDoc('${d.id}')">Edit</button>
@@ -7530,8 +7809,8 @@ function openEditDoc(id){
   const maxW=(doc.preferences&&doc.preferences.maxWork)||7;
   const body=`
     <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;align-items:flex-end">
-      <div class="fg"><label>Last Name</label><input type="text" id="ed-last" value="${doc.last||''}" style="width:130px"></div>
-      <div class="fg"><label>First Name</label><input type="text" id="ed-first" value="${doc.first||''}" style="width:120px"></div>
+      <div class="fg"><label>Last Name</label><input type="text" id="ed-last" value="${qgEsc(doc.last||'')}" style="width:130px"></div>
+      <div class="fg"><label>First Name</label><input type="text" id="ed-first" value="${qgEsc(doc.first||'')}" style="width:120px"></div>
     </div>
     <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;align-items:flex-end">
       <div class="fg"><label>Role</label>
@@ -7567,7 +7846,7 @@ function openEditDoc(id){
     </div>
     <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;align-items:flex-end">
       <div class="fg"><label>Start Date</label><input type="date" id="ed-start" value="${doc.startDate||''}" style="width:150px"></div>
-      <div class="fg"><label>Title</label><input type="text" id="ed-title" value="${doc.title||''}" style="width:200px"></div>
+      <div class="fg"><label>Title</label><input type="text" id="ed-title" value="${qgEsc(doc.title||'')}" style="width:200px"></div>
     </div>
     <div style="border-top:1px solid var(--line);margin-top:6px;padding-top:10px">
       <div style="font-weight:700;font-size:12px;color:var(--ink2);margin-bottom:8px">Scheduling Preferences</div>
@@ -7676,7 +7955,10 @@ function addPhysician(){
   const last=document.getElementById('n-last').value.trim();
   const first=document.getElementById('n-first').value.trim();
   if(!last){toast('Last name required','error');return}
-  const id=(last+first).toLowerCase().replace(/\s+/g,'')+'_'+Date.now();
+  // Same sanitizer as the qGenda import path — ids are embedded in inline
+  // onclick handlers, so quotes/apostrophes must never survive. Existing
+  // stored ids are never rewritten.
+  const id=((last+first).toLowerCase().replace(/[^a-z0-9]/g,'')||'provider')+'_'+Date.now();
   const type=document.getElementById('n-type').value;
   const title=document.getElementById('n-title').value.trim()||(type==='weekday-only'?'Medical Director':'');
   S.docs.push({
@@ -7755,9 +8037,6 @@ function switchRole(role){
   updateSettingsMenuVisibility();
   // Old phys tab bar always hidden (navigation is now in page header)
   document.getElementById('tabs-phys').style.display='none';
-  // Legacy phys-pick (keep for backward compat but hide)
-  const legPick=document.getElementById('phys-pick');
-  if(legPick) legPick.style.display='none';
 
   if(role==='admin'){
     nav('sched');
@@ -7771,16 +8050,13 @@ function populatePhysPicker(){
   if(docs.length&&!docs.find(d=>d.id===S.ui.currentPhysId))S.ui.currentPhysId=docs[0].id;
   if(!docs.length)S.ui.currentPhysId=null;
   const opts=docs.length
-    ? docs.map(d=>`<option value="${d.id}"${d.id===S.ui.currentPhysId?' selected':''}>${dname(d)}</option>`).join('')
+    ? docs.map(d=>`<option value="${qgEsc(d.id)}"${d.id===S.ui.currentPhysId?' selected':''}>${qgEsc(dname(d))}</option>`).join('')
     : '<option value="">No providers yet</option>';
   // Populate both page-header pickers
   const reqPick=document.getElementById('phys-pick-req');
   const schdPick=document.getElementById('phys-pick-schd');
   if(reqPick){reqPick.innerHTML=opts;reqPick.disabled=!docs.length;}
   if(schdPick){schdPick.innerHTML=opts;schdPick.disabled=!docs.length;}
-  // Keep legacy hidden one in sync
-  const legPick=document.getElementById('phys-pick');
-  if(legPick){legPick.innerHTML=opts;legPick.disabled=!docs.length;}
   updatePhysHeaders();
 }
 function updatePhysHeaders(){
@@ -7820,18 +8096,6 @@ function onPhysPickSchd(){
   updatePhysHeaders();
   renderMySchedule();
 }
-// Legacy — keep for any code that still calls it
-function onPhysPick(){
-  const val=document.getElementById('phys-pick').value;
-  if(!val)return;
-  S.ui.currentPhysId=val;
-  populatePhysPicker();
-  if(S.ui.role==='phys'){
-    if(document.getElementById('pg-myreq').classList.contains('on')) renderMyRequestCal();
-    if(document.getElementById('pg-myschd').classList.contains('on')) renderMySchedule();
-  }
-}
-
 // ════════════════════════════════════════════════════════
 //  NAV
 // ════════════════════════════════════════════════════════
@@ -7875,7 +8139,7 @@ function nav(p){
   else {
     // qtot panel removed (now inline column)
   }
-  if(p==='week'){S.ui.wkStart=wkStart(new Date());renderWeek()}
+  if(p==='week'){if(!S.ui.wkStart)S.ui.wkStart=wkStart(new Date());renderWeek()}
   if(p==='requests') renderRequestsAdmin();
   if(p==='docs'){backToDocList();renderDocList()}
   if(p==='hol') renderHolidayTable();
@@ -7906,9 +8170,30 @@ function handleProviderNameDblClick(docId){
 // ════════════════════════════════════════════════════════
 //  INIT
 // ════════════════════════════════════════════════════════
-loadData();
+// Year/quarter selectors are generated from the current date so the app never
+// runs out of selectable periods (the old hardcoded lists ended at 2026 Q4).
+function selectableYears(){
+  const cur=new Date().getFullYear();
+  const years=[];
+  for(let y=cur-1;y<=cur+2;y++)years.push(y);
+  return years;
+}
+function populateDateSelectors(){
+  const years=selectableYears();
+  const yearOpts=years.map(y=>`<option value="${y}">${y}</option>`).join('');
+  const qLabels=['Jan–Mar','Apr–Jun','Jul–Sep','Oct–Dec'];
+  const ySel=document.getElementById('yr-sel');
+  if(ySel)ySel.innerHTML=yearOpts;
+  const holSel=document.getElementById('hol-yr');
+  if(holSel){holSel.innerHTML=yearOpts;holSel.value=String(new Date().getFullYear());}
+  const myq=document.getElementById('myq-sel');
+  if(myq)myq.innerHTML=years.map(y=>[1,2,3,4].map(q=>`<option value="${y}-${q}">${y} Q${q} (${qLabels[q-1]})</option>`).join('')).join('');
+  const reqq=document.getElementById('req-q-sel');
+  if(reqq)reqq.innerHTML=years.map(y=>[1,2,3,4].map(q=>`<option value="${y}-${q}">${y} Q${q}</option>`).join('')).join('');
+}
+populateDateSelectors();
 
-// Populate quarter selectors with reasonable defaults
+// Default the schedule view to the current quarter
 const now=new Date();
 const curYear=now.getFullYear();
 const curQ=Math.floor(now.getMonth()/3)+1;
