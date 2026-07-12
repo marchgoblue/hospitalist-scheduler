@@ -855,6 +855,7 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
       <button class="btn btn-p" id="demo-requests-btn" onclick="fillDemoTimeOffRequests()" style="display:none">1 · Fill Demo Requests</button>
       <button class="btn btn-p" id="gen-btn" onclick="tryGenerateQuarter()">Generate Schedule</button>
       <button class="btn btn-sm" id="fairness-btn" onclick="recheckFairness()" title="Check shift distribution fairness">Fairness Check</button>
+      <button class="btn btn-sm" id="save-version-btn" onclick="saveVersion()" title="Save a named snapshot you can restore later (same as Data Management → Save Version)">Save Version</button>
       <button class="btn btn-sm" onclick="exportScheduleExcel()" title="Download this quarter as an Excel file">Export Excel</button>
       <button class="btn btn-sm" onclick="startScheduleTour()" title="Guided walkthrough of the schedule markings">Tutorial</button>
     </div>
@@ -1536,7 +1537,7 @@ function updateQgendaImportGuidance(){
 
 function setReadOnly(ro){
   const b=document.getElementById('readonly-banner');if(b)b.classList.toggle('on',ro);
-  ['gen-btn','save-btn','m-fill-r','m-fill-s','m-fill-off','m-fill-none','undo-btn'].forEach(id=>{const el=document.getElementById(id);if(el)el.disabled=ro||(id==='undo-btn'&&!scheduleUndoStack.length);});
+  ['gen-btn','save-btn','save-version-btn','m-fill-r','m-fill-s','m-fill-off','m-fill-none','undo-btn'].forEach(id=>{const el=document.getElementById(id);if(el)el.disabled=ro||(id==='undo-btn'&&!scheduleUndoStack.length);});
   updateSettingsMenuVisibility();
 }
 function updateHeaderForUser(){
