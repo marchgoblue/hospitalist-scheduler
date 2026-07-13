@@ -3148,6 +3148,16 @@ function buildScheduleWorkbook(year,q){
 
   const cellLabel=sh=>sh==='OFF'||!sh?'':(sh==='APP_NS'?'NA':sh==='APP_NX'?'NX':sh);
   const shiftAt=(docId,ds)=>(S.sched[docId]&&S.sched[docId][ds])||'OFF';
+  // Rounding cells carry the team assignment: R3 = team 3, R-G/R-W = Green/White
+  const exportCell=(docId,ds)=>{
+    const sh=shiftAt(docId,ds);
+    if(sh!=='R')return cellLabel(sh);
+    const t=S.teams&&S.teams[docId]&&S.teams[docId][ds];
+    if(t===undefined||t===null||t==='')return 'R';
+    if(t==='green')return 'R-G';
+    if(t==='white')return 'R-W';
+    return 'R'+t;
+  };
 
   const header=['Provider','Role','Type','FTE',...days.map(d=>`${monAbbr(d.getMonth())} ${d.getDate()} ${dayN(d)}`)];
   const rows=[header];
@@ -3160,7 +3170,7 @@ function buildScheduleWorkbook(year,q){
         providerRoleLabel(doc),
         providerTypeLabel(doc),
         fteValue(doc),
-        ...days.map(d=>cellLabel(shiftAt(doc.id,dstrD(d))))
+        ...days.map(d=>exportCell(doc.id,dstrD(d)))
       ]);
     });
   };
@@ -3180,6 +3190,9 @@ function buildScheduleWorkbook(year,q){
   covRow('APP Admitters',ds=>allDocs.filter(doc=>isAppProvider(doc)&&doc.type!=='prn'&&['S','H'].includes(shiftAt(doc.id,ds))).length);
   covRow('Target: MD/DO Rounders',ds=>physicianRounderTargetForDate(ds));
   covRow('Target: MD/DO Swing',ds=>admitterTargetForDate(ds));
+
+  rows.push([]);
+  rows.push(['Legend: R# = rounding on that team number (e.g. R3 = Team 3) · R-G / R-W = Green / White team · S = swing/admit · N = nocturnist · X = cross coverage · H = holiday · NA / NX = APP night admit / night cross · blank = off']);
 
   const ws=XLSX.utils.aoa_to_sheet(rows);
   ws['!cols']=[{wch:24},{wch:6},{wch:18},{wch:5},...days.map(()=>({wch:5}))];
