@@ -13,6 +13,7 @@ It is **not** a qGenda replacement — day-to-day operations (swaps, call, pagin
 - Excel-style schedule grid: click any cell to change a shift, fill modes for bulk edits, undo, name-column resize, search filter
 - One-click Excel export: the quarter grid (with daily coverage counts) plus a per-provider totals sheet as a .xlsx download
 - Staffing gap detection: short/overstaffed days flagged in red; click a date to see which shift is off and the fairest candidate providers to fix it
+- Medical director shifts are "extra" (ignored by staffing counts and the generator) unless a specific day is marked as census-counting — via the red-flag popup or Shift+click on the director's cell — for days the director covers a real census-carrying shift
 - Fairness dashboard: flags outliers in total shifts, swing shifts, weekend load, and unmet required requests (FTE-adjusted)
 - qGenda Excel import (Calendar by Task): bootstraps a new site's roster and reconciles actual worked shifts each quarter
 - Named versions (save/restore snapshots), clear-schedule and reset-group maintenance flows with typed confirmation

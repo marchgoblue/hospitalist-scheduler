@@ -424,6 +424,8 @@ input[type=checkbox]{width:14px;height:14px;cursor:pointer}
 .msc-s{display:block;font-size:9px;font-weight:700;color:#a85800;line-height:1.3}
 /* Consult team badge */
 .consult-badge{display:inline-block;background:#dff5e6;color:#0a7044;border:1px solid #a8d8b8;border-radius:2px;font-size:9px;font-weight:700;padding:1px 4px;margin-right:5px;letter-spacing:.4px}
+/* Medical director shift counted toward daily staffing */
+.sheet tbody td.cell.census-counted{box-shadow:inset 0 0 0 2px #0a7044}
 /* Required OFF conflict highlight */
 .cell-REQCONFLICT{background:#d71920!important;color:#fff!important;font-weight:700}
 
@@ -1400,6 +1402,7 @@ let S = {
   announcement: '',        // admin message displayed in physician portal
   qgendaShiftMap: {},      // {qGenda task label: 'R'|'S'|'N'|'IGNORE'}
   staffingDismissals: {},  // {dateStr: true} admin-hidden staffing issue flags
+  censusShifts: {},        // {docId: {dateStr: true}} medical-director shifts that count toward daily staffing
   cfg: {annual:182, R:13, S:3, maxReq:15, maxWeekendReq:6, maxRequired:5, fairnessStartDate:''},
   ui: {
     role:'admin',          // 'admin' or 'phys'
@@ -1461,6 +1464,7 @@ function freshAppState(){
     announcement: '',
     qgendaShiftMap: {},
     staffingDismissals: {},
+    censusShifts: {},
     cfg: {annual:182, R:13, S:3, maxReq:15, maxWeekendReq:6, maxRequired:5, fairnessStartDate:''},
     ui: {
       role:'admin',
@@ -1939,6 +1943,7 @@ function applyMigrations(){
   if(!S.qgendaShiftMap)S.qgendaShiftMap={};
   if(!S.qgendaShiftDetails)S.qgendaShiftDetails={};
   if(!S.staffingDismissals)S.staffingDismissals={};
+  if(!S.censusShifts)S.censusShifts={};
   ensureShiftCfg();
   if(!S.ui)S.ui={};
   if(S.ui.currentPhysId&&!S.docs.find(d=>d.id===S.ui.currentPhysId))S.ui.currentPhysId=null;
@@ -3062,6 +3067,7 @@ function confirmClearSchedule(){
       S.baseSchedule={};
       S.qgendaShiftDetails={};
       S.staffingDismissals={};
+      S.censusShifts={};
       S.cycleStarts={};
       S.hols={};
       S.teams={};
@@ -3087,6 +3093,7 @@ function freshGroupState(){
     qgendaShiftMap: {},
     qgendaShiftDetails: {},
     staffingDismissals: {},
+    censusShifts: {},
     cfg: {...{annual:182, R:13, S:3, maxReq:15, maxWeekendReq:6, maxRequired:5, fairnessStartDate:''}, ...shiftCfgDefaults()},
     ui: {
       role:'admin',
@@ -3151,12 +3158,13 @@ function buildScheduleWorkbook(year,q){
   // Rounding cells carry the team assignment: R3 = team 3, R-G/R-W = Green/White
   const exportCell=(docId,ds)=>{
     const sh=shiftAt(docId,ds);
-    if(sh!=='R')return cellLabel(sh);
+    const star=isCensusCounted(docId,ds)&&sh!=='OFF'?'*':'';
+    if(sh!=='R')return cellLabel(sh)+ (cellLabel(sh)?star:'');
     const t=S.teams&&S.teams[docId]&&S.teams[docId][ds];
-    if(t===undefined||t===null||t==='')return 'R';
-    if(t==='green')return 'R-G';
-    if(t==='white')return 'R-W';
-    return 'R'+t;
+    if(t===undefined||t===null||t==='')return 'R'+star;
+    if(t==='green')return 'R-G'+star;
+    if(t==='white')return 'R-W'+star;
+    return 'R'+t+star;
   };
 
   const header=['Provider','Role','Type','FTE',...days.map(d=>`${monAbbr(d.getMonth())} ${d.getDate()} ${dayN(d)}`)];
@@ -3183,8 +3191,8 @@ function buildScheduleWorkbook(year,q){
   // Daily coverage counts, same definitions as the on-screen footer
   rows.push([]);
   const covRow=(label,countFn)=>rows.push([label,'','','',...days.map(d=>countFn(dstrD(d)))]);
-  covRow('MD/DO Rounders',ds=>allDocs.filter(doc=>!isAppProvider(doc)&&!isMedicalDirectorDoc(doc)&&shiftAt(doc.id,ds)==='R').length);
-  covRow('MD/DO Swing',ds=>allDocs.filter(doc=>!isAppProvider(doc)&&!isMedicalDirectorDoc(doc)&&['S','H'].includes(shiftAt(doc.id,ds))).length);
+  covRow('MD/DO Rounders',ds=>allDocs.filter(doc=>!isAppProvider(doc)&&(!isMedicalDirectorDoc(doc)||isCensusCounted(doc.id,ds))&&shiftAt(doc.id,ds)==='R').length);
+  covRow('MD/DO Swing',ds=>allDocs.filter(doc=>!isAppProvider(doc)&&(!isMedicalDirectorDoc(doc)||isCensusCounted(doc.id,ds))&&['S','H'].includes(shiftAt(doc.id,ds))).length);
   covRow('Nocturnists',ds=>allDocs.filter(doc=>!isAppProvider(doc)&&shiftAt(doc.id,ds)==='N').length);
   covRow('APP Rounders',ds=>allDocs.filter(doc=>isAppProvider(doc)&&shiftAt(doc.id,ds)==='R').length);
   covRow('APP Admitters',ds=>allDocs.filter(doc=>isAppProvider(doc)&&['S','H'].includes(shiftAt(doc.id,ds))).length);
@@ -3192,7 +3200,7 @@ function buildScheduleWorkbook(year,q){
   covRow('Target: MD/DO Swing',ds=>admitterTargetForDate(ds));
 
   rows.push([]);
-  rows.push(['Legend: R# = rounding on that team number (e.g. R3 = Team 3) · R-G / R-W = Green / White team · S = swing/admit · N = nocturnist · X = cross coverage · H = holiday · NA / NX = APP night admit / night cross · blank = off']);
+  rows.push(['Legend: R# = rounding on that team number (e.g. R3 = Team 3) · R-G / R-W = Green / White team · S = swing/admit · N = nocturnist · X = cross coverage · H = holiday · NA / NX = APP night admit / night cross · * = medical director shift counted toward daily staffing · blank = off']);
 
   const ws=XLSX.utils.aoa_to_sheet(rows);
   ws['!cols']=[{wch:24},{wch:6},{wch:18},{wch:5},...days.map(()=>({wch:5}))];
@@ -3468,7 +3476,7 @@ function staffingIssueDefinitions(ds,docs=activeDocs(parseInt(ds.slice(0,4),10))
   // PRN providers are never auto-scheduled, but manually assigning them a
   // shift is a primary way admins fill small gaps, and doing so must clear
   // the red staffing flag.
-  const isPhysicianCoverageDoc=d=>!isAppProvider(d)&&!isMedicalDirectorDoc(d);
+  const isPhysicianCoverageDoc=d=>!isAppProvider(d)&&(!isMedicalDirectorDoc(d)||isCensusCounted(d.id,ds));
   const items=[
     {key:'R',label:'MD/DO Rounding',target:st.R,count:count(d=>isPhysicianCoverageDoc(d)&&isSched(d,'R'))},
     {key:'S',label:'MD/DO Swing / Admit',target:st.S,count:count(d=>isPhysicianCoverageDoc(d)&&(isSched(d,'S')||isSched(d,'H')))},
@@ -3481,14 +3489,29 @@ function staffingIssueDefinitions(ds,docs=activeDocs(parseInt(ds.slice(0,4),10))
   return items.map(x=>({...x,diff:x.count-x.target})).filter(x=>x.diff!==0);
 }
 function isStaffingDismissed(ds){return !!(S.staffingDismissals&&S.staffingDismissals[ds])}
+// Medical director shifts are "extra" (no full census) and are ignored by
+// staffing counts and the generator — unless the admin explicitly marks a
+// specific day's shift as census-counting, e.g. when the director covers a
+// real census-carrying shift.
+function isCensusCounted(docId,ds){return !!(S.censusShifts&&S.censusShifts[docId]&&S.censusShifts[docId][ds])}
+function setCensusCounted(docId,ds,on){
+  if(!S.censusShifts)S.censusShifts={};
+  if(on){
+    if(!S.censusShifts[docId])S.censusShifts[docId]={};
+    S.censusShifts[docId][ds]=true;
+  }else if(S.censusShifts[docId]){
+    delete S.censusShifts[docId][ds];
+    if(!Object.keys(S.censusShifts[docId]).length)delete S.censusShifts[docId];
+  }
+}
 function visibleStaffingIssueDefinitions(ds,docs=activeDocs(parseInt(ds.slice(0,4),10))){
   return isStaffingDismissed(ds)?[]:staffingIssueDefinitions(ds,docs);
 }
 function shiftMatchesStaffingKey(doc,ds,key){
   // Mirrors staffingIssueDefinitions: any filled shift counts, including PRN
   const sh=S.sched[doc.id]&&S.sched[doc.id][ds];
-  if(key==='R')return sh==='R'&&!isAppProvider(doc)&&!isMedicalDirectorDoc(doc);
-  if(key==='S')return (sh==='S'||sh==='H')&&!isAppProvider(doc)&&!isMedicalDirectorDoc(doc);
+  if(key==='R')return sh==='R'&&!isAppProvider(doc)&&(!isMedicalDirectorDoc(doc)||isCensusCounted(doc.id,ds));
+  if(key==='S')return (sh==='S'||sh==='H')&&!isAppProvider(doc)&&(!isMedicalDirectorDoc(doc)||isCensusCounted(doc.id,ds));
   if(key==='N')return sh==='N'&&!isAppProvider(doc);
   if(key==='APP_R')return sh==='R'&&isAppProvider(doc);
   if(key==='APP_S')return (sh==='S'||sh==='H')&&isAppProvider(doc);
@@ -5505,6 +5528,14 @@ function _generateQuarter(candidateSeed=0,finalize=true){
     let needAppR=stDay.appRounders||0;
     let needAppS=stDay.appAdmitters||0;
 
+    // Director shifts explicitly marked census-counting cover a real slot
+    weekdayOnly.forEach(doc=>{
+      if(!isCensusCounted(doc.id,ds))return;
+      const sh=S.sched[doc.id]&&S.sched[doc.id][ds];
+      if(sh==='R')needR--;
+      else if(sh==='S'||sh==='H')needS--;
+    });
+
     // Deduct strict pre-assigned shifts (MD and APP pools separately)
     strictAll.forEach(doc=>{
       if(isMedicalDirectorDoc(doc))return;
@@ -6484,13 +6515,17 @@ function renderSchedule(){
       if(conflict)cls.push(isReqRequired?'cell-REQCONFLICT':'cell-CONFLICT');
       if(i>0&&d.getDate()===1)cls.push('month-sep');
       if(isHighlighted)cls.push('row-hl-cell');if(isColHl)cls.push('col-hl');
-      const label=sh==='OFF'?'':(sh==='APP_NS'?'NA':sh==='APP_NX'?'NX':sh);
+      const counted=sh!=='OFF'&&isCensusCounted(doc.id,ds);
+      if(counted)cls.push('census-counted');
+      const label=(sh==='OFF'?'':(sh==='APP_NS'?'NA':sh==='APP_NX'?'NX':sh))+(counted?'•':'');
       const tipParts=[];
       if(isReqRequired&&conflict) tipParts.push('REQUIRED OFF CONFLICT');
       else if(isReq) tipParts.push('Requested off');
+      if(counted) tipParts.push('Counts toward daily staffing');
       tipParts.push(dailyShiftLabel(doc,ds,sh));
       tipParts.push(`${dname(doc)} · ${ds}`);
-      row+=`<td class="${cls.join(' ')}" data-doc="${doc.id}" data-date="${ds}" onclick="cycleCell('${doc.id}','${ds}')" title="${qgEsc(tipParts.join('\n'))}">${label}</td>`;
+      if(isConsult&&sh!=='OFF') tipParts.push('Shift+click to toggle census counting');
+      row+=`<td class="${cls.join(' ')}" data-doc="${doc.id}" data-date="${ds}" onclick="cycleCell('${doc.id}','${ds}',event)" title="${qgEsc(tipParts.join('\n'))}">${label}</td>`;
     });
     row+='</tr>';
     return row;
@@ -6537,8 +6572,8 @@ function renderSchedule(){
     });
     html+='</tr>';
   }
-  coverageRow('MD/DO ROUND',ds=>physicianRounderTargetForDate(ds),ds=>allDocs.filter(doc=>!isAppProvider(doc)&&!isMedicalDirectorDoc(doc)&&S.sched[doc.id]&&S.sched[doc.id][ds]==='R').length);
-  coverageRow('MD/DO SWING',ds=>admitterTargetForDate(ds),ds=>allDocs.filter(doc=>!isAppProvider(doc)&&!isMedicalDirectorDoc(doc)&&S.sched[doc.id]&&(S.sched[doc.id][ds]==='S'||S.sched[doc.id][ds]==='H')).length);
+  coverageRow('MD/DO ROUND',ds=>physicianRounderTargetForDate(ds),ds=>allDocs.filter(doc=>!isAppProvider(doc)&&(!isMedicalDirectorDoc(doc)||isCensusCounted(doc.id,ds))&&S.sched[doc.id]&&S.sched[doc.id][ds]==='R').length);
+  coverageRow('MD/DO SWING',ds=>admitterTargetForDate(ds),ds=>allDocs.filter(doc=>!isAppProvider(doc)&&(!isMedicalDirectorDoc(doc)||isCensusCounted(doc.id,ds))&&S.sched[doc.id]&&(S.sched[doc.id][ds]==='S'||S.sched[doc.id][ds]==='H')).length);
   coverageRow('NOCTURNISTS',ds=>staffingForDate(ds).nocturnists,ds=>allDocs.filter(doc=>S.sched[doc.id]&&S.sched[doc.id][ds]==='N'&&!isAppProvider(doc)).length);
   coverageRow('APP ROUND',ds=>staffingForDate(ds).appRounders,ds=>allDocs.filter(doc=>S.sched[doc.id]&&S.sched[doc.id][ds]==='R'&&isAppProvider(doc)).length);
   coverageRow('APP SWING',ds=>staffingForDate(ds).appAdmitters,ds=>allDocs.filter(doc=>S.sched[doc.id]&&(S.sched[doc.id][ds]==='S'||S.sched[doc.id][ds]==='H')&&isAppProvider(doc)).length);
@@ -6675,6 +6710,18 @@ function handleDateHeaderClick(ds,ev){
         </button>`;
       }).join('')}
     </div>
+    ${(()=>{
+      const mdWorking=activeDocs(parseInt(ds.slice(0,4),10)).filter(d=>isMedicalDirectorDoc(d)&&S.sched[d.id]&&S.sched[d.id][ds]&&S.sched[d.id][ds]!=='OFF');
+      if(!mdWorking.length)return '';
+      return `<div class="tx-xs tx-mu" style="margin-top:8px;margin-bottom:4px;font-weight:700">Medical director coverage</div><div class="staffing-popover-actions">${mdWorking.map(d=>{
+        const dsh=S.sched[d.id][ds];
+        const on=isCensusCounted(d.id,ds);
+        return `<button class="btn" onclick="toggleCensusCounted('${d.id}','${ds}');handleDateHeaderClick('${ds}')">
+          <span>${on?'Stop counting':'Count'} ${qgEsc(dname(d))}'s ${qgEsc(dsh)}</span>
+          <strong style="color:${on?'#a85800':'#0a7044'}">${on?'counted':'not counted'}</strong>
+        </button>`;
+      }).join('')}</div>`;
+    })()}
     <div class="staffing-popover-actions" style="margin-top:8px">
       ${dismissed
         ?`<button class="btn" onclick="restoreStaffingFlag('${ds}')">Show red flag again</button>`
@@ -6736,19 +6783,22 @@ function setShiftMode(mode){
 // ── Cell click: cycles common shifts, or applies fill mode ─
 const SHIFT_CYCLE=['R','S','N','X','OFF'];
 const APP_NOCT_SHIFT_CYCLE=['APP_NS','APP_NX','OFF'];
-function cycleCell(docId,ds){
+function cycleCell(docId,ds,ev){
   if(!isAdmin()){ toast('View-only — sign in as admin to edit','error'); return; }
+  const doc=byId(docId);
+  // Shift+click on a medical director cell toggles census counting instead of cycling
+  if(ev&&ev.shiftKey&&doc&&isMedicalDirectorDoc(doc)){toggleCensusCounted(docId,ds);return;}
   if(S.ui.fillMode){
     if(!S.sched[docId]) S.sched[docId]={};
     const old=S.sched[docId][ds];
     pushScheduleUndo(docId,ds,old,S.ui.fillMode);
     S.sched[docId][ds]=S.ui.fillMode;
+    if(S.ui.fillMode==='OFF')setCensusCounted(docId,ds,false);
     saveData();
     renderSchedule();
     return;
   }
   const cur=(S.sched[docId]&&S.sched[docId][ds])||'OFF';
-  const doc=byId(docId);
   const cycle=(doc&&isAppProvider(doc)&&doc.type==='nocturnist')?APP_NOCT_SHIFT_CYCLE:SHIFT_CYCLE;
   const idx=cycle.indexOf(cur);
   const next=cycle[(idx+1)%cycle.length];
@@ -6756,8 +6806,23 @@ function cycleCell(docId,ds){
   const old=S.sched[docId][ds];
   pushScheduleUndo(docId,ds,old,next);
   S.sched[docId][ds]=next;
+  if(next==='OFF')setCensusCounted(docId,ds,false);
   saveData();
   renderSchedule();
+}
+function toggleCensusCounted(docId,ds){
+  if(!isAdmin()){toast('Admin only','error');return;}
+  const doc=byId(docId);
+  if(!doc||!isMedicalDirectorDoc(doc)){toast('Census counting applies to medical director shifts.','info');return;}
+  const sh=S.sched[docId]&&S.sched[docId][ds];
+  if(!sh||sh==='OFF'){toast('Assign a shift on this day first, then mark it as counting.','error');return;}
+  const on=!isCensusCounted(docId,ds);
+  setCensusCounted(docId,ds,on);
+  saveData(true);
+  renderSchedule();
+  toast(on
+    ?`${dname(doc)}'s ${sh} on ${ds} now counts toward daily staffing.`
+    :`${dname(doc)}'s ${sh} on ${ds} no longer counts toward staffing.`,'success',3500);
 }
 // ════════════════════════════════════════════════════════
 //  WEEKLY VIEW
