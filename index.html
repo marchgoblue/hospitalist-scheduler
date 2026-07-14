@@ -3186,8 +3186,8 @@ function buildScheduleWorkbook(year,q){
   covRow('MD/DO Rounders',ds=>allDocs.filter(doc=>!isAppProvider(doc)&&!isMedicalDirectorDoc(doc)&&shiftAt(doc.id,ds)==='R').length);
   covRow('MD/DO Swing',ds=>allDocs.filter(doc=>!isAppProvider(doc)&&!isMedicalDirectorDoc(doc)&&['S','H'].includes(shiftAt(doc.id,ds))).length);
   covRow('Nocturnists',ds=>allDocs.filter(doc=>!isAppProvider(doc)&&shiftAt(doc.id,ds)==='N').length);
-  covRow('APP Rounders',ds=>allDocs.filter(doc=>isAppProvider(doc)&&doc.type!=='prn'&&shiftAt(doc.id,ds)==='R').length);
-  covRow('APP Admitters',ds=>allDocs.filter(doc=>isAppProvider(doc)&&doc.type!=='prn'&&['S','H'].includes(shiftAt(doc.id,ds))).length);
+  covRow('APP Rounders',ds=>allDocs.filter(doc=>isAppProvider(doc)&&shiftAt(doc.id,ds)==='R').length);
+  covRow('APP Admitters',ds=>allDocs.filter(doc=>isAppProvider(doc)&&['S','H'].includes(shiftAt(doc.id,ds))).length);
   covRow('Target: MD/DO Rounders',ds=>physicianRounderTargetForDate(ds));
   covRow('Target: MD/DO Swing',ds=>admitterTargetForDate(ds));
 
@@ -3464,15 +3464,19 @@ function staffingIssueDefinitions(ds,docs=activeDocs(parseInt(ds.slice(0,4),10))
   const st=staffingForDate(ds);
   const count=fn=>docs.filter(fn).length;
   const isSched=(d,sh)=>S.sched[d.id]&&S.sched[d.id][ds]===sh;
-  const isPhysicianCoverageDoc=d=>!isAppProvider(d)&&d.type!=='prn'&&!isMedicalDirectorDoc(d);
+  // A filled shift counts toward coverage no matter the provider's type —
+  // PRN providers are never auto-scheduled, but manually assigning them a
+  // shift is a primary way admins fill small gaps, and doing so must clear
+  // the red staffing flag.
+  const isPhysicianCoverageDoc=d=>!isAppProvider(d)&&!isMedicalDirectorDoc(d);
   const items=[
     {key:'R',label:'MD/DO Rounding',target:st.R,count:count(d=>isPhysicianCoverageDoc(d)&&isSched(d,'R'))},
     {key:'S',label:'MD/DO Swing / Admit',target:st.S,count:count(d=>isPhysicianCoverageDoc(d)&&(isSched(d,'S')||isSched(d,'H')))},
-    {key:'N',label:'Nocturnists',target:st.nocturnists,count:count(d=>!isAppProvider(d)&&d.type==='nocturnist'&&isSched(d,'N'))},
-    {key:'APP_R',label:'APP Rounders',target:st.appRounders,count:count(d=>isAppProvider(d)&&d.type!=='prn'&&isSched(d,'R'))},
-    {key:'APP_S',label:'APP Admitters',target:st.appAdmitters,count:count(d=>isAppProvider(d)&&d.type!=='prn'&&(isSched(d,'S')||isSched(d,'H')))},
-    {key:'APP_NS',label:'APP Nocturnist Admitters',target:st.appNocturnistAdmitters,count:count(d=>isAppProvider(d)&&d.type==='nocturnist'&&isSched(d,'APP_NS'))},
-    {key:'APP_NX',label:'APP Nocturnist Cross Cover',target:st.appNocturnistCrossCover,count:count(d=>isAppProvider(d)&&d.type==='nocturnist'&&isSched(d,'APP_NX'))}
+    {key:'N',label:'Nocturnists',target:st.nocturnists,count:count(d=>!isAppProvider(d)&&isSched(d,'N'))},
+    {key:'APP_R',label:'APP Rounders',target:st.appRounders,count:count(d=>isAppProvider(d)&&isSched(d,'R'))},
+    {key:'APP_S',label:'APP Admitters',target:st.appAdmitters,count:count(d=>isAppProvider(d)&&(isSched(d,'S')||isSched(d,'H')))},
+    {key:'APP_NS',label:'APP Nocturnist Admitters',target:st.appNocturnistAdmitters,count:count(d=>isAppProvider(d)&&isSched(d,'APP_NS'))},
+    {key:'APP_NX',label:'APP Nocturnist Cross Cover',target:st.appNocturnistCrossCover,count:count(d=>isAppProvider(d)&&isSched(d,'APP_NX'))}
   ];
   return items.map(x=>({...x,diff:x.count-x.target})).filter(x=>x.diff!==0);
 }
@@ -3481,14 +3485,15 @@ function visibleStaffingIssueDefinitions(ds,docs=activeDocs(parseInt(ds.slice(0,
   return isStaffingDismissed(ds)?[]:staffingIssueDefinitions(ds,docs);
 }
 function shiftMatchesStaffingKey(doc,ds,key){
+  // Mirrors staffingIssueDefinitions: any filled shift counts, including PRN
   const sh=S.sched[doc.id]&&S.sched[doc.id][ds];
   if(key==='R')return sh==='R'&&!isAppProvider(doc)&&!isMedicalDirectorDoc(doc);
   if(key==='S')return (sh==='S'||sh==='H')&&!isAppProvider(doc)&&!isMedicalDirectorDoc(doc);
-  if(key==='N')return sh==='N'&&!isAppProvider(doc)&&doc.type==='nocturnist';
-  if(key==='APP_R')return sh==='R'&&isAppProvider(doc)&&doc.type!=='prn';
-  if(key==='APP_S')return (sh==='S'||sh==='H')&&isAppProvider(doc)&&doc.type!=='prn';
-  if(key==='APP_NS')return sh==='APP_NS'&&isAppProvider(doc)&&doc.type==='nocturnist';
-  if(key==='APP_NX')return sh==='APP_NX'&&isAppProvider(doc)&&doc.type==='nocturnist';
+  if(key==='N')return sh==='N'&&!isAppProvider(doc);
+  if(key==='APP_R')return sh==='R'&&isAppProvider(doc);
+  if(key==='APP_S')return (sh==='S'||sh==='H')&&isAppProvider(doc);
+  if(key==='APP_NS')return sh==='APP_NS'&&isAppProvider(doc);
+  if(key==='APP_NX')return sh==='APP_NX'&&isAppProvider(doc);
   return false;
 }
 function eligibleDocsForStaffingKey(docs,key){
@@ -6535,10 +6540,10 @@ function renderSchedule(){
   coverageRow('MD/DO ROUND',ds=>physicianRounderTargetForDate(ds),ds=>allDocs.filter(doc=>!isAppProvider(doc)&&!isMedicalDirectorDoc(doc)&&S.sched[doc.id]&&S.sched[doc.id][ds]==='R').length);
   coverageRow('MD/DO SWING',ds=>admitterTargetForDate(ds),ds=>allDocs.filter(doc=>!isAppProvider(doc)&&!isMedicalDirectorDoc(doc)&&S.sched[doc.id]&&(S.sched[doc.id][ds]==='S'||S.sched[doc.id][ds]==='H')).length);
   coverageRow('NOCTURNISTS',ds=>staffingForDate(ds).nocturnists,ds=>allDocs.filter(doc=>S.sched[doc.id]&&S.sched[doc.id][ds]==='N'&&!isAppProvider(doc)).length);
-  coverageRow('APP ROUND',ds=>staffingForDate(ds).appRounders,ds=>allDocs.filter(doc=>doc.type!=='prn'&&S.sched[doc.id]&&S.sched[doc.id][ds]==='R'&&isAppProvider(doc)).length);
-  coverageRow('APP SWING',ds=>staffingForDate(ds).appAdmitters,ds=>allDocs.filter(doc=>doc.type!=='prn'&&S.sched[doc.id]&&(S.sched[doc.id][ds]==='S'||S.sched[doc.id][ds]==='H')&&isAppProvider(doc)).length);
-  coverageRow('APP NIGHT ADMIT',ds=>staffingForDate(ds).appNocturnistAdmitters,ds=>allDocs.filter(doc=>doc.type==='nocturnist'&&S.sched[doc.id]&&S.sched[doc.id][ds]==='APP_NS'&&isAppProvider(doc)).length);
-  coverageRow('APP NIGHT CROSS',ds=>staffingForDate(ds).appNocturnistCrossCover,ds=>allDocs.filter(doc=>doc.type==='nocturnist'&&S.sched[doc.id]&&S.sched[doc.id][ds]==='APP_NX'&&isAppProvider(doc)).length);
+  coverageRow('APP ROUND',ds=>staffingForDate(ds).appRounders,ds=>allDocs.filter(doc=>S.sched[doc.id]&&S.sched[doc.id][ds]==='R'&&isAppProvider(doc)).length);
+  coverageRow('APP SWING',ds=>staffingForDate(ds).appAdmitters,ds=>allDocs.filter(doc=>S.sched[doc.id]&&(S.sched[doc.id][ds]==='S'||S.sched[doc.id][ds]==='H')&&isAppProvider(doc)).length);
+  coverageRow('APP NIGHT ADMIT',ds=>staffingForDate(ds).appNocturnistAdmitters,ds=>allDocs.filter(doc=>S.sched[doc.id]&&S.sched[doc.id][ds]==='APP_NS'&&isAppProvider(doc)).length);
+  coverageRow('APP NIGHT CROSS',ds=>staffingForDate(ds).appNocturnistCrossCover,ds=>allDocs.filter(doc=>S.sched[doc.id]&&S.sched[doc.id][ds]==='APP_NX'&&isAppProvider(doc)).length);
   html+='</tfoot></table>';
 
   document.getElementById('sheet-outer').innerHTML=`<div class="sheet-wrap" id="sheet-wrap" style="--name-col-w:${nameColWidth}px"><span class="name-resizer" title="Drag to resize name column"></span>${html}</div>`;
