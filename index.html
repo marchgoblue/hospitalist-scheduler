@@ -2635,13 +2635,11 @@ function showQgendaMapModal(records, filename, totalParsed, totalIgnored, unknow
     const nameParts=rawName.match(/^([^,]+),\s*(.+)$/);
     const defLast=nameParts?nameParts[1].trim():'';
     const defFirst=nameParts?nameParts[2].trim():'';
-    const hasAppTask=records.some(r=>r.rawName===rawName&&qgIsAppTask(r.task));
-    const hasNocturnistTask=records.some(r=>r.rawName===rawName&&qgIsNocturnistTask(r.task));
-    const defaultRole=hasAppTask?'APP':'MD/DO';
+    const defaultRole=records.some(r=>r.rawName===rawName&&qgIsAppTask(r.task))?'APP':'MD/DO';
     const providerShiftCount=records.filter(r=>r.rawName===rawName).length;
     const defaultType=records.some(r=>r.rawName===rawName&&qgIsMedicalDirectorTask(r.task))
       ?'weekday-only'
-      :(hasAppTask&&hasNocturnistTask?'nocturnist':(hasAppTask?'standard':(providerShiftCount<20?'prn':(onboardingEmptyRoster?'standard':'prn'))));
+      :(providerShiftCount<20?'prn':(onboardingEmptyRoster?'standard':'prn'));
     const defaultFte=defaultType==='prn'?'0.0':'1.0';
     const addOpt=(isUnmatched||onboardingEmptyRoster)?`<option value="__add__" ${onboardingEmptyRoster?'selected':''} style="color:#0a7044;font-weight:700">+ Add as new provider</option>`:'';
     const opts=addOpt+`<option value="">— skip —</option>`+
@@ -3439,7 +3437,6 @@ function normalizeRole(role){return role==='NP'?'APP':(role==='MD'?'MD/DO':(role
 function providerRoleLabel(d){return normalizeRole(d&&d.role)}
 function isStrictTeamEligible(d){return d&&d.type==='standard'&&!isMedicalDirectorDoc(d)&&isStrictStyle(d)}
 function isAppProvider(d){return d&&(d.role==='APP'||d.role==='NP')}
-function isDayAppSchedulingDoc(d){return isAppProvider(d)&&!isMedicalDirectorDoc(d)&&d.type!=='prn'&&d.type!=='nocturnist'}
 function physicianRounderTarget(){return S.cfg.R||0}
 function admitterTarget(){return S.cfg.S||0}
 function baseStaffingCounts(){
@@ -3534,8 +3531,8 @@ function shiftMatchesStaffingKey(doc,ds,key){
 }
 function eligibleDocsForStaffingKey(docs,key){
   if(key==='N')return docs.filter(d=>d.type==='nocturnist'&&!isAppProvider(d));
-  if(key==='APP_NS'||key==='APP_NX')return docs.filter(d=>isAppProvider(d)&&d.type==='nocturnist');
-  if(key==='APP_R'||key==='APP_S')return docs.filter(isDayAppSchedulingDoc);
+  if(key==='APP_NS'||key==='APP_NX')return docs.filter(d=>isAppProvider(d)&&!isMedicalDirectorDoc(d)&&d.type!=='prn'&&(d.type==='standard'||d.type==='nocturnist'));
+  if(key==='APP_R'||key==='APP_S')return docs.filter(d=>isAppProvider(d)&&d.type!=='prn');
   return docs.filter(d=>!isAppProvider(d)&&d.type!=='prn'&&d.type!=='nocturnist'&&!isMedicalDirectorDoc(d));
 }
 function quarterShiftCount(doc,days,key){
@@ -4531,7 +4528,9 @@ function assignStrictBaseline({strictAll,swingOnly,days,startD,candidateSeed,str
 }
 function assignNocturnistBaseline({nocturnists,days,startD,candidateSeed}){
   const mdNoct=nocturnists.filter(d=>!isAppProvider(d)).sort(providerSort);
-  const appNoct=nocturnists.filter(isAppProvider).sort(providerSort);
+  const appNoct=activeDocs(S.ui.year)
+    .filter(d=>isAppProvider(d)&&!isMedicalDirectorDoc(d)&&d.type!=='prn'&&(d.type==='standard'||d.type==='nocturnist')&&fteValue(d)>0)
+    .sort(providerSort);
   function applyNightPool(pool,targetFn,seedOffset,shiftForDocDay=null){
     const phaseById=chooseStrictPhases(pool,days,startD,(ds)=>Math.max(0,targetFn(staffingForDate(ds))),candidateSeed+seedOffset);
     const workBlocks=chooseStrictFteWorkBlocks(pool,days,startD,phaseById,(ds)=>Math.max(0,targetFn(staffingForDate(ds))),candidateSeed+seedOffset);
@@ -5219,7 +5218,7 @@ function _generateQuarter(candidateSeed=0,finalize=true){
   // is scheduled by the variable engine (appRotation) like any other provider.
   const strictMixed=allActive.filter(d=>d.type==='standard'&&!isMedicalDirectorDoc(d)&&d.preferences&&d.preferences.scheduleStyle==='strict');
   const strictSwing=allActive.filter(d=>d.type==='standard'&&!isMedicalDirectorDoc(d)&&d.preferences&&d.preferences.scheduleStyle==='strict-swing-block');
-  const appStrict=allActive.filter(d=>isDayAppSchedulingDoc(d)&&isStrictStyle(d));
+  const appStrict=allActive.filter(d=>d.type==='standard'&&!isMedicalDirectorDoc(d)&&isAppProvider(d)&&isStrictStyle(d));
   const strictAll=[...new Map([...strictMixed,...strictSwing,...appStrict].map(d=>[d.id,d])).values()];
   const physicianSwingPool=allActive.filter(d=>d.type==='standard'
     &&!isMedicalDirectorDoc(d)
@@ -5243,7 +5242,7 @@ function _generateQuarter(candidateSeed=0,finalize=true){
   // Part-time (FTE < 1.0) providers share this pool: they get fewer blocks via
   // FTE-scaled targets, and their time-off requests are honored like anyone's.
   const rotation=allActive.filter(d=>d.type==='standard'&&!isMedicalDirectorDoc(d)&&!isAppProvider(d)&&!isStrictStyle(d)&&fteValue(d)>0);
-  const appRotation=allActive.filter(d=>isDayAppSchedulingDoc(d)&&!isStrictStyle(d)&&fteValue(d)>0);
+  const appRotation=allActive.filter(d=>d.type==='standard'&&!isMedicalDirectorDoc(d)&&isAppProvider(d)&&!isStrictStyle(d)&&fteValue(d)>0);
   // PRN providers are never scheduled by the algorithm (0 FTE / on-call only)
 
   rotation.sort((a,b)=>a.last.localeCompare(b.last)||a.first.localeCompare(b.first));
@@ -5595,6 +5594,13 @@ function _generateQuarter(candidateSeed=0,finalize=true){
     function fillPool(pool,needR,needS){
       const assigned=new Set();
 
+      // APP night assignments are built before the day fill. Preserve them so
+      // the day APP pass does not overwrite APP night admit/cross coverage.
+      pool.forEach(doc=>{
+        const existing=S.sched[doc.id]&&S.sched[doc.id][ds];
+        if(existing==='APP_NS'||existing==='APP_NX'||existing==='N')assigned.add(doc.id);
+      });
+
       // STEP 1: Required OFF
       pool.forEach(doc=>{
         if(doc.startDate&&doc.startDate>ds){S.sched[doc.id][ds]='OFF';assigned.add(doc.id);return;}
@@ -5626,13 +5632,23 @@ function _generateQuarter(candidateSeed=0,finalize=true){
         S.sched[doc.id][ds]='OFF';assign(doc.id,'OFF',month,ds);assigned.add(doc.id);
       });
 
+      if(needR<=0&&needS<=0){
+        pool.forEach(doc=>{
+          if(assigned.has(doc.id)) return;
+          S.sched[doc.id][ds]='OFF';assign(doc.id,'OFF',month,ds);
+        });
+        return;
+      }
+
       // STEP 2: Forced R continuations (must reach preferredR)
-      pool.forEach(doc=>{
-        if(assigned.has(doc.id)) return;
-        if(mustContinueR(doc.id)){
-          S.sched[doc.id][ds]='R';assign(doc.id,'R',month,ds);needR--;assigned.add(doc.id);
-        }
-      });
+      if(needR>0){
+        pool.forEach(doc=>{
+          if(assigned.has(doc.id)) return;
+          if(mustContinueR(doc.id)){
+            S.sched[doc.id][ds]='R';assign(doc.id,'R',month,ds);needR--;assigned.add(doc.id);
+          }
+        });
+      }
 
       // STEP 4a: Normal S — BELOW monthly target (strongest fairness tier)
       if(needS>0){
@@ -5795,7 +5811,7 @@ function _generateQuarter(candidateSeed=0,finalize=true){
       // STEP 6: Everyone else OFF (variable providers only — strict already pre-assigned)
       pool.forEach(doc=>{
         if(assigned.has(doc.id)) return;
-        if(mustContinueR(doc.id)){S.sched[doc.id][ds]='R';assign(doc.id,'R',month,ds);return;}
+        if(needR>0&&mustContinueR(doc.id)){S.sched[doc.id][ds]='R';assign(doc.id,'R',month,ds);needR--;return;}
         S.sched[doc.id][ds]='OFF';assign(doc.id,'OFF',month,ds);
       });
     }
